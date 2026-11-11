@@ -40,12 +40,10 @@ func (s *Server) handleYouTubeStreams(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errInvalidID)
 		return
 	}
-	var self int64
-	if v := r.URL.Query().Get("destinationId"); v != "" {
-		if self, err = strconv.ParseInt(v, 10, 64); err != nil || self < 0 {
-			writeError(w, http.StatusBadRequest, "destinationId must be a destination id")
-			return
-		}
+	self, ok := selfDestinationParam(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "destinationId must be a destination id")
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
@@ -82,26 +80,48 @@ func (s *Server) handleYouTubeStreams(w http.ResponseWriter, r *http.Request) {
 	out := make([]ytStreamRow, 0, len(streams))
 	for _, st := range streams {
 		row := ytStreamRow{StreamSummary: st}
-		for i, d := range mine {
-			pinned := d.Compliance.YouTube != nil && d.Compliance.YouTube.StreamID == st.ID
-			held := false
-			for _, k := range st.MatchedKeys {
-				if k == i {
-					held = true
-				}
-			}
-			if !held && !pinned {
-				continue
-			}
-			if d.ID == self {
-				row.Current = true
-				continue
-			}
-			row.UsedBy = append(row.UsedBy, ytStreamUse{ID: d.ID, Name: d.Name})
-		}
+		addYouTubeStreamUses(&row, mine, self)
 		out = append(out, row)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"supported": true, "streams": out})
+}
+
+// selfDestinationParam reads the destinationId query, the destination the page is
+// for. It reports false for a value that is not a destination id; an absent one
+// is 0.
+func selfDestinationParam(r *http.Request) (int64, bool) {
+	v := r.URL.Query().Get("destinationId")
+	if v == "" {
+		return 0, true
+	}
+	self, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || self < 0 {
+		return 0, false
+	}
+	return self, true
+}
+
+// addYouTubeStreamUses marks row current when the queried destination publishes
+// with it, and lists the other destinations on the account that publish to it,
+// matched by key or pinned id.
+func addYouTubeStreamUses(row *ytStreamRow, mine []*db.Destination, self int64) {
+	for i, d := range mine {
+		pinned := d.Compliance.YouTube != nil && d.Compliance.YouTube.StreamID == row.ID
+		held := false
+		for _, k := range row.MatchedKeys {
+			if k == i {
+				held = true
+			}
+		}
+		if !held && !pinned {
+			continue
+		}
+		if d.ID == self {
+			row.Current = true
+			continue
+		}
+		row.UsedBy = append(row.UsedBy, ytStreamUse{ID: d.ID, Name: d.Name})
+	}
 }
 
 // scrubSourceKeys removes every held key from a message.

@@ -75,6 +75,14 @@ func (s *Server) handleTwitchToolDelete(w http.ResponseWriter, r *http.Request) 
 	s.serveTwitchTool(w, r, twitchDeletes, http.StatusBadRequest, false)
 }
 
+const (
+	// twitchBlockedTermsResource and twitchBlockedTermsSyncResource are the
+	// resource names the Twitch tool routes use; they are repeated in both the
+	// URL dispatch and the tool table.
+	twitchBlockedTermsResource     = "blocked-terms"
+	twitchBlockedTermsSyncResource = "blocked-terms-sync"
+)
+
 func (s *Server) serveTwitchTool(w http.ResponseWriter, r *http.Request, table map[string]toolFn, failStatus int, hasBody bool) {
 	if s.servePackTool(w, r) {
 		return
@@ -99,7 +107,7 @@ func (s *Server) serveTwitchTool(w http.ResponseWriter, r *http.Request, table m
 			*dst = strings.TrimSpace(q.Get(key))
 		}
 	}
-	if chi.URLParam(r, "resource") == "blocked-terms-sync" {
+	if chi.URLParam(r, "resource") == twitchBlockedTermsSyncResource {
 		set, err := s.store.GetSettings()
 		if err != nil {
 			writeStoreError(w, err)
@@ -111,7 +119,7 @@ func (s *Server) serveTwitchTool(w http.ResponseWriter, r *http.Request, table m
 	account := strings.TrimSpace(q.Get("account"))
 	timeout := time.Duration(0)
 	switch chi.URLParam(r, "resource") {
-	case "blocked-terms-sync", "chatters":
+	case twitchBlockedTermsSyncResource, "chatters":
 		timeout = twitchLongToolTimeout
 	}
 	err := s.chat.WithTwitchTools(r.Context(), account, timeout,
@@ -143,7 +151,7 @@ var twitchReads = map[string]toolFn{
 	"shield": func(r *http.Request, tt chat.TwitchTools, _ twitchToolBody) (any, error) {
 		return tt.GetShield(r.Context())
 	},
-	"blocked-terms": func(r *http.Request, tt chat.TwitchTools, _ twitchToolBody) (any, error) {
+	twitchBlockedTermsResource: func(r *http.Request, tt chat.TwitchTools, _ twitchToolBody) (any, error) {
 		v, err := tt.ListBlockedTerms(r.Context())
 		return map[string]any{"terms": nonNil(v)}, err
 	},
@@ -171,7 +179,7 @@ var twitchReads = map[string]toolFn{
 }
 
 var twitchPosts = map[string]toolFn{
-	"blocked-terms-sync": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
+	twitchBlockedTermsSyncResource: func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
 		return tt.SyncBlockedTerms(r.Context(), b.terms)
 	},
 	"announcements": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
@@ -183,7 +191,7 @@ var twitchPosts = map[string]toolFn{
 	"warnings": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
 		return nil, tt.Warn(r.Context(), b.user(), b.Reason)
 	},
-	"blocked-terms": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
+	twitchBlockedTermsResource: func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
 		return tt.AddBlockedTerm(r.Context(), b.Text)
 	},
 	"held-messages": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
@@ -231,7 +239,7 @@ var twitchDeletes = map[string]toolFn{
 	"pin": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
 		return nil, tt.Unpin(r.Context(), b.MessageID)
 	},
-	"blocked-terms": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
+	twitchBlockedTermsResource: func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {
 		return nil, tt.DeleteBlockedTerm(r.Context(), b.ID)
 	},
 	"roles": func(r *http.Request, tt chat.TwitchTools, b twitchToolBody) (any, error) {

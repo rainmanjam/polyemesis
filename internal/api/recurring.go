@@ -128,20 +128,28 @@ func (s *Server) recurringOnce(ctx context.Context, now time.Time) {
 		if !ok || !sc.Enabled || sc.Action != scheduler.ActionStart {
 			continue
 		}
-		for _, d := range dests {
-			if !scheduleTargets(sc, d.ID) || d.AccountID == nil || d.Enabled {
-				continue
-			}
-			sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
-			if !ok {
-				continue
-			}
-			ed, ok := sb.(oauth.ScheduledEditor)
-			if !ok {
-				continue
-			}
-			s.lookaheadFor(ctx, ed, tpl, sc, d, now)
+		s.lookaheadOnDestinations(ctx, tpl, sc, dests, now)
+	}
+}
+
+// lookaheadOnDestinations runs the lookahead for one template and schedule on
+// every switched-off destination that has an account and a platform able to
+// schedule broadcasts.
+func (s *Server) lookaheadOnDestinations(ctx context.Context, tpl scheduler.BroadcastTemplate, sc scheduler.Schedule,
+	dests []*db.Destination, now time.Time) {
+	for _, d := range dests {
+		if !scheduleTargets(sc, d.ID) || d.AccountID == nil || d.Enabled {
+			continue
 		}
+		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
+		if !ok {
+			continue
+		}
+		ed, ok := sb.(oauth.ScheduledEditor)
+		if !ok {
+			continue
+		}
+		s.lookaheadFor(ctx, ed, tpl, sc, d, now)
 	}
 }
 
@@ -176,20 +184,18 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			continue
 		}
 		counted++
-		switch {
-		case err == nil && occ.State == scheduler.OccurrenceUpcoming:
+		if err == nil {
 			// The mirror is the FIRST counted occurrence's or nobody's. When that one's create failed or is still
 			// pending, the mirror is not moved to the next one: this week's show would then go live on next
 			// week's event.
-			if counted == 1 {
+			if occ.State == scheduler.OccurrenceUpcoming && counted == 1 {
 				s.pointGoLiveAt(d, sc, at, occ.PlatformEventID, nil, now)
 			}
+			// Pending or stranded (the upcoming case above aside): another sweep is inside its create, or the
+			// cancel is being retried. It holds its slot and nothing is mirrored for it.
 			continue
-		case err == nil:
-			// Pending or stranded: another sweep is inside its create, or the cancel is being retried.
-			// It holds its slot and nothing is mirrored for it.
-			continue
-		case !errors.Is(err, db.ErrNotFound):
+		}
+		if !errors.Is(err, db.ErrNotFound) {
 			s.log.Warn("recurring: cannot read an occurrence", "destination", d.Name, "err", redactErr(err))
 			return
 		}
@@ -200,15 +206,7 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			continue
 		}
 		b, ok := s.createTemplateEvent(ctx, ed, tpl, sc, d, at, now)
-		if ok && strings.TrimSpace(d.StreamKey) == "" && b.Ingest.Key != "" {
-			// The first create in this walk minted the destination's stream. The next one must be handed the same
-			// key as HeldKey, or a destination with an ingest of its own gets a SECOND stream for occurrence two,
-			// and the mirror later moves to an event whose key the destination does not hold. A copy, so the
-			// caller's row is not changed under it.
-			cp := *d
-			cp.StreamKey = b.Ingest.Key
-			d = &cp
-		}
+		d = destinationWithMintedKey(d, b, ok)
 		if !ok {
 			// The failure is logged where it happened, and the claim is released or the event is
 			// cancelled, so the next sweep is free to try. Each occurrence stands alone, so one that
@@ -219,6 +217,22 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			s.pointGoLiveAt(d, sc, at, b.ID, b, now)
 		}
 	}
+}
+
+// destinationWithMintedKey returns d, or a copy of it holding the stream key the
+// create just minted, when the destination has none of its own and the create
+// returned one. The copy stands in for d from then on, so the caller's row is not
+// changed under it.
+func destinationWithMintedKey(d *db.Destination, b *oauth.Broadcast, ok bool) *db.Destination {
+	// The first create in this walk minted the destination's stream. The next one must be handed the same
+	// key as HeldKey, or a destination with an ingest of its own gets a SECOND stream for occurrence two,
+	// and the mirror later moves to an event whose key the destination does not hold.
+	if !ok || strings.TrimSpace(d.StreamKey) != "" || b.Ingest.Key == "" {
+		return d
+	}
+	cp := *d
+	cp.StreamKey = b.Ingest.Key
+	return &cp
 }
 
 // createTemplateEvent creates ONE occurrence's platform event, titles it from the template, attaches
@@ -484,12 +498,7 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 	beyond := occurrencesBeyondLookahead(open, tplByID, now)
 	for _, o := range open {
 		if o.State == scheduler.OccurrencePending {
-			if now.Sub(o.CreatedAt) > claimAbandonAfter {
-				s.log.Warn("recurring: released a claim whose create never finished; an event it "+
-					"created, if any, is not removed automatically", "schedule", o.ScheduleID,
-					"destination", o.DestinationID)
-				_ = s.store.DeleteOccurrence(o.ID)
-			}
+			s.releaseAbandonedClaim(o, now)
 			continue
 		}
 		sc, schedOK := schedByID[o.ScheduleID]
@@ -509,38 +518,61 @@ func (s *Server) reconcileOccurrences(ctx context.Context, now time.Time,
 			!scheduleTargets(sc, o.DestinationID) || beyond[o.ID] || destGone
 		if withdrawn {
 			if err := s.cancelOccurrence(ctx, o, true, now); err != nil {
-				if errors.Is(err, errDestinationDelivering) {
-					// The destination is live, so the event may be bound to its broadcast. The row is kept and the
-					// next pass tries again, which cancels the event once the destination stops.
-					s.log.Warn("recurring: an orphaned event's destination is live, so the event is kept and will be "+
-						"retried after the destination stops", "schedule", o.ScheduleID, "event", o.PlatformEventID)
-					continue
-				}
-				if errors.Is(err, errDestinationGone) {
-					// Nothing can reach this event any more: the row names a destination and no account.
-					// Retrying cannot change that, so the row goes, once, and the event is named loudly.
-					s.log.Error("recurring: an event's destination was deleted before the event could be "+
-						"cancelled, so it was left on the platform; remove it in the platform's own studio",
-						"schedule", o.ScheduleID, "event", o.PlatformEventID)
-					_ = s.store.DeleteOccurrence(o.ID)
-					continue
-				}
-				if errors.Is(err, oauth.ErrScheduledNotCancellable) {
-					// The platform will not delete this event: it is live, testing or aired. The row is
-					// dropped so the sweep does not come back to it, and the event is named for the operator.
-					s.log.Warn("recurring: an orphaned event may not be deleted from here (its show has started, its "+
-						"destination is live, or the platform refused), so it was left on the platform; "+
-						"remove it in the platform's own studio if it is not wanted",
-						"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
-					_ = s.store.DeleteOccurrence(o.ID)
-					continue
-				}
-				s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
-					"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
+				s.reportOrphanCancelFailure(o, err)
 			}
 			continue
 		}
 	}
+	s.pruneOccurrences(now)
+}
+
+// releaseAbandonedClaim drops a pending claim whose create never finished, once
+// it is older than claimAbandonAfter.
+func (s *Server) releaseAbandonedClaim(o scheduler.Occurrence, now time.Time) {
+	if now.Sub(o.CreatedAt) > claimAbandonAfter {
+		s.log.Warn("recurring: released a claim whose create never finished; an event it "+
+			"created, if any, is not removed automatically", "schedule", o.ScheduleID,
+			"destination", o.DestinationID)
+		_ = s.store.DeleteOccurrence(o.ID)
+	}
+}
+
+// reportOrphanCancelFailure logs why a withdrawn event could not be cancelled, and
+// drops the row when retrying cannot change the outcome.
+func (s *Server) reportOrphanCancelFailure(o scheduler.Occurrence, err error) {
+	if errors.Is(err, errDestinationDelivering) {
+		// The destination is live, so the event may be bound to its broadcast. The row is kept and the
+		// next pass tries again, which cancels the event once the destination stops.
+		s.log.Warn("recurring: an orphaned event's destination is live, so the event is kept and will be "+
+			"retried after the destination stops", "schedule", o.ScheduleID, "event", o.PlatformEventID)
+		return
+	}
+	if errors.Is(err, errDestinationGone) {
+		// Nothing can reach this event any more: the row names a destination and no account.
+		// Retrying cannot change that, so the row goes, once, and the event is named loudly.
+		s.log.Error("recurring: an event's destination was deleted before the event could be "+
+			"cancelled, so it was left on the platform; remove it in the platform's own studio",
+			"schedule", o.ScheduleID, "event", o.PlatformEventID)
+		_ = s.store.DeleteOccurrence(o.ID)
+		return
+	}
+	if errors.Is(err, oauth.ErrScheduledNotCancellable) {
+		// The platform will not delete this event: it is live, testing or aired. The row is
+		// dropped so the sweep does not come back to it, and the event is named for the operator.
+		s.log.Warn("recurring: an orphaned event may not be deleted from here (its show has started, its "+
+			"destination is live, or the platform refused), so it was left on the platform; "+
+			"remove it in the platform's own studio if it is not wanted",
+			"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
+		_ = s.store.DeleteOccurrence(o.ID)
+		return
+	}
+	s.log.Warn("recurring: an orphaned event could not be cancelled; it will be retried",
+		"schedule", o.ScheduleID, "event", o.PlatformEventID, "err", redactErr(err))
+}
+
+// pruneOccurrences removes past occurrence rows and go-live records older than the
+// retention window. The platform events themselves stay.
+func (s *Server) pruneOccurrences(now time.Time) {
 	// Past occurrences: only the local row goes. The platform event is a page that already aired, and
 	// removing it is the operator's choice, not a sweep's.
 	cutoff := now.Add(-occurrenceRetention)
@@ -706,13 +738,9 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		if err := occurrenceCancelRefusal(o, now, s.destinationLive(o.DestinationID)); err != nil {
 			return err
 		}
-		d, err := s.store.GetDestination(o.DestinationID)
-		if errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("%w: %w: its event %s cannot be removed from here; delete it in the "+
-				"platform's own studio", oauth.ErrScheduledNotCancellable, errDestinationGone, o.PlatformEventID)
-		}
+		d, err := s.cancelDestinationFor(o)
 		if err != nil {
-			return fmt.Errorf("cannot read the destination for event %s: %w", o.PlatformEventID, err)
+			return err
 		}
 		// The operator's skip checked Enabled before it got here, and the scheduler can switch the destination on
 		// in between to take this very show live. The row just read is the latest word, so the skip is refused again
@@ -721,13 +749,9 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		if !removeRow && d.Enabled {
 			return fmt.Errorf("%w: the destination was switched on, so its event may be about to go on air", errOccurrenceRefused)
 		}
-		sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
-		if !ok {
-			return fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, o.PlatformEventID)
-		}
-		ed, ok := sb.(oauth.ScheduledEditor)
-		if !ok || d.AccountID == nil {
-			return fmt.Errorf("%s cannot cancel scheduled events from here, or the destination has no account", d.Platform)
+		ed, err := s.cancelEditorFor(d, o.PlatformEventID)
+		if err != nil {
+			return err
 		}
 		acct, err := s.tokenFor(ctx, *d.AccountID)
 		if err != nil {
@@ -740,16 +764,51 @@ func (s *Server) cancelOccurrence(ctx context.Context, o scheduler.Occurrence, r
 		}
 		// The mirror named this event, so it must not keep pointing at it. Forget removes only the
 		// entry for this schedule and this broadcast, and leaves every other show alone.
-		_ = s.recordErr(d, func(cur *db.Destination) bool {
-			if prev, ok := cur.Facebook.AnnouncementFor(o.ScheduleID); ok && prev.BroadcastID == o.PlatformEventID {
-				cur.Facebook.Forget(o.ScheduleID, o.PlatformEventID)
-				return true
-			}
-			return false
-		})
+		s.forgetMirroredAnnouncement(d, o)
 	}
 	if removeRow {
 		return s.store.DeleteOccurrence(o.ID)
 	}
 	return s.store.SetOccurrenceState(o.ID, scheduler.OccurrenceSkipped)
+}
+
+// cancelDestinationFor reads the destination an event was published through.
+// A deleted destination is refused with a message that says where to delete
+// the event instead.
+func (s *Server) cancelDestinationFor(o scheduler.Occurrence) (*db.Destination, error) {
+	d, err := s.store.GetDestination(o.DestinationID)
+	if errors.Is(err, db.ErrNotFound) {
+		return nil, fmt.Errorf("%w: %w: its event %s cannot be removed from here; delete it in the "+
+			"platform's own studio", oauth.ErrScheduledNotCancellable, errDestinationGone, o.PlatformEventID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cannot read the destination for event %s: %w", o.PlatformEventID, err)
+	}
+	return d, nil
+}
+
+// cancelEditorFor returns the platform's scheduled-event editor for a
+// destination, or the refusal that says why its events cannot be cancelled here.
+func (s *Server) cancelEditorFor(d *db.Destination, eventID string) (oauth.ScheduledEditor, error) {
+	sb, ok := oauth.As[oauth.ScheduledBroadcaster](s.providers, d.Platform)
+	if !ok {
+		return nil, fmt.Errorf("%s has no scheduled-event support, so event %s cannot be removed", d.Platform, eventID)
+	}
+	ed, ok := sb.(oauth.ScheduledEditor)
+	if !ok || d.AccountID == nil {
+		return nil, fmt.Errorf("%s cannot cancel scheduled events from here, or the destination has no account", d.Platform)
+	}
+	return ed, nil
+}
+
+// forgetMirroredAnnouncement drops the mirror's entry for this schedule and
+// this broadcast, once the event is gone, so it no longer points at it.
+func (s *Server) forgetMirroredAnnouncement(d *db.Destination, o scheduler.Occurrence) {
+	_ = s.recordErr(d, func(cur *db.Destination) bool {
+		if prev, ok := cur.Facebook.AnnouncementFor(o.ScheduleID); ok && prev.BroadcastID == o.PlatformEventID {
+			cur.Facebook.Forget(o.ScheduleID, o.PlatformEventID)
+			return true
+		}
+		return false
+	})
 }

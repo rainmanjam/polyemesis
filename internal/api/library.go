@@ -160,30 +160,10 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		sessionOf = map[int64]int64{}
 	}
 
-	// Members, oldest first, so the representative frame comes from the start
-	// of the broadcast rather than from whatever segment happened to sort last.
-	members := map[int64][]db.Recording{}
-	for i := len(all) - 1; i >= 0; i-- {
-		rec := all[i]
-		if sid := sessionOf[rec.ID]; sid != 0 {
-			members[sid] = append(members[sid], rec)
-		}
-	}
-
+	members := librarySessionMembers(all, sessionOf)
 	dir := s.cfg.RecordingsDir()
 	for _, sess := range sessions {
-		view := librarySession{Session: sess, DisplayTitle: sess.DisplayTitle()}
-		for _, rec := range members[sess.ID] {
-			if transcribed[rec.ID] {
-				view.Transcribed++
-			}
-			if view.PosterRecordingID == 0 {
-				if file := representativeFrame(dir, rec.Filename); file != "" {
-					view.PosterRecordingID, view.PosterFile = rec.ID, file
-				}
-			}
-		}
-		out.Sessions = append(out.Sessions, view)
+		out.Sessions = append(out.Sessions, librarySessionView(sess, members[sess.ID], transcribed, dir))
 	}
 
 	meta, err := s.store.ListRecordingMeta(ids)
@@ -201,6 +181,37 @@ func (s *Server) handleLibrary(w http.ResponseWriter, r *http.Request) {
 		out.Ungrouped = append(out.Ungrouped, v)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// librarySessionMembers groups recordings by their session, oldest first, so the
+// representative frame comes from the start of the broadcast rather than from
+// whatever segment happened to sort last. all is newest first.
+func librarySessionMembers(all []db.Recording, sessionOf map[int64]int64) map[int64][]db.Recording {
+	members := map[int64][]db.Recording{}
+	for i := len(all) - 1; i >= 0; i-- {
+		rec := all[i]
+		if sid := sessionOf[rec.ID]; sid != 0 {
+			members[sid] = append(members[sid], rec)
+		}
+	}
+	return members
+}
+
+// librarySessionView is one session's card: its transcribed count and its
+// poster, the first member that has a representative frame on disk.
+func librarySessionView(sess db.Session, recs []db.Recording, transcribed map[int64]bool, dir string) librarySession {
+	view := librarySession{Session: sess, DisplayTitle: sess.DisplayTitle()}
+	for _, rec := range recs {
+		if transcribed[rec.ID] {
+			view.Transcribed++
+		}
+		if view.PosterRecordingID == 0 {
+			if file := representativeFrame(dir, rec.Filename); file != "" {
+				view.PosterRecordingID, view.PosterFile = rec.ID, file
+			}
+		}
+	}
+	return view
 }
 
 // representativeFrame picks the derived still that best stands in for a

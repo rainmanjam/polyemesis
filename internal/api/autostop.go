@@ -113,19 +113,12 @@ func (r *ingestStopRunner) shutdown(ctx context.Context) {
 // of the same destinations (OBS's, arriving at the same moment) do and record
 // nothing.
 func (s *Server) stopForIngestLoss(ctx context.Context, l engine.IngestLoss) []obsbridge.Outcome {
-	out := make([]obsbridge.Outcome, 0, len(l.Destinations))
-	skip := func(id int64, name, why string) {
-		out = append(out, obsbridge.Outcome{ID: id, Name: name, Outcome: string(bulkSkipped), Message: why})
-	}
 	// Re-read at run time: the stop may have waited behind a paced OBS start, and
 	// an operator may have turned the setting off, or removed the programme,
 	// since the engine decided.
 	src, err := s.store.GetSource(l.SourceID)
 	if err != nil || !src.Ingest.AutoStop.Armed() {
-		for _, id := range l.Destinations {
-			skip(id, "", "the stop-on-ingest-loss setting was turned off before it ran, so nothing was stopped")
-		}
-		return out
+		return skipAllForIngestLoss(l, "the stop-on-ingest-loss setting was turned off before it ran, so nothing was stopped")
 	}
 	// And the ingest itself, at THIS moment: the stop was decided when the wait
 	// ran out but it may have queued behind a paced OBS start for a long time,
@@ -135,37 +128,51 @@ func (s *Server) stopForIngestLoss(ctx context.Context, l engine.IngestLoss) []o
 	// been rebuilt since, its answer is for a hub that no longer exists, so the
 	// engine now serving this programme is asked too.
 	if (l.Arriving != nil && l.Arriving()) || s.currentIngestArriving(l.SourceID) {
-		for _, id := range l.Destinations {
-			skip(id, "", "the ingest returned before the stop ran, so nothing was stopped")
-		}
-		return out
+		return skipAllForIngestLoss(l, "the ingest returned before the stop ran, so nothing was stopped")
 	}
+	out := make([]obsbridge.Outcome, 0, len(l.Destinations))
 	for _, id := range l.Destinations {
-		if ctx.Err() != nil {
-			skip(id, "", "the server was shutting down")
-			continue
-		}
-		row, err := s.store.GetDestination(id)
-		if err != nil {
-			out = append(out, obsbridge.Outcome{ID: id, Outcome: string(bulkFailed), Message: err.Error()})
-			continue
-		}
-		src := l.SourceID
-		if !sameProgramme(row.SourceID, &src) {
-			out = append(out, obsbridge.Outcome{ID: id, Name: row.Name, Outcome: string(bulkFailed),
-				Message: "this destination has moved to another programme, so stop-on-ingest-loss left it alone"})
-			continue
-		}
-		if !row.Enabled {
-			skip(id, row.Name, "already stopped")
-			continue
-		}
-		out = append(out, fromBulk(s.bulkOneCut(row, false, false)))
+		out = append(out, s.stopOneForIngestLoss(ctx, l.SourceID, id))
 	}
 	if acted(out) {
 		s.announceIngestStop(l, out)
 	}
 	return out
+}
+
+// ingestLossSkip is the "skipped" outcome a stop-on-ingest-loss row reports.
+func ingestLossSkip(id int64, name, why string) obsbridge.Outcome {
+	return obsbridge.Outcome{ID: id, Name: name, Outcome: string(bulkSkipped), Message: why}
+}
+
+// skipAllForIngestLoss reports every destination of a stop as skipped for why.
+func skipAllForIngestLoss(l engine.IngestLoss, why string) []obsbridge.Outcome {
+	out := make([]obsbridge.Outcome, 0, len(l.Destinations))
+	for _, id := range l.Destinations {
+		out = append(out, ingestLossSkip(id, "", why))
+	}
+	return out
+}
+
+// stopOneForIngestLoss decides and performs the stop of one destination of a
+// stop-on-ingest-loss, returning its outcome.
+func (s *Server) stopOneForIngestLoss(ctx context.Context, sourceID, id int64) obsbridge.Outcome {
+	if ctx.Err() != nil {
+		return ingestLossSkip(id, "", "the server was shutting down")
+	}
+	row, err := s.store.GetDestination(id)
+	if err != nil {
+		return obsbridge.Outcome{ID: id, Outcome: string(bulkFailed), Message: err.Error()}
+	}
+	src := sourceID
+	if !sameProgramme(row.SourceID, &src) {
+		return obsbridge.Outcome{ID: id, Name: row.Name, Outcome: string(bulkFailed),
+			Message: "this destination has moved to another programme, so stop-on-ingest-loss left it alone"}
+	}
+	if !row.Enabled {
+		return ingestLossSkip(id, row.Name, "already stopped")
+	}
+	return fromBulk(s.bulkOneCut(row, false, false))
 }
 
 // currentIngestArriving asks the engine that serves the programme NOW, by
@@ -275,17 +282,25 @@ func autoStopNewlyEnabledWithoutAck(prev, next db.AutoStopSettings, sentAck bool
 	return next.Enabled && !prev.Enabled && !sentAck
 }
 
+// sourceAutoStopAck, sourceIngestAck and sourceBodyAck mirror the part of a
+// source body that sentAutoStopAck reads; the JSON tags match the wire names.
+type sourceAutoStopAck struct {
+	Acknowledged *bool `json:"acknowledged"`
+}
+
+type sourceIngestAck struct {
+	AutoStop sourceAutoStopAck `json:"autoStop"`
+}
+
+type sourceBodyAck struct {
+	Ingest sourceIngestAck `json:"ingest"`
+}
+
 // sentAutoStopAck reports whether a source body says ingest.autoStop.acknowledged
 // is true. Unparseable bodies say false; the strict decode has already refused
 // them by the time this matters.
 func sentAutoStopAck(body []byte) bool {
-	var b struct {
-		Ingest struct {
-			AutoStop struct {
-				Acknowledged *bool `json:"acknowledged"`
-			} `json:"autoStop"`
-		} `json:"ingest"`
-	}
+	var b sourceBodyAck
 	if json.Unmarshal(body, &b) != nil {
 		return false
 	}

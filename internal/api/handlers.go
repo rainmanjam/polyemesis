@@ -35,6 +35,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/platform"
 	"github.com/rainmanjam/polyemesis/internal/routing"
 	"github.com/rainmanjam/polyemesis/internal/services"
+	"github.com/rainmanjam/polyemesis/internal/srtla"
+	"github.com/rainmanjam/polyemesis/internal/srtserver"
 	"github.com/rainmanjam/polyemesis/internal/startupenv"
 	"github.com/rainmanjam/polyemesis/internal/supervisor"
 )
@@ -1290,40 +1292,7 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 	out := make([]metrics.Ingest, 0, len(engines))
 	srtLinks, groups := s.mgr.SRTLinks(), s.mgr.SRTLAGroups()
 	for _, e := range engines {
-		st := e.Status()
-		in := metrics.Ingest{
-			// A programme with no ingest child is REPORTED AS STOPPED rather
-			// than omitted, the same rule the destination series follow: an
-			// absent series and a stopped one are indistinguishable to an
-			// alert, and only one of them is true.
-			Process: metrics.Process{State: string(supervisor.StateStopped)},
-			ID:      e.SourceID(),
-			Name:    e.SourceName(),
-			Relay: metrics.Relay{
-				Subscribers: len(st.Relay.Subscribers),
-				RxPackets:   st.Relay.RxPackets,
-				RxBytes:     st.Relay.RxBytes,
-				TxPackets:   st.Relay.TxPackets,
-				Dropped:     st.Relay.Dropped,
-			},
-		}
-		in.State = string(s.mgr.IngestState(e, st.Ingest))
-		if st.Ingest != nil {
-			in.Restarts = st.Ingest.Restarts
-		}
-		if b := e.Monitor().Bitrate(); len(b) > 0 {
-			in.BitrateKbps = b[len(b)-1].Kbps
-		}
-		if g := bondedFor(linkForCard(srtLinks, e.SourceID()), groups); g != nil {
-			in.BondedLinks = len(g.Links)
-		}
-		if fo := st.Failover; fo != nil {
-			in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}
-			if l := fo.PrimaryLink; l != nil {
-				in.Failover.RTTMs, in.Failover.LossPercent = l.RTTMs, l.LossPercent
-			}
-		}
-		out = append(out, in)
+		out = append(out, s.engineIngest(e, srtLinks, groups))
 	}
 
 	// AND EVERY PROGRAMME WITH NO ENGINE, as stopped. Sync logs and carries on
@@ -1356,6 +1325,44 @@ func (s *Server) ingestSnapshots() []metrics.Ingest {
 		})
 	}
 	return out
+}
+
+// engineIngest builds the ingest row for one engine that is running.
+func (s *Server) engineIngest(e *engine.Engine, srtLinks []srtserver.LinkStats, groups []srtla.GroupStats) metrics.Ingest {
+	st := e.Status()
+	in := metrics.Ingest{
+		// A programme with no ingest child is REPORTED AS STOPPED rather
+		// than omitted, the same rule the destination series follow: an
+		// absent series and a stopped one are indistinguishable to an
+		// alert, and only one of them is true.
+		Process: metrics.Process{State: string(supervisor.StateStopped)},
+		ID:      e.SourceID(),
+		Name:    e.SourceName(),
+		Relay: metrics.Relay{
+			Subscribers: len(st.Relay.Subscribers),
+			RxPackets:   st.Relay.RxPackets,
+			RxBytes:     st.Relay.RxBytes,
+			TxPackets:   st.Relay.TxPackets,
+			Dropped:     st.Relay.Dropped,
+		},
+	}
+	in.State = string(s.mgr.IngestState(e, st.Ingest))
+	if st.Ingest != nil {
+		in.Restarts = st.Ingest.Restarts
+	}
+	if b := e.Monitor().Bitrate(); len(b) > 0 {
+		in.BitrateKbps = b[len(b)-1].Kbps
+	}
+	if g := bondedFor(linkForCard(srtLinks, e.SourceID()), groups); g != nil {
+		in.BondedLinks = len(g.Links)
+	}
+	if fo := st.Failover; fo != nil {
+		in.Failover = &metrics.Failover{Active: string(fo.Active), Degraded: fo.Degraded != ""}
+		if l := fo.PrimaryLink; l != nil {
+			in.Failover.RTTMs, in.Failover.LossPercent = l.RTTMs, l.LossPercent
+		}
+	}
+	return in
 }
 
 // ----------------------------------------------------------------- settings
@@ -2669,6 +2676,16 @@ func (s *Server) dropUnsendableSettings(row *db.Destination) ([]string, error) {
 // read the store (the transaction holds the pool's only connection), so the
 // caller lists the accounts first and passes them in.
 func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.PlatformAccount) []string {
+	warnings := s.dropUnsendablePlatformSettings(row)
+	if w := unlinkForeignAccount(row, accts); w != "" {
+		warnings = append(warnings, w)
+	}
+	return warnings
+}
+
+// dropUnsendablePlatformSettings clears the settings a platform cannot send and
+// returns a warning for each one it cleared.
+func (s *Server) dropUnsendablePlatformSettings(row *db.Destination) []string {
 	var warnings []string
 
 	// Discovered through As[CompliancePusher], never a list of platform names: the
@@ -2740,6 +2757,16 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 				"X broadcast is published, and %s posts no announcement.", row.Platform))
 	}
 
+	return warnings
+}
+
+// unlinkForeignAccount unlinks the destination's connected account when it is
+// a different platform's account, and returns the warning that says so ("" when
+// nothing was unlinked).
+func unlinkForeignAccount(row *db.Destination, accts []db.PlatformAccount) string {
+	if row.AccountID == nil {
+		return ""
+	}
 	// THE CONNECTED ACCOUNT, AND WHOSE API ITS TOKEN IS SENT TO.
 	//
 	// account_id and platform are two independent columns and nothing compared
@@ -2805,59 +2832,55 @@ func (s *Server) dropUnsendableSettingsAgainst(row *db.Destination, accts []db.P
 	// That is not this mismatch, and the foreign key answers it: the store
 	// refuses the write, and inventing a second answer here would only disagree
 	// with it.
-	if row.AccountID != nil {
-		// The whole list rather than GetPlatformAccount, because this question
-		// is about the account's PLATFORM and nothing else. ListPlatformAccounts
-		// returns rows with no token material on them, so the check that exists
-		// to keep a token off the wrong wire never decrypts one itself.
-		for _, a := range accts {
-			if a.ID != *row.AccountID {
-				continue
-			}
-			// An empty platform is read as custom, which is what the store is
-			// about to default it to (CreateDestination and UpdateDestination
-			// both do). Comparing the undefaulted value would make "" look like
-			// a platform of its own in the sentence below.
-			want := row.Platform
-			if want == "" {
-				want = db.PlatformCustom
-			}
-			// CUSTOM IS NOT A MISMATCH, and treating it as one would break the
-			// only thing the link still does there.
-			//
-			// Nothing resolves a platform API off a custom destination. Every
-			// capability lookup in oauth.Set keys on the platform and there is
-			// no custom entry -- As[ScheduledBroadcaster], As[BroadcastLifecycler] and Get
-			// all answer false -- so the pre-announce and lifecycle sweeps
-			// skip the row entirely and no token is ever sent anywhere on its
-			// behalf. The leak this clause exists to stop cannot happen here.
-			//
-			// The link, meanwhile, is load-bearing: handleRefreshStreamKey
-			// picks the provider off acct.Platform, NOT off dest.Platform, so
-			// "custom endpoint holding a YouTube account" is exactly the shape
-			// that fetches a key for an ingest URL the operator pasted by hand.
-			// All but four of the preset catalogue's entries save as custom, so
-			// unlinking here would be the common case, not the corner one.
-			if want == db.PlatformCustom {
-				break
-			}
-			if a.Platform == want {
-				break
-			}
-			row.AccountID = nil
-			warnings = append(warnings, fmt.Sprintf(
-				"The connected account was unlinked: %q is a %s account and this "+
-					"destination publishes to %s. The link decides which platform's API "+
-					"receives that account's access token, so keeping it would send %s "+
-					"credentials to %s. The URL and stream key already on this destination "+
-					"are untouched; link a %s account if you want its key refreshed "+
-					"automatically.",
-				a.AccountName, a.Platform, want, a.Platform, want, want))
-			break
+	// The whole list rather than GetPlatformAccount, because this question
+	// is about the account's PLATFORM and nothing else. ListPlatformAccounts
+	// returns rows with no token material on them, so the check that exists
+	// to keep a token off the wrong wire never decrypts one itself.
+	for _, a := range accts {
+		if a.ID != *row.AccountID {
+			continue
 		}
+		// An empty platform is read as custom, which is what the store is
+		// about to default it to (CreateDestination and UpdateDestination
+		// both do). Comparing the undefaulted value would make "" look like
+		// a platform of its own in the sentence below.
+		want := row.Platform
+		if want == "" {
+			want = db.PlatformCustom
+		}
+		// CUSTOM IS NOT A MISMATCH, and treating it as one would break the
+		// only thing the link still does there.
+		//
+		// Nothing resolves a platform API off a custom destination. Every
+		// capability lookup in oauth.Set keys on the platform and there is
+		// no custom entry -- As[ScheduledBroadcaster], As[BroadcastLifecycler] and Get
+		// all answer false -- so the pre-announce and lifecycle sweeps
+		// skip the row entirely and no token is ever sent anywhere on its
+		// behalf. The leak this clause exists to stop cannot happen here.
+		//
+		// The link, meanwhile, is load-bearing: handleRefreshStreamKey
+		// picks the provider off acct.Platform, NOT off dest.Platform, so
+		// "custom endpoint holding a YouTube account" is exactly the shape
+		// that fetches a key for an ingest URL the operator pasted by hand.
+		// All but four of the preset catalogue's entries save as custom, so
+		// unlinking here would be the common case, not the corner one.
+		if want == db.PlatformCustom {
+			return ""
+		}
+		if a.Platform == want {
+			return ""
+		}
+		row.AccountID = nil
+		return fmt.Sprintf(
+			"The connected account was unlinked: %q is a %s account and this "+
+				"destination publishes to %s. The link decides which platform's API "+
+				"receives that account's access token, so keeping it would send %s "+
+				"credentials to %s. The URL and stream key already on this destination "+
+				"are untouched; link a %s account if you want its key refreshed "+
+				"automatically.",
+			a.AccountName, a.Platform, want, a.Platform, want, want)
 	}
-
-	return warnings
+	return ""
 }
 
 // destinationWrite is the stored state of a destination that a save is checked
@@ -3607,27 +3630,34 @@ func (s *Server) setDestinationEnabled(w http.ResponseWriter, r *http.Request, e
 	if ctl.KeyWarning != "" {
 		resp["warnings"] = []string{ctl.KeyWarning}
 	}
-	if ctl.Effect.Found {
-		if ctl.Effect.HasProcess {
-			resp["state"] = ctl.Effect.State
-		}
-		if ctl.Effect.Error != "" {
-			resp["error"] = ctl.Effect.Error
-		}
-		if !enabled {
-			resp["reaped"] = ctl.Effect.Warning == ""
-			if ctl.Effect.Warning != "" {
-				resp["warning"] = ctl.Effect.Warning
-			}
-			if ctl.Effect.DrainingSeconds > 0 {
-				resp["drainingSeconds"] = ctl.Effect.DrainingSeconds
-			}
-		}
-	}
+	addDestinationEffect(resp, enabled, ctl.Effect)
 	if ctl.Effect.Cut {
 		resp["cut"] = true
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// addDestinationEffect copies what the toggle did to the running process into
+// the response, when the destination had one.
+func addDestinationEffect(resp map[string]any, enabled bool, eff destEffect) {
+	if !eff.Found {
+		return
+	}
+	if eff.HasProcess {
+		resp["state"] = eff.State
+	}
+	if eff.Error != "" {
+		resp["error"] = eff.Error
+	}
+	if !enabled {
+		resp["reaped"] = eff.Warning == ""
+		if eff.Warning != "" {
+			resp["warning"] = eff.Warning
+		}
+		if eff.DrainingSeconds > 0 {
+			resp["drainingSeconds"] = eff.DrainingSeconds
+		}
+	}
 }
 
 func (s *Server) handleStartDestination(w http.ResponseWriter, r *http.Request) {

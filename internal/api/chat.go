@@ -296,6 +296,8 @@ func tallySend(results []chat.SendResult) chatSendResponse {
 
 // handleChatSend posts one message, by default only to the platforms that are
 // live. "to":"all" or a "platforms" list override that.
+const chatPlatformAndIDRequired = "platform and id are required"
+
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	if !s.requireChat(w) {
 		return
@@ -319,41 +321,83 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `"to" is "live" or "all"; to name platforms, send "platforms"`)
 		return
 	}
+	named, ok := namedChatsFor(w, req, to)
+	if !ok {
+		return
+	}
+	// No length check. Each platform's limit is published in the overview so
+	// the composer can warn, but the platform itself is the authority on what
+	// it will accept, and refusing here would silently cost the operator a
+	// message every platform would have taken.
+	pick, ok := s.chatPickFor(w, to, named)
+	if !ok {
+		return
+	}
+
+	results, err := s.chat.SendTo(r.Context(), req.Text, pick)
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if named != nil {
+		results = named.filter(results)
+	}
+	// 200 even when every platform failed: the request was carried out and the
+	// per-platform verdicts are the answer. A status code cannot say "Twitch
+	// took it and YouTube did not", and collapsing it to one would throw away
+	// the half that worked.
+	writeJSON(w, http.StatusOK, tallySend(results))
+}
+
+// namedChatPlatform reads a platform name a send names, writing the refusal and
+// reporting false when it is not a platform this build has.
+func namedChatPlatform(w http.ResponseWriter, name string) (db.Platform, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if _, ok := platform.ByEnum(name); !ok {
+		writeError(w, http.StatusBadRequest, "unknown platform "+strconv.Quote(name))
+		return "", false
+	}
+	return db.Platform(name), true
+}
+
+// namedChatsConflict reports whether a send names a "to" along with platforms or
+// accounts, or both platforms and accounts.
+func namedChatsConflict(req chatSendRequest, to string) bool {
+	return to != "" || (len(req.Platforms) > 0 && len(req.Accounts) > 0)
+}
+
+// namedChatsFor reads the platforms and accounts a send names. It writes the
+// refusal and reports false when the names are not usable.
+func namedChatsFor(w http.ResponseWriter, req chatSendRequest, to string) (*namedChats, bool) {
 	var named *namedChats
 	if len(req.Platforms) > 0 || len(req.Accounts) > 0 {
-		if to != "" || (len(req.Platforms) > 0 && len(req.Accounts) > 0) {
+		if namedChatsConflict(req, to) {
 			writeError(w, http.StatusBadRequest, `send one of "to", "platforms" or "accounts"`)
-			return
+			return nil, false
 		}
 		named = &namedChats{platforms: map[db.Platform]bool{}, accounts: map[string]bool{}}
-		check := func(name string) (db.Platform, bool) {
-			name = strings.ToLower(strings.TrimSpace(name))
-			if _, ok := platform.ByEnum(name); !ok {
-				writeError(w, http.StatusBadRequest, "unknown platform "+strconv.Quote(name))
-				return "", false
-			}
-			return db.Platform(name), true
-		}
 		for _, name := range req.Platforms {
-			p, ok := check(name)
+			p, ok := namedChatPlatform(w, name)
 			if !ok {
-				return
+				return nil, false
 			}
 			named.platforms[p] = true
 		}
 		for _, a := range req.Accounts {
-			p, ok := check(a.Platform)
+			p, ok := namedChatPlatform(w, a.Platform)
 			if !ok {
-				return
+				return nil, false
 			}
 			named.accounts[chatKey(p, strings.TrimSpace(a.Account))] = true
 		}
 	}
 
-	// No length check. Each platform's limit is published in the overview so
-	// the composer can warn, but the platform itself is the authority on what
-	// it will accept, and refusing here would silently cost the operator a
-	// message every platform would have taken.
+	return named, true
+}
+
+// chatPickFor chooses which chats a send reaches: the named ones, every one, or the
+// live ones. It writes the refusal and reports false when nothing can be sent.
+func (s *Server) chatPickFor(w http.ResponseWriter, to string, named *namedChats) (func(p db.Platform, account string) chat.SkipReason, bool) {
 	var pick func(p db.Platform, account string) chat.SkipReason
 	switch {
 	case named != nil:
@@ -371,7 +415,7 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		if statuses := s.chat.Statuses(); len(statuses) > 0 && !live.anyLive(statuses) {
 			// Never a send to nowhere: the operator is told to choose.
 			writeErrorCode(w, http.StatusConflict, codeNoPlatformLive, noPlatformLive)
-			return
+			return nil, false
 		}
 		pick = func(p db.Platform, account string) chat.SkipReason {
 			if live.Live(p, account) {
@@ -381,19 +425,7 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	results, err := s.chat.SendTo(r.Context(), req.Text, pick)
-	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
-		return
-	}
-	if named != nil {
-		results = named.filter(results)
-	}
-	// 200 even when every platform failed: the request was carried out and the
-	// per-platform verdicts are the answer. A status code cannot say "Twitch
-	// took it and YouTube did not", and collapsing it to one would throw away
-	// the half that worked.
-	writeJSON(w, http.StatusOK, tallySend(results))
+	return pick, true
 }
 
 // namedChats is what the operator asked for: whole platforms, or exact accounts.
@@ -480,7 +512,7 @@ func (s *Server) handleChatDeleteMessage(w http.ResponseWriter, r *http.Request)
 	account := strings.TrimSpace(q.Get("account"))
 	id := strings.TrimSpace(q.Get("id"))
 	if platform == "" || id == "" {
-		writeError(w, http.StatusBadRequest, "platform and id are required")
+		writeError(w, http.StatusBadRequest, chatPlatformAndIDRequired)
 		return
 	}
 
@@ -525,7 +557,7 @@ func (s *Server) handleChatHideMessage(w http.ResponseWriter, r *http.Request) {
 	account := strings.TrimSpace(q.Get("account"))
 	id := strings.TrimSpace(q.Get("id"))
 	if platform == "" || id == "" {
-		writeError(w, http.StatusBadRequest, "platform and id are required")
+		writeError(w, http.StatusBadRequest, chatPlatformAndIDRequired)
 		return
 	}
 
@@ -869,7 +901,7 @@ func (s *Server) handleChatFlagRelease(w http.ResponseWriter, r *http.Request) {
 	account := strings.TrimSpace(q.Get("account"))
 	id := strings.TrimSpace(q.Get("id"))
 	if platform == "" || id == "" {
-		writeError(w, http.StatusBadRequest, "platform and id are required")
+		writeError(w, http.StatusBadRequest, chatPlatformAndIDRequired)
 		return
 	}
 	// Refused while the model is still being asked: releasing a line it is

@@ -202,19 +202,26 @@ func (s *Server) mcpEndpoint(root http.Handler) http.Handler {
 		outer := &mcpOuter{
 			authz:      r.Header.Get("Authorization"),
 			remoteAddr: r.RemoteAddr,
-			forwarded:  http.Header{},
+			forwarded:  mcpForwardedHeaders(r),
 			tokenName:  p.token.Name,
 			scope:      db.BaseScope(p.token.Scope),
 			address:    s.clientIP(r),
 			access:     access,
 		}
-		for _, h := range forwardedHeaders {
-			if v := r.Header.Values(h); len(v) > 0 {
-				outer.forwarded[h] = append([]string(nil), v...)
-			}
-		}
 		sdk.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), mcpOuterKey{}, outer)))
 	})
+}
+
+// mcpForwardedHeaders copies the forwardedHeaders that the request carries, so
+// the tools can pass them on to the handler they call.
+func mcpForwardedHeaders(r *http.Request) http.Header {
+	forwarded := http.Header{}
+	for _, h := range forwardedHeaders {
+		if v := r.Header.Values(h); len(v) > 0 {
+			forwarded[h] = append([]string(nil), v...)
+		}
+	}
+	return forwarded
 }
 
 // mcpMaxRequestBytes bounds one JSON-RPC request. The largest legitimate one is

@@ -46,9 +46,9 @@ func (s *Server) handlePlatformGuides(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, guides)
 }
 
-// livestreamGated is a provider whose live API the operator switches on, X's
+// livestreamGater is a provider whose live API the operator switches on, X's
 // Livestream family today.
-type livestreamGated interface {
+type livestreamGater interface {
 	LivestreamAccess() bool
 }
 
@@ -65,7 +65,7 @@ func (s *Server) livestreamGate(platform db.Platform) string {
 	if err != nil {
 		return ""
 	}
-	g, ok := p.(livestreamGated)
+	g, ok := p.(livestreamGater)
 	if !ok {
 		return ""
 	}
@@ -1073,6 +1073,19 @@ func (s *Server) refreshDestinationKey(ctx context.Context, id int64) (*db.Desti
 		// stale, so its pending state is dropped and the next sweep opens it on the one that holds this key.
 		resetXPendingLifecycle(s.store, *updated.AccountID)
 	}
+	warnings = append(warnings, s.captionIngestWarnings(updated, b, caption)...)
+	if w := backupIngestWarning(updated); w != "" {
+		warnings = append(warnings, w)
+	}
+	warnings = append(warnings, repairs...)
+
+	return updated, warnings, nil
+}
+
+// captionIngestWarnings reports what the caption URL did on a write: a missing URL on a
+// destination that posts captions, or one that could not be stored.
+func (s *Server) captionIngestWarnings(updated *db.Destination, b *oauth.Broadcast, caption *db.IngestCaption) []string {
+	var warnings []string
 	// The caption URL was stored by that same write, bound to the new key, when
 	// the row as it stands posts captions: never for a refused write, never for
 	// a destination whose captions were switched off during the fetch, and
@@ -1091,15 +1104,18 @@ func (s *Server) refreshDestinationKey(ctx context.Context, id int64) (*db.Desti
 				"captions cannot be posted to this destination yet: "+redactErr(caption.NotStored))
 		}
 	}
-	if updated.BackupIngestWanted && updated.BackupURL == "" {
-		warnings = append(warnings,
-			"Facebook did not offer a backup ingest endpoint for this broadcast, so "+
-				"no redundant feed will be published. The destination is otherwise "+
-				"configured correctly and will go live normally.")
-	}
-	warnings = append(warnings, repairs...)
+	return warnings
+}
 
-	return updated, warnings, nil
+// backupIngestWarning says why a Facebook broadcast has no backup endpoint, or "" when
+// it has one or none was wanted.
+func backupIngestWarning(updated *db.Destination) string {
+	if updated.BackupIngestWanted && updated.BackupURL == "" {
+		return "Facebook did not offer a backup ingest endpoint for this broadcast, so " +
+			"no redundant feed will be published. The destination is otherwise " +
+			"configured correctly and will go live normally."
+	}
+	return ""
 }
 
 // errRefreshAccountChanged refuses a fetched key for a destination whose

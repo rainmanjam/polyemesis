@@ -404,29 +404,9 @@ func EffectiveAutomodMatrix(a db.AutomodSettings) automod.Matrix { return matrix
 func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 	switch c {
 	case automod.CheckerRules:
-		// A DISABLED rule is no rule: Rule.Match returns false for one, so the
-		// checker would be built and find nothing.
-		for _, r := range a.Rules {
-			if r.Enabled && strings.TrimSpace(r.Pattern) != "" {
-				return true, ""
-			}
-		}
-		return false, "no enabled rule is written"
+		return checkerRulesConfigured(a)
 	case automod.CheckerModel:
-		// EITHER checker makes the column live: the matrix has one model
-		// column, and a secondary running alone (its primary switched off)
-		// still decides. See automod.Chain.
-		if !a.Model.Enabled && !a.Secondary.Enabled {
-			return false, "the model checker is switched off"
-		}
-		// modelConfigFor copies an empty endpoint over the default, so the
-		// checker is built and every call is a POST to "" that fails open.
-		for _, m := range []db.AutomodModel{a.Model, a.Secondary} {
-			if m.Enabled && strings.TrimSpace(m.Endpoint) != "" {
-				return true, ""
-			}
-		}
-		return false, "the model checker has no endpoint"
+		return checkerModelConfigured(a)
 	case automod.CheckerProtection:
 		// The pack is its own switch (protection.state). A cell armed for it
 		// while the pack is off would be stored and never fire, then go live the
@@ -441,6 +421,36 @@ func checkerConfigured(a db.AutomodSettings, c automod.Checker) (bool, string) {
 	// nil. A checker this build does not know is dropped by matrixFromSettings
 	// before it could matter.
 	return true, ""
+}
+
+// checkerRulesConfigured reports whether the rules checker has a rule to run.
+func checkerRulesConfigured(a db.AutomodSettings) (bool, string) {
+	// A DISABLED rule is no rule: Rule.Match returns false for one, so the
+	// checker would be built and find nothing.
+	for _, r := range a.Rules {
+		if r.Enabled && strings.TrimSpace(r.Pattern) != "" {
+			return true, ""
+		}
+	}
+	return false, "no enabled rule is written"
+}
+
+// checkerModelConfigured reports whether the model checker has something to call.
+func checkerModelConfigured(a db.AutomodSettings) (bool, string) {
+	// EITHER checker makes the column live: the matrix has one model
+	// column, and a secondary running alone (its primary switched off)
+	// still decides. See automod.Chain.
+	if !a.Model.Enabled && !a.Secondary.Enabled {
+		return false, "the model checker is switched off"
+	}
+	// modelConfigFor copies an empty endpoint over the default, so the
+	// checker is built and every call is a POST to "" that fails open.
+	for _, m := range []db.AutomodModel{a.Model, a.Secondary} {
+		if m.Enabled && strings.TrimSpace(m.Endpoint) != "" {
+			return true, ""
+		}
+	}
+	return false, "the model checker has no endpoint"
 }
 
 // liveMatrix is m without the cells whose checker is not configured -- the

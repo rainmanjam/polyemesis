@@ -256,36 +256,78 @@ const fileValueRefusal = "%s: the -/ prefix makes FFmpeg read the option's value
 	"contents to the platform. Type the value inline instead (%s)"
 
 func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuard, err error) {
-	for _, a := range append(append([]string{}, in...), out...) {
-		if a == "-report" {
-			return nil, errors.New(reportFlagRefusal)
-		}
-		if strings.HasPrefix(a, "-/") {
-			return nil, fmt.Errorf(fileValueRefusal, a, "-"+strings.TrimPrefix(a, "-/"))
-		}
+	if err := refuseExpertFlagPrefixes(in, out); err != nil {
+		return nil, err
 	}
-	for _, a := range in {
-		if a == "-i" {
-			return nil, errors.New("input args: -i adds a second input, which renumbers every " +
-				"stream the routing graph refers to. The destination's input is the relay and " +
-				"cannot be changed here")
-		}
-		if routingFlag(a) {
-			return nil, fmt.Errorf("input args: %s belongs on the output side, where the routing "+
-				"graph is. Put it in the output arguments if you really mean it", a)
-		}
+	if err := refuseExpertInputFlags(in); err != nil {
+		return nil, err
 	}
 
 	// The video guarantee this destination is making right now. Passthrough
 	// means -c:v copy off the ingest; a rendition means -c:v copy off a shared
 	// encode that already happened. Overriding it re-encodes in the first case
 	// and double-encodes in the second, and both deserve to be said out loud.
-	promise := "the source video is copied through untouched (-c:v copy)"
+	guards, err = expertOutputGuards(out, videoPromise(row))
+	if err != nil {
+		return nil, err
+	}
+	// File access LAST, so the refusals above keep their own, more specific
+	// wording (a second -i "renumbers" the routing graph). It is the same walk
+	// the engine runs at spawn; see ffmpeg.CheckExpertFileAccess.
+	for _, side := range []struct {
+		field string
+		argv  []string
+	}{{"input args", in}, {"output args", out}} {
+		if err := ffmpeg.CheckExpertFileAccess(side.field, side.argv); err != nil {
+			return nil, err
+		}
+	}
+	return guards, nil
+}
+
+// refuseExpertFlagPrefixes refuses -report and any "-/" option, on either side.
+func refuseExpertFlagPrefixes(in, out []string) error {
+	for _, a := range append(append([]string{}, in...), out...) {
+		if a == "-report" {
+			return errors.New(reportFlagRefusal)
+		}
+		if strings.HasPrefix(a, "-/") {
+			return fmt.Errorf(fileValueRefusal, a, "-"+strings.TrimPrefix(a, "-/"))
+		}
+	}
+	return nil
+}
+
+// refuseExpertInputFlags refuses the flags that would add an input or renumber
+// the routing graph on the input side.
+func refuseExpertInputFlags(in []string) error {
+	for _, a := range in {
+		if a == "-i" {
+			return errors.New("input args: -i adds a second input, which renumbers every " +
+				"stream the routing graph refers to. The destination's input is the relay and " +
+				"cannot be changed here")
+		}
+		if routingFlag(a) {
+			return fmt.Errorf("input args: %s belongs on the output side, where the routing "+
+				"graph is. Put it in the output arguments if you really mean it", a)
+		}
+	}
+	return nil
+}
+
+// videoPromise is the sentence that says what video guarantee the destination
+// makes right now, for the video-codec guard's reason.
+func videoPromise(row *db.Destination) string {
 	if row.RenditionID != nil {
-		promise = fmt.Sprintf("this destination copies video from rendition %d, which has already "+
+		return fmt.Sprintf("this destination copies video from rendition %d, which has already "+
 			"encoded it once", *row.RenditionID)
 	}
+	return "the source video is copied through untouched (-c:v copy)"
+}
 
+// expertOutputGuards walks the output arguments and returns a guard for each
+// codec or routing override, or the first refusal.
+func expertOutputGuards(out []string, promise string) (guards []expertGuard, err error) {
 	for i, a := range out {
 		switch {
 		case a == "-i":
@@ -312,17 +354,6 @@ func checkExpertArgs(in, out []string, row *db.Destination) (guards []expertGuar
 					"profile, and a second answer can silently override it — which is the one "+
 					"failure this product cannot have.", a),
 			})
-		}
-	}
-	// File access LAST, so the refusals above keep their own, more specific
-	// wording (a second -i "renumbers" the routing graph). It is the same walk
-	// the engine runs at spawn; see ffmpeg.CheckExpertFileAccess.
-	for _, side := range []struct {
-		field string
-		argv  []string
-	}{{"input args", in}, {"output args", out}} {
-		if err := ffmpeg.CheckExpertFileAccess(side.field, side.argv); err != nil {
-			return nil, err
 		}
 	}
 	return guards, nil

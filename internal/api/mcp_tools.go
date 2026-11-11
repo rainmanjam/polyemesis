@@ -282,15 +282,7 @@ func mcpStripCredentialFields(v any) any {
 	case map[string]any:
 		for k, val := range x {
 			if mcpCredentialFields[k] {
-				switch vv := val.(type) {
-				case nil, bool:
-				case string:
-					if vv != "" {
-						x[k] = "[redacted]"
-					}
-				default:
-					x[k] = "[redacted]"
-				}
+				x[k] = redactedCredential(val)
 				continue
 			}
 			x[k] = mcpStripCredentialFields(val)
@@ -301,6 +293,22 @@ func mcpStripCredentialFields(v any) any {
 		}
 	}
 	return v
+}
+
+// redactedCredential returns the value a credential field is shown as: empty
+// values (nil, false, "") stay as they are, anything else becomes "[redacted]".
+func redactedCredential(val any) any {
+	switch vv := val.(type) {
+	case nil, bool:
+		return val
+	case string:
+		if vv != "" {
+			return "[redacted]"
+		}
+		return val
+	default:
+		return "[redacted]"
+	}
 }
 
 // refusal is a tool answer that says nothing was done, with what an agent
@@ -326,18 +334,8 @@ func (s *Server) mcpToolHandler(root http.Handler, t mcpTool) mcp.ToolHandler {
 			return nil, errors.New("internal error: the MCP request context is missing")
 		}
 		c := &mcpCtx{ctx: ctx, s: s, root: root, tool: &t}
-		// The admin server is the only one these are registered on, so a read
-		// token cannot name them. Checked again here so that a mistake in
-		// newMCPServer is a refusal rather than a dispatch -- and the REST
-		// scope check behind this is the third line.
-		if t.tier != mcpRead && outer.scope != db.ScopeAdmin {
-			return c.refusal("this tool needs an API token with the \"admin\" scope; this one is read-only", nil)
-		}
-		// And the level, read when this request arrived. The server this call
-		// reached was built without the tool if its level is off, so this is
-		// the second line, not the first.
-		if !mcpToolAllowed(t, outer.scope == db.ScopeAdmin, outer.access) {
-			return c.refusal("this tool's level is switched off in the MCP settings", nil)
+		if msg := mcpToolRefusal(t, outer); msg != "" {
+			return c.refusal(msg, nil)
 		}
 		var args json.RawMessage
 		if req != nil && req.Params != nil {
@@ -345,24 +343,53 @@ func (s *Server) mcpToolHandler(root http.Handler, t mcpTool) mcp.ToolHandler {
 		}
 		res, err := t.run(c, args)
 		if t.tier == mcpWrite && c.wrote {
-			outcome := c.outcome
-			if err != nil && outcome == "" {
-				outcome = "failed"
-			}
-			s.publishAudit(auditMCPAction(t.name, outer.tokenName, c.target, outcome, outer.address, t.stopping || c.stopping))
+			s.publishMCPWriteAudit(t, c, outer, err)
 		}
 		if err != nil {
-			// A refusal from REST or a bad argument is a tool result the agent
-			// can read and correct, not a protocol error.
-			var ae *mcpArgError
-			var re *mcpRESTError
-			if errors.As(err, &ae) || errors.As(err, &re) {
-				return c.refusal(err.Error(), nil)
-			}
-			return c.refusal("the tool failed: "+err.Error(), nil)
+			return mcpErrorResult(c, err)
 		}
 		return res, nil
 	}
+}
+
+// mcpToolRefusal returns why the tool may not run for this caller, or "" when it
+// may. The admin server is the only one these are registered on, so a read token
+// cannot name them; that is checked again here so that a mistake in
+// newMCPServer is a refusal rather than a dispatch, and the REST scope check
+// behind this is the third line. The level is read when this request arrived:
+// the server this call reached was built without the tool if its level is off,
+// so this is the second line, not the first.
+func mcpToolRefusal(t mcpTool, outer *mcpOuter) string {
+	if t.tier != mcpRead && outer.scope != db.ScopeAdmin {
+		return "this tool needs an API token with the \"admin\" scope; this one is read-only"
+	}
+	if !mcpToolAllowed(t, outer.scope == db.ScopeAdmin, outer.access) {
+		return "this tool's level is switched off in the MCP settings"
+	}
+	return ""
+}
+
+// publishMCPWriteAudit records a write tool's action in the audit log. A failed
+// call with no outcome of its own is recorded as failed.
+func (s *Server) publishMCPWriteAudit(t mcpTool, c *mcpCtx, outer *mcpOuter, err error) {
+	outcome := c.outcome
+	if err != nil && outcome == "" {
+		outcome = "failed"
+	}
+	s.publishAudit(auditMCPAction(t.name, outer.tokenName, c.target, outcome, outer.address, t.stopping || c.stopping))
+}
+
+// mcpErrorResult turns a tool's error into a tool result the agent can read and
+// correct, not a protocol error.
+func mcpErrorResult(c *mcpCtx, err error) (*mcp.CallToolResult, error) {
+	// A refusal from REST or a bad argument is a tool result the agent can read
+	// and correct, not a protocol error.
+	var ae *mcpArgError
+	var re *mcpRESTError
+	if errors.As(err, &ae) || errors.As(err, &re) {
+		return c.refusal(err.Error(), nil)
+	}
+	return c.refusal("the tool failed: "+err.Error(), nil)
 }
 
 // decodeArgs decodes a tool's arguments strictly: an unknown field, a second
@@ -1644,18 +1671,8 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	}
 	c.target = fmt.Sprintf("destination %d (%s)", a.DestinationID, a.Preset)
 	// The allowlist, not just the pattern: a name must be one this build has.
-	presets, err := c.call(http.MethodGet, "/routing/presets", nil, nil)
-	if err != nil {
+	if err := c.checkPresetKnown(a.Preset); err != nil {
 		return nil, err
-	}
-	known := false
-	for _, p := range asList(presets, "presets") {
-		if id, _ := pick(p, "id")["id"].(string); id == a.Preset {
-			known = true
-		}
-	}
-	if !known {
-		return nil, argErr("unknown preset %q; list_routing_presets names them", a.Preset)
 	}
 	// The destination's own programme, which the route needs named on an
 	// install with more than one, and its current mix for the preview.
@@ -1677,39 +1694,7 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 	q.Set(destinationParam, strconv.FormatInt(a.DestinationID, 10))
 	q.Set(presetMixParam, mix)
 	if !a.Confirm {
-		// The preview: the route's dry run, through the same checks as the
-		// apply, storing nothing. What would change, what is kept, and whether
-		// it would cost the destination a restart.
-		row, err := c.previewPreset(a.Preset, q)
-		if err != nil {
-			return nil, err
-		}
-		profile, _ := row["profile"].(map[string]any)
-		if profile == nil {
-			return nil, errors.New("the preset route returned no profile")
-		}
-		current := pick(d, field)[field]
-		health, err := c.destinationHealth(a.DestinationID, src)
-		if err != nil {
-			return nil, err
-		}
-		running := processRunning(health)
-		// Either mix: the second one is compiled into the same FFmpeg graph
-		// (routing.CompilePair), so a structural change to it restarts the
-		// destination as surely as one to the live mix.
-		structural := profileStructureChanged(current, profile)
-		return c.refusal("Not done: applying a preset replaces this destination's audio routing"+
-			restartClause(running && structural)+
-			". Show the user these changes, then call apply_routing_preset again with confirm:true.",
-			map[string]any{
-				"destination":  destSummary(d),
-				"preset":       a.Preset,
-				"mix":          field,
-				"tracks":       trackChanges(current, profile),
-				"kept":         row["kept"],
-				"running":      running,
-				"wouldRestart": running && structural,
-			})
+		return c.previewRoutingPreset(a.Preset, a.DestinationID, d, src, q, field)
 	}
 	res, err := c.call(http.MethodPost, "/routing/presets/"+url.PathEscape(a.Preset)+"/apply", q, nil)
 	if err != nil {
@@ -1728,13 +1713,7 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 		return nil, fmt.Errorf("the preset was not applied to destination %d (%s): %s", a.DestinationID, outcome, msg)
 	}
 	out := map[string]any{"applied": a.Preset, "mix": field, "profile": row["profile"]}
-	result := map[string]any{"outcome": row["outcome"]}
-	for _, k := range []string{"applied", "reason", "message", "kept"} {
-		if v, ok := row[k]; ok {
-			result[k] = v
-		}
-	}
-	out["result"] = result
+	out["result"] = presetResultFields(row)
 	if w := pick(res, "warnings")["warnings"]; w != nil {
 		out["warnings"] = w
 	}
@@ -1745,6 +1724,72 @@ func runApplyPreset(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error)
 		c.outcome = "saved, but the running pipeline was not updated (reconcile failed)"
 	}
 	return c.result(out, false)
+}
+
+// checkPresetKnown refuses a preset name this build does not list.
+func (c *mcpCtx) checkPresetKnown(preset string) error {
+	presets, err := c.call(http.MethodGet, "/routing/presets", nil, nil)
+	if err != nil {
+		return err
+	}
+	known := false
+	for _, p := range asList(presets, "presets") {
+		if id, _ := pick(p, "id")["id"].(string); id == preset {
+			known = true
+		}
+	}
+	if !known {
+		return argErr("unknown preset %q; list_routing_presets names them", preset)
+	}
+	return nil
+}
+
+// previewRoutingPreset is the apply without confirm: the route's dry run, through
+// the same checks as the apply, storing nothing. It reports what would change,
+// what is kept, and whether it would cost the destination a restart.
+func (c *mcpCtx) previewRoutingPreset(preset string, destID int64, d any, src *int64, q url.Values, field string) (*mcp.CallToolResult, error) {
+	row, err := c.previewPreset(preset, q)
+	if err != nil {
+		return nil, err
+	}
+	profile, _ := row["profile"].(map[string]any)
+	if profile == nil {
+		return nil, errors.New("the preset route returned no profile")
+	}
+	current := pick(d, field)[field]
+	health, err := c.destinationHealth(destID, src)
+	if err != nil {
+		return nil, err
+	}
+	running := processRunning(health)
+	// Either mix: the second one is compiled into the same FFmpeg graph
+	// (routing.CompilePair), so a structural change to it restarts the
+	// destination as surely as one to the live mix.
+	structural := profileStructureChanged(current, profile)
+	return c.refusal("Not done: applying a preset replaces this destination's audio routing"+
+		restartClause(running && structural)+
+		". Show the user these changes, then call apply_routing_preset again with confirm:true.",
+		map[string]any{
+			"destination":  destSummary(d),
+			"preset":       preset,
+			"mix":          field,
+			"tracks":       trackChanges(current, profile),
+			"kept":         row["kept"],
+			"running":      running,
+			"wouldRestart": running && structural,
+		})
+}
+
+// presetResultFields is the outcome block of an applied preset: the row's
+// outcome and the fields the apply names, when the row carries them.
+func presetResultFields(row map[string]any) map[string]any {
+	result := map[string]any{"outcome": row["outcome"]}
+	for _, k := range []string{"applied", "reason", "message", "kept"} {
+		if v, ok := row[k]; ok {
+			result[k] = v
+		}
+	}
+	return result
 }
 
 // previewPreset is the apply route's dry run: it checks and builds the new mix
@@ -1958,50 +2003,28 @@ func profileStructureChanged(prev any, next map[string]any) bool {
 	return strip(prev) != strip(next)
 }
 
+// scheduleArgs is the runSchedule tool's arguments.
+type scheduleArgs struct {
+	Name           string  `json:"name"`
+	Action         string  `json:"action"`
+	Kind           string  `json:"kind"`
+	DestinationIDs []int64 `json:"destinationIds"`
+	RunAt          string  `json:"runAt"`
+	TZ             string  `json:"tz"`
+	AtMinutes      int     `json:"atMinutes"`
+	Days           []int   `json:"days"`
+	Confirm        bool    `json:"confirm"`
+}
+
 func runSchedule(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
-	var a struct {
-		Name           string  `json:"name"`
-		Action         string  `json:"action"`
-		Kind           string  `json:"kind"`
-		DestinationIDs []int64 `json:"destinationIds"`
-		RunAt          string  `json:"runAt"`
-		TZ             string  `json:"tz"`
-		AtMinutes      int     `json:"atMinutes"`
-		Days           []int   `json:"days"`
-		Confirm        bool    `json:"confirm"`
-	}
+	var a scheduleArgs
 	if err := decodeArgs(raw, &a); err != nil {
 		return nil, err
 	}
-	if err := checkText("name", a.Name, 1, 100); err != nil {
+	if err := a.checkWhat(); err != nil {
 		return nil, err
 	}
-	if a.Action != "start" && a.Action != "stop" {
-		return nil, argErr("action must be start or stop")
-	}
-	if a.Kind != "once" && a.Kind != "daily" && a.Kind != "weekly" {
-		return nil, argErr("kind must be once, daily or weekly")
-	}
-	if len(a.DestinationIDs) < 1 || len(a.DestinationIDs) > 50 {
-		return nil, argErr("destinationIds must name 1 to 50 destinations")
-	}
-	for _, id := range a.DestinationIDs {
-		if err := checkID("destinationIds", id); err != nil {
-			return nil, err
-		}
-	}
-	if a.AtMinutes < 0 || a.AtMinutes > 1439 {
-		return nil, argErr("atMinutes must be 0 to 1439")
-	}
-	if len(a.Days) > 7 {
-		return nil, argErr("days holds at most 7 entries")
-	}
-	for _, d := range a.Days {
-		if d < 0 || d > 6 {
-			return nil, argErr("days are 0 (Sunday) to 6")
-		}
-	}
-	if err := checkText("tz", a.TZ, 0, 64); err != nil {
+	if err := a.checkWhen(); err != nil {
 		return nil, err
 	}
 	body := map[string]any{
@@ -2030,6 +2053,44 @@ func runSchedule(c *mcpCtx, raw json.RawMessage) (*mcp.CallToolResult, error) {
 		return nil, err
 	}
 	return c.result(v, false)
+}
+
+// checkWhat checks the schedule's name, action, kind and destinations.
+func (a scheduleArgs) checkWhat() error {
+	if err := checkText("name", a.Name, 1, 100); err != nil {
+		return err
+	}
+	if a.Action != "start" && a.Action != "stop" {
+		return argErr("action must be start or stop")
+	}
+	if a.Kind != "once" && a.Kind != "daily" && a.Kind != "weekly" {
+		return argErr("kind must be once, daily or weekly")
+	}
+	if len(a.DestinationIDs) < 1 || len(a.DestinationIDs) > 50 {
+		return argErr("destinationIds must name 1 to 50 destinations")
+	}
+	for _, id := range a.DestinationIDs {
+		if err := checkID("destinationIds", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkWhen checks the schedule's time of day, weekdays and time zone.
+func (a scheduleArgs) checkWhen() error {
+	if a.AtMinutes < 0 || a.AtMinutes > 1439 {
+		return argErr("atMinutes must be 0 to 1439")
+	}
+	if len(a.Days) > 7 {
+		return argErr("days holds at most 7 entries")
+	}
+	for _, d := range a.Days {
+		if d < 0 || d > 6 {
+			return argErr("days are 0 (Sunday) to 6")
+		}
+	}
+	return checkText("tz", a.TZ, 0, 64)
 }
 
 // --- resources ---

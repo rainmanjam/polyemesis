@@ -213,31 +213,10 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// UNSCOPED ON A MULTI-PROGRAMME INSTALL IS A SEPARATE INTENT. Without
-	// ?source= this reaches every programme's delayed destinations, which a
-	// caller that simply forgot the parameter (a deck key whose programme
-	// lookup failed) must not do by accident.
-	if sourceID == nil && !req.AllProgrammes {
-		srcs, err := s.store.ListSources()
-		if err != nil {
-			writeStoreError(w, err)
-			return
-		}
-		if len(srcs) > 1 {
-			writeError(w, http.StatusBadRequest, "this install has more than one programme: name one with "+
-				`?source=<id>, or send "allProgrammes": true to dump every programme's delayed destinations`)
-			return
-		}
+	if !s.checkDumpAllScope(w, sourceID, req.AllProgrammes) {
+		return
 	}
-	var (
-		rows []*db.Destination
-		err  error
-	)
-	if sourceID != nil {
-		rows, err = s.store.ListDestinationsBySource(*sourceID)
-	} else {
-		rows, err = s.store.ListDestinations()
-	}
+	rows, err := s.dumpAllRows(sourceID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -261,11 +240,7 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 			res, err := s.dumpAudited(d, row, req.wantFor(row, want), addr)
 			if err != nil {
 				_, msg := dumpRefusal(err)
-				outcome := dumpAllFailed
-				if errors.Is(err, delayline.ErrNoCutPoint) || errors.Is(err, delayline.ErrNotOnAir) ||
-					errors.Is(err, engine.ErrNotDelayed) {
-					outcome = dumpAllSkipped
-				}
+				outcome := dumpAllFailureOutcome(err)
 				results[i] = map[string]any{"id": row.ID, "name": row.Name, "outcome": outcome, "message": msg}
 				return
 			}
@@ -276,6 +251,48 @@ func (s *Server) handleDumpAllDelays(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 	writeJSON(w, http.StatusOK, map[string]any{"action": "dump", "results": results})
+}
+
+// checkDumpAllScope refuses an unscoped dump on a multi-programme install, and
+// reports false after writing the refusal. It reports true when the dump may run.
+func (s *Server) checkDumpAllScope(w http.ResponseWriter, sourceID *int64, allProgrammes bool) bool {
+	// UNSCOPED ON A MULTI-PROGRAMME INSTALL IS A SEPARATE INTENT. Without
+	// ?source= this reaches every programme's delayed destinations, which a
+	// caller that simply forgot the parameter (a deck key whose programme
+	// lookup failed) must not do by accident.
+	if sourceID != nil || allProgrammes {
+		return true
+	}
+	srcs, err := s.store.ListSources()
+	if err != nil {
+		writeStoreError(w, err)
+		return false
+	}
+	if len(srcs) > 1 {
+		writeError(w, http.StatusBadRequest, "this install has more than one programme: name one with "+
+			`?source=<id>, or send "allProgrammes": true to dump every programme's delayed destinations`)
+		return false
+	}
+	return true
+}
+
+// dumpAllFailureOutcome is the outcome of a dump that returned an error: skipped
+// when the destination had nothing it could dump, failed otherwise.
+func dumpAllFailureOutcome(err error) dumpAllOutcome {
+	if errors.Is(err, delayline.ErrNoCutPoint) || errors.Is(err, delayline.ErrNotOnAir) ||
+		errors.Is(err, engine.ErrNotDelayed) {
+		return dumpAllSkipped
+	}
+	return dumpAllFailed
+}
+
+// dumpAllRows returns the destinations a dump-all reaches: the named programme's,
+// or every destination when none is named.
+func (s *Server) dumpAllRows(sourceID *int64) ([]*db.Destination, error) {
+	if sourceID != nil {
+		return s.store.ListDestinationsBySource(*sourceID)
+	}
+	return s.store.ListDestinations()
 }
 
 // auditDelayDumped records a dump: programme was withheld from the air on

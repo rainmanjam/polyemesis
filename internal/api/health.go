@@ -42,18 +42,48 @@ import (
 // is why it stays off the authenticated group: a monitor that needs a
 // credential is a monitor that stops working when the credential is rotated.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	type check struct {
-		Name   string `json:"name"`
-		OK     bool   `json:"ok"`
-		Detail string `json:"detail,omitempty"`
-	}
-	checks := make([]check, 0, 3)
-	fatal := false
+	checks := make([]healthCheck, 0, 3)
 
+	dbCheck, fatal := s.databaseHealth()
+	checks = append(checks, dbCheck)
+
+	eng, engFatal := s.engineHealth()
+	fatal = fatal || engFatal
+	checks = append(checks, eng)
+
+	checks = append(checks, s.recordingDiskHealth())
+
+	degraded := false
+	for _, c := range checks {
+		if !c.OK {
+			degraded = true
+		}
+	}
+	if !degraded {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	status, code := "degraded", http.StatusOK
+	if fatal {
+		status, code = "unhealthy", http.StatusServiceUnavailable
+	}
+	writeJSON(w, code, map[string]any{"status": status, "checks": checks})
+}
+
+// healthCheck is one line of GET /health's checks array.
+type healthCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail,omitempty"`
+}
+
+// databaseHealth reports the database check, and whether its failure is fatal.
+func (s *Server) databaseHealth() (healthCheck, bool) {
+	fatal := false
 	// The database. Not "is the handle non-nil" -- a query, because the failure
 	// this catches is a file that has gone away, a volume unmounted under a
 	// running process, or a handle that will not give up a connection.
-	dbCheck := check{Name: "database", OK: true}
+	dbCheck := healthCheck{Name: "database", OK: true}
 	if err := s.store.Ping(); err != nil {
 		dbCheck.OK, dbCheck.Detail, fatal = false, err.Error(), true
 	} else if f, bad := s.store.StorageFault(); bad {
@@ -76,13 +106,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 				" (last seen " + f.At.UTC().Format(time.RFC3339) + ")"
 		}
 	}
-	checks = append(checks, dbCheck)
+	return dbCheck, fatal
+}
 
-	// The engine set. SOURCES CONFIGURED AND NOT ONE ENGINE RUNNING is the same
-	// condition Manager.Start refuses to boot on, and Sync can produce it later
-	// on a install that booted fine. No sources at all is a fresh install and a
-	// normal state, not a failure -- see Manager.Start.
-	eng := check{Name: "engine", OK: true}
+// engineHealth reports the engine-set check, and whether its failure is fatal.
+func (s *Server) engineHealth() (healthCheck, bool) {
+	fatal := false
+	eng := healthCheck{Name: "engine", OK: true}
 	switch {
 	case s.mgr == nil:
 		// A build with no engine wired: nothing to be reachable or not. Said
@@ -114,10 +144,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			eng.Detail = fmt.Sprintf("%d of %d source(s) running", running, sources)
 		}
 	}
-	checks = append(checks, eng)
+	return eng, fatal
+}
 
-	// The recording floor. Reported, never fatal: see the two-tier note above.
-	disk := check{Name: "recordingDisk", OK: true}
+// recordingDiskHealth reports the recording floor. Reported, never fatal.
+func (s *Server) recordingDiskHealth() healthCheck {
+	disk := healthCheck{Name: "recordingDisk", OK: true}
 	if st := s.storageVerdict(); st.Halted {
 		disk.OK = false
 		disk.Detail = st.Reason
@@ -125,21 +157,5 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 			disk.Detail = "recording is halted by the free-space floor"
 		}
 	}
-	checks = append(checks, disk)
-
-	degraded := false
-	for _, c := range checks {
-		if !c.OK {
-			degraded = true
-		}
-	}
-	if !degraded {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
-	}
-	status, code := "degraded", http.StatusOK
-	if fatal {
-		status, code = "unhealthy", http.StatusServiceUnavailable
-	}
-	writeJSON(w, code, map[string]any{"status": status, "checks": checks})
+	return disk
 }

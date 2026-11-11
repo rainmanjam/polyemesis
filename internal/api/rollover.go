@@ -231,27 +231,11 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		return false, err
 	}
 	if !d.Enabled || c.host.delivering == nil || !c.host.delivering(d.ID) {
-		// Off air. The session ends with the broadcast, so the next time it goes live the countdown starts again from
-		// the platform's own start, not from the old session.
-		if !cfg.SessionStartedAt.IsZero() {
-			if err := c.store.SetRolloverSession(d.ID, "", time.Time{}, now); err != nil {
-				c.log.Warn("planned rollover: could not end the session", "destination", d.Name, "err", err)
-			}
-		}
-		return false, nil
+		return c.endOffAirSession(d, cfg, now)
 	}
 	bid := d.ActiveBroadcastID()
 	if !c.actsOn(d.Platform) {
-		// Countdown only. The planner is not consulted, because a due trigger would have nothing to do. The session
-		// is still recorded, once per broadcast, because the countdown card counts from it: without it a Facebook
-		// destination, whose cap is documented, never showed one. Nothing here can read such a platform's own start,
-		// so the first sighting on air is used.
-		if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
-			if err := c.store.SetRolloverSession(d.ID, bid, now, now); err != nil {
-				c.log.Warn("planned rollover: could not record the session", "destination", d.Name, "err", err)
-			}
-		}
-		return false, nil
+		return c.recordCountdownSession(d, cfg, bid, now)
 	}
 
 	if d.Platform == db.PlatformYouTube && bid == "" {
@@ -279,18 +263,54 @@ func (c *rolloverCoordinator) considerOne(ctx context.Context, cfg db.RolloverSe
 		cfg.SessionBroadcastID, cfg.SessionStartedAt = bid, start
 	}
 
-	trigger := oauth.RolloverTrigger("")
-	if force {
-		trigger = "manual"
-	} else {
-		plan := oauth.PlanRollover(c.planInput(cfg, d.Platform, now))
-		if !plan.Due {
-			return false, nil
-		}
-		trigger = plan.Trigger
+	trigger, due := c.rolloverTrigger(cfg, d, now, force)
+	if !due {
+		return false, nil
 	}
 	err = c.act(ctx, d, cfg, bid, trigger, now)
 	return true, err
+}
+
+// endOffAirSession ends the recorded session of a destination that is off air. The
+// session ends with the broadcast, so the next time it goes live the countdown
+// starts again from the platform's own start, not from the old session.
+func (c *rolloverCoordinator) endOffAirSession(d *db.Destination, cfg db.RolloverSettings, now time.Time) (bool, error) {
+	// Off air. The session ends with the broadcast, so the next time it goes live the countdown starts again from
+	// the platform's own start, not from the old session.
+	if !cfg.SessionStartedAt.IsZero() {
+		if err := c.store.SetRolloverSession(d.ID, "", time.Time{}, now); err != nil {
+			c.log.Warn("planned rollover: could not end the session", "destination", d.Name, "err", err)
+		}
+	}
+	return false, nil
+}
+
+// recordCountdownSession records the session for a platform the planner does not
+// act on, once per broadcast, so its countdown card has a start to count from.
+func (c *rolloverCoordinator) recordCountdownSession(d *db.Destination, cfg db.RolloverSettings, bid string, now time.Time) (bool, error) {
+	// Countdown only. The planner is not consulted, because a due trigger would have nothing to do. The session
+	// is still recorded, once per broadcast, because the countdown card counts from it: without it a Facebook
+	// destination, whose cap is documented, never showed one. Nothing here can read such a platform's own start,
+	// so the first sighting on air is used.
+	if cfg.SessionBroadcastID != bid || cfg.SessionStartedAt.IsZero() {
+		if err := c.store.SetRolloverSession(d.ID, bid, now, now); err != nil {
+			c.log.Warn("planned rollover: could not record the session", "destination", d.Name, "err", err)
+		}
+	}
+	return false, nil
+}
+
+// rolloverTrigger decides whether a rollover is due and, if so, what triggered it.
+// A manual run is always due, and is labelled as one.
+func (c *rolloverCoordinator) rolloverTrigger(cfg db.RolloverSettings, d *db.Destination, now time.Time, force bool) (oauth.RolloverTrigger, bool) {
+	if force {
+		return "manual", true
+	}
+	plan := oauth.PlanRollover(c.planInput(cfg, d.Platform, now))
+	if !plan.Due {
+		return "", false
+	}
+	return plan.Trigger, true
 }
 
 // rolloverFailedPrefix starts the result act records for a rollover that failed.

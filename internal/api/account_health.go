@@ -44,7 +44,7 @@ func revokedKey(p db.Platform, ref string) string { return string(p) + "/" + ref
 
 // markRevoked records that the platform no longer honours this account's
 // token. Reports whether it is news (it was not already marked).
-func (b *accountHealthBook) markRevoked(key string, reason string) bool {
+func (b *accountHealthBook) markRevoked(key, reason string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.revoked == nil {

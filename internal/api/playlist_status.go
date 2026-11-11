@@ -146,6 +146,40 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	// item, the same order as the Stat below, and playlists are short.
 	refusal, refused := s.uploadRefusal(name)
 
+	if s.playlistItemReadyStatus(&st, name, refusal, refused) {
+		return st
+	}
+	if s.playlistItemTranscodingStatus(&st, name, refused) {
+		return st
+	}
+	// ATTENTION, and Detail must name ONE of the three causes the spec allows:
+	// the upload is missing, the last attempt failed, or nothing is queued.
+	// Checked in that order because a missing upload is the root cause even
+	// when a stale failed job also exists for the same target, and because it
+	// is the one cause a re-queue cannot fix by itself.
+	if s.playlistUploadAttentionStatus(&st, name) {
+		return st
+	}
+	if s.playlistItemRefusedStatus(&st, name, refusal, refused) {
+		return st
+	}
+	if s.playlistItemFailedStatus(&st, name) {
+		return st
+	}
+
+	st.State = playlistItemAttention
+	if s.jobq == nil {
+		st.Detail = "the background job queue is not running on this server, " +
+			"so this item cannot be normalised"
+	} else {
+		st.Detail = "not yet queued for normalisation"
+	}
+	return st
+}
+
+// playlistItemReadyStatus sets st to ready and reports true when this upload has
+// a non-empty derivative on disk.
+func (s *Server) playlistItemReadyStatus(st *PlaylistItemStatus, name, refusal string, refused bool) bool {
 	// READY asks the one question engine.playlistItemsReady asks: is there a
 	// NON-EMPTY derivative this profile produced. os.Stat, never store.Resolve
 	// -- Resolve is a shape check that never touches the disk, and this is a
@@ -159,17 +193,23 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	// the operator read amber here while the tier respawn-looped on an empty
 	// file. An endpoint that explains why the playlist is off air is worth
 	// nothing if it is answering a different question from the gate.
-	if fi, err := os.Stat(playlistmedia.DerivativePath(s.cfg.DataDir, name)); err == nil && fi.Size() > 0 {
-		st.State = playlistItemReady
-		if refused {
-			// Deliberately does not touch State. See Warning's declaration.
-			st.Warning = "\"" + name + "\" was inspected and refused (" + refusal +
-				"), but the copy already on air was made before that; " +
-				"replace the file or remove this item when convenient"
-		}
-		return st
+	fi, err := os.Stat(playlistmedia.DerivativePath(s.cfg.DataDir, name))
+	if err != nil || fi.Size() <= 0 {
+		return false
 	}
+	st.State = playlistItemReady
+	if refused {
+		// Deliberately does not touch State. See Warning's declaration.
+		st.Warning = "\"" + name + "\" was inspected and refused (" + refusal +
+			"), but the copy already on air was made before that; " +
+			"replace the file or remove this item when convenient"
+	}
+	return true
+}
 
+// playlistItemTranscodingStatus sets st to transcoding and reports true when an
+// active normalisation job exists for this upload and the upload was not refused.
+func (s *Server) playlistItemTranscodingStatus(st *PlaylistItemStatus, name string, refused bool) bool {
 	// TRANSCODING: an active normalisation job for this upload. Target, not a
 	// join on Upload -- playlistmedia.NormaliseTarget is the same key
 	// NewNormaliseJob submits under and the queue's Unique fold dedupes on, so
@@ -187,43 +227,50 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	// to an operator whose file can never finish. The queue state is true and
 	// the conclusion drawn from it is false, which is worse than saying
 	// nothing.
-	target := playlistmedia.NormaliseTarget(name)
-	if s.jobq != nil && !refused {
-		active, err := s.jobq.List(jobs.Filter{
-			States: []jobs.State{jobs.StateQueued, jobs.StateRunning, jobs.StateDeferred},
-			Kinds:  []jobs.Kind{playlistmedia.KindNormalise},
-			Target: target,
-		})
-		if err == nil && len(active) > 0 {
-			st.State = playlistItemTranscoding
-			return st
-		}
+	if s.jobq == nil || refused {
+		return false
 	}
-
-	// ATTENTION, and Detail must name ONE of the three causes the spec allows:
-	// the upload is missing, the last attempt failed, or nothing is queued.
-	// Checked in that order because a missing upload is the root cause even
-	// when a stale failed job also exists for the same target, and because it
-	// is the one cause a re-queue cannot fix by itself.
-	if store, err := s.uploadStore(); err == nil {
-		if path, err := store.Resolve(name); err == nil {
-			if _, err := os.Stat(path); err != nil {
-				st.State = playlistItemAttention
-				st.Detail = "the upload \"" + name + "\" no longer exists; " +
-					"upload the file again or remove this item from the playlist"
-				return st
-			}
-		} else {
-			// Resolve refused the name outright -- an escape attempt or an
-			// empty/invalid one. Settings.Validate is supposed to keep this
-			// from ever being stored, but this endpoint reports what it
-			// observes rather than trusting that upstream check held.
-			st.State = playlistItemAttention
-			st.Detail = "\"" + name + "\" is not a usable upload name: " + err.Error()
-			return st
-		}
+	active, err := s.jobq.List(jobs.Filter{
+		States: []jobs.State{jobs.StateQueued, jobs.StateRunning, jobs.StateDeferred},
+		Kinds:  []jobs.Kind{playlistmedia.KindNormalise},
+		Target: playlistmedia.NormaliseTarget(name),
+	})
+	if err != nil || len(active) == 0 {
+		return false
 	}
+	st.State = playlistItemTranscoding
+	return true
+}
 
+// playlistUploadAttentionStatus sets st to attention and reports true when the
+// upload is missing or its name is not a usable one.
+func (s *Server) playlistUploadAttentionStatus(st *PlaylistItemStatus, name string) bool {
+	store, err := s.uploadStore()
+	if err != nil {
+		return false
+	}
+	path, err := store.Resolve(name)
+	if err != nil {
+		// Resolve refused the name outright -- an escape attempt or an
+		// empty/invalid one. Settings.Validate is supposed to keep this
+		// from ever being stored, but this endpoint reports what it
+		// observes rather than trusting that upstream check held.
+		st.State = playlistItemAttention
+		st.Detail = "\"" + name + "\" is not a usable upload name: " + err.Error()
+		return true
+	}
+	if _, err := os.Stat(path); err != nil {
+		st.State = playlistItemAttention
+		st.Detail = "the upload \"" + name + "\" no longer exists; " +
+			"upload the file again or remove this item from the playlist"
+		return true
+	}
+	return false
+}
+
+// playlistItemRefusedStatus sets st to attention and reports true when the
+// upload was refused by inspection.
+func (s *Server) playlistItemRefusedStatus(st *PlaylistItemStatus, name, refusal string, refused bool) bool {
 	// REFUSED OUTRANKS A FAILED JOB, and for the same reason a missing upload
 	// outranks one: it is the root cause, and it is the one a re-queue cannot
 	// fix. The normalisation below failed BECAUSE the source was refused, so
@@ -235,37 +282,35 @@ func (s *Server) playlistItemStatus(name string) PlaylistItemStatus {
 	// identical, which is why the sentence is built here rather than returned
 	// by uploadRefusal: there is no copy on air to keep, so this one is not
 	// something to do "when convenient".
-	if refused {
-		st.State = playlistItemAttention
-		st.Detail = "\"" + name + "\" was inspected and refused (" + refusal +
-			"), so it cannot be normalised; sending the same file again will " +
-			"not change that -- replace the file or remove this item"
-		return st
+	if !refused {
+		return false
 	}
-
-	if s.jobq != nil {
-		failed, err := s.jobq.List(jobs.Filter{
-			States: []jobs.State{jobs.StateFailed},
-			Kinds:  []jobs.Kind{playlistmedia.KindNormalise},
-			Target: target,
-			Limit:  1,
-		})
-		if err == nil && len(failed) > 0 {
-			st.State = playlistItemAttention
-			st.Detail = "normalisation failed"
-			if failed[0].Error != "" {
-				st.Detail += ": " + failed[0].Error
-			}
-			return st
-		}
-	}
-
 	st.State = playlistItemAttention
+	st.Detail = "\"" + name + "\" was inspected and refused (" + refusal +
+		"), so it cannot be normalised; sending the same file again will " +
+		"not change that -- replace the file or remove this item"
+	return true
+}
+
+// playlistItemFailedStatus sets st to attention and reports true when the last
+// normalisation attempt for this upload failed.
+func (s *Server) playlistItemFailedStatus(st *PlaylistItemStatus, name string) bool {
 	if s.jobq == nil {
-		st.Detail = "the background job queue is not running on this server, " +
-			"so this item cannot be normalised"
-	} else {
-		st.Detail = "not yet queued for normalisation"
+		return false
 	}
-	return st
+	failed, err := s.jobq.List(jobs.Filter{
+		States: []jobs.State{jobs.StateFailed},
+		Kinds:  []jobs.Kind{playlistmedia.KindNormalise},
+		Target: playlistmedia.NormaliseTarget(name),
+		Limit:  1,
+	})
+	if err != nil || len(failed) == 0 {
+		return false
+	}
+	st.State = playlistItemAttention
+	st.Detail = "normalisation failed"
+	if failed[0].Error != "" {
+		st.Detail += ": " + failed[0].Error
+	}
+	return true
 }

@@ -87,57 +87,85 @@ func resolveHoldKey(k string) (string, bool) {
 // vocabulary lives in internal/automod/pack and in internal/automod.
 func protectionVocabProblems(p db.AutomodProtection) []string {
 	var probs []string
+	probs = append(probs, packVocabProblems(p)...)
+	probs = append(probs, categoryVocabProblems(p)...)
+	probs = append(probs, ceilingVocabProblems(p)...)
+	probs = append(probs, holdDetectorVocabProblems(p)...)
+	probs = append(probs, addTermVocabProblems(p)...)
+	return probs
+}
+
+// vocabSortedKeys returns a map's keys in sorted order, so the problems that name
+// them come out in a stable order.
+func vocabSortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// packVocabProblems names a pack this build does not have and a negative version.
+func packVocabProblems(p db.AutomodProtection) []string {
+	var probs []string
 	if p.Pack != "" && p.Pack != db.DefaultProtectionPack {
 		probs = append(probs, fmt.Sprintf("protection pack %q is not one this build has", p.Pack))
 	}
 	if p.PackVersion < 0 {
 		probs = append(probs, "protection packVersion cannot be negative")
 	}
-	cats := make([]string, 0, len(p.Categories))
-	for c := range p.Categories {
-		cats = append(cats, c)
-	}
-	sort.Strings(cats)
-	for _, c := range cats {
+	return probs
+}
+
+// categoryVocabProblems names a category the pack does not have, and a detector
+// that does not belong to a category that does.
+func categoryVocabProblems(p db.AutomodProtection) []string {
+	var probs []string
+	for _, c := range vocabSortedKeys(p.Categories) {
 		if !protectionCategories[c] {
 			probs = append(probs, fmt.Sprintf("protection category %q is not one the pack has", c))
 			continue
 		}
-		dets := make([]string, 0, len(p.Categories[c].Detectors))
-		for d := range p.Categories[c].Detectors {
-			dets = append(dets, d)
-		}
-		sort.Strings(dets)
-		for _, d := range dets {
+		for _, d := range vocabSortedKeys(p.Categories[c].Detectors) {
 			if _, ok := groupOf(c, d); !ok {
 				probs = append(probs, fmt.Sprintf("protection category %q has no detector %q", c, d))
 			}
 		}
 	}
+	return probs
+}
+
+// ceilingVocabProblems names a ceiling for a category that is not one of the
+// known ceiling keys.
+func ceilingVocabProblems(p db.AutomodProtection) []string {
+	var probs []string
 	allowed := map[string]bool{"self_harm": true}
 	for _, k := range automod.CeilingKeys() {
 		allowed[k] = true
 	}
-	cks := make([]string, 0, len(p.Ceilings))
-	for k := range p.Ceilings {
-		cks = append(cks, k)
-	}
-	sort.Strings(cks)
-	for _, k := range cks {
+	for _, k := range vocabSortedKeys(p.Ceilings) {
 		if !allowed[k] {
 			probs = append(probs, fmt.Sprintf("protection ceiling names unknown category %q", k))
 		}
 	}
-	hks := make([]string, 0, len(p.HoldDetectors))
-	for k := range p.HoldDetectors {
-		hks = append(hks, k)
-	}
-	sort.Strings(hks)
-	for _, k := range hks {
+	return probs
+}
+
+// holdDetectorVocabProblems names a hold detector that does not resolve.
+func holdDetectorVocabProblems(p db.AutomodProtection) []string {
+	var probs []string
+	for _, k := range vocabSortedKeys(p.HoldDetectors) {
 		if _, ok := resolveHoldKey(k); !ok {
 			probs = append(probs, fmt.Sprintf("protection holdDetectors names unknown detector %q", k))
 		}
 	}
+	return probs
+}
+
+// addTermVocabProblems checks each added term's tier against its category.
+func addTermVocabProblems(p db.AutomodProtection) []string {
+	var probs []string
 	for _, t := range p.AddTerms {
 		switch t.Category {
 		case pack.CategoryHate:
@@ -183,30 +211,7 @@ func packConfigFromSettings(p db.AutomodProtection) (pack.Config, map[string]boo
 		cfg.AllowIDs[id] = true
 	}
 	for cat, c := range p.Categories {
-		off := c.Enabled != nil && !*c.Enabled
-		// The two term categories are switched as categories; every other
-		// category is its groups. A disabled category switches all of them off,
-		// and wins over a detector inside it.
-		if cat == pack.CategoryHate || cat == pack.CategoryProfanity {
-			if c.Enabled != nil {
-				cfg.Categories[cat] = *c.Enabled
-			}
-		}
-		for _, g := range pack.Groups() {
-			if groupCategory(g) != cat {
-				continue
-			}
-			if off {
-				cfg.Detectors[g] = false
-			} else if v, ok := c.Detectors[groupShort(g)]; ok {
-				cfg.Detectors[g] = v
-			}
-		}
-		// A profanity group follows its category, not a detector entry.
-		if cat == pack.CategoryProfanity {
-			delete(cfg.Detectors, pack.GroupProfanityMild)
-			delete(cfg.Detectors, pack.GroupProfanityStrong)
-		}
+		applyProtectionCategory(&cfg, cat, c)
 	}
 	hold := map[string]bool{}
 	for k, v := range p.HoldDetectors {
@@ -215,6 +220,36 @@ func packConfigFromSettings(p db.AutomodProtection) (pack.Config, map[string]boo
 		}
 	}
 	return cfg, hold
+}
+
+// applyProtectionCategory writes one protection category into the pack config:
+// the term categories are switched as categories, every other category through
+// its groups.
+func applyProtectionCategory(cfg *pack.Config, cat string, c db.ProtectionCategory) {
+	off := c.Enabled != nil && !*c.Enabled
+	// The two term categories are switched as categories; every other
+	// category is its groups. A disabled category switches all of them off,
+	// and wins over a detector inside it.
+	if cat == pack.CategoryHate || cat == pack.CategoryProfanity {
+		if c.Enabled != nil {
+			cfg.Categories[cat] = *c.Enabled
+		}
+	}
+	for _, g := range pack.Groups() {
+		if groupCategory(g) != cat {
+			continue
+		}
+		if off {
+			cfg.Detectors[g] = false
+		} else if v, ok := c.Detectors[groupShort(g)]; ok {
+			cfg.Detectors[g] = v
+		}
+	}
+	// A profanity group follows its category, not a detector entry.
+	if cat == pack.CategoryProfanity {
+		delete(cfg.Detectors, pack.GroupProfanityMild)
+		delete(cfg.Detectors, pack.GroupProfanityStrong)
+	}
 }
 
 // ladderFromSettings is the strike ladder for a stored block.
