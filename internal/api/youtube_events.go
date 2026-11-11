@@ -61,21 +61,33 @@ func (s *Server) handleYouTubeEvents(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	keys, selfIdx := ytHeldKeys(rows, acct.Platform, id, self)
+	events, err := mgr.ListEvents(ctx, acct.AccessToken, keys)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, scrubSourceKeys(err.Error(), keys))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"supported": true, "events": ytEventRows(events, selfIdx)})
+}
+
+// ytHeldKeys collects the stream keys of this account's destinations on the
+// platform, and the position of the destination self among them (-1 if none).
+func ytHeldKeys(rows []*db.Destination, platform db.Platform, accountID, self int64) ([]string, int) {
 	var keys []string
 	selfIdx := -1
 	for _, d := range rows {
-		if d.Platform == acct.Platform && d.AccountID != nil && *d.AccountID == id {
+		if d.Platform == platform && d.AccountID != nil && *d.AccountID == accountID {
 			if d.ID == self {
 				selfIdx = len(keys)
 			}
 			keys = append(keys, d.StreamKey)
 		}
 	}
-	events, err := mgr.ListEvents(ctx, acct.AccessToken, keys)
-	if err != nil {
-		writeError(w, http.StatusBadGateway, scrubSourceKeys(err.Error(), keys))
-		return
-	}
+	return keys, selfIdx
+}
+
+// ytEventRows marks each event that is bound to the held stream at selfIdx.
+func ytEventRows(events []oauth.EventSummary, selfIdx int) []ytEventRow {
 	out := make([]ytEventRow, 0, len(events))
 	for _, e := range events {
 		row := ytEventRow{EventSummary: e}
@@ -86,7 +98,7 @@ func (s *Server) handleYouTubeEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"supported": true, "events": out})
+	return out
 }
 
 // handleYouTubeEventAutoStart answers POST /platforms/accounts/{id}/youtube/events/{eventId}/auto-start.
