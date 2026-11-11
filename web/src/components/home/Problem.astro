@@ -15,7 +15,7 @@ const cards: Array<{ kind: MeterKind; title: string; body: string }> = [
   {
     kind: "relay",
     title: "Cloud relays",
-    body: "One upload, but every platform hears the same mix, and adding destinations usually means a paid plan.",
+    body: "One upload, but a relay can send every platform the same mix, and free plans can stop at two destinations.",
   },
   {
     kind: "plugin",
@@ -25,7 +25,7 @@ const cards: Array<{ kind: MeterKind; title: string; body: string }> = [
   {
     kind: "scripts",
     title: "nginx and FFmpeg scripts",
-    body: "One upload and any mix you can script, as long as you keep the glue working.",
+    body: "One upload, and FFmpeg can build a different mix per platform, but you write and maintain those scripts yourself.",
   },
 ];
 
@@ -40,7 +40,7 @@ const strip = meter("polyemesis");
 <section class="problem border-y border-line bg-surface/40" id="problem" aria-labelledby="h-problem" data-upload-meter>
   <div class="wrap py-20 sm:py-24">
     <h2 id="h-problem" class="text-balance font-display text-3xl font-bold leading-tight sm:text-4xl">
-      Every way to multistream today asks you to give something up.
+      The usual ways to multistream each ask you to give something up.
     </h2>
     <p class="pc" aria-hidden="true">Platforms you stream to: <span data-pcount>{START_PLATFORMS}</span></p>
 

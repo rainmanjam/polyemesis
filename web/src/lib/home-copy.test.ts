@@ -474,3 +474,46 @@ describe("the run beat", () => {
   it("names no placeholder install", () => expect(run).not.toMatch(/polyemesis\.com\/install|polyemesis\/polyemesis\b|href="#"/));
   it("does not claim the console address is printed", () => expect(run).not.toMatch(/prints the address/));
 });
+
+/* Task 12: homepage claims checked against the code and docs. Each guard keeps
+ * a claim that the docs do not support from coming back. */
+describe("homepage claims match the code (T12)", () => {
+  const home = (name: string) => readFileSync(join(here, "..", "components", "home", name), "utf8");
+  const how = home("HowItWorks.astro");
+  const recovery = home("Recovery.astro");
+  const run = home("Run.astro");
+
+  // docs/OBS.md:130-132: classic RTMP carries one audio track. Only SRT/SRTLA carry every track.
+  it("does not promise every track over RTMP", () => expect(how).not.toMatch(/RTMP, SRT or SRTLA/));
+  // README.md:104 and docs/API.md:893 name vMix only for stop-on-ingest-loss; no multitrack doc.
+  it("names no vMix multitrack path in the steps", () => expect(how).not.toMatch(/vMix/));
+  // docs/ARCHITECTURE.md:234-236: the outage before the slate stays a timestamp gap.
+  it("does not promise a gapless failover", () => expect(recovery).not.toMatch(/never see a gap/));
+  // docs/CONNECTING-PLATFORMS.md:294: reply-to-a-message is unknown on Twitch and YouTube.
+  it("does not claim chat replies", () => expect(recovery).not.toMatch(/\breply\b/i));
+  // docs/PLATFORMS.md:42-48: chat on several platforms is unverified.
+  it("does not claim chat for every platform", () => expect(recovery).not.toMatch(/chat (for|from) every platform/i));
+  // docs/QUICKSTART.md:1-7 is "the impatient path" from installing; it covers no VPS renting
+  // and sends readers to INSTALL.md for "the careful version".
+  it("does not claim the quickstart covers renting a VPS", () => expect(run).not.toMatch(/renting/));
+  it("sends server newcomers to the install guide", () => expect(run).toMatch(/Never run a server before\?[^<]*<a href="\/docs\/install">/));
+  // docs/INSTALL.md:327: script installs find the setup code in the closing summary.
+  it("points script users at the setup code", () => expect(run).toMatch(/closing summary/));
+  // docs/FAQ.md:103-104: failover is off by default, so the heading must be conditional.
+  it("makes the recovery heading conditional on failover", () =>
+    expect(recovery).toMatch(/With failover on, your stream stays up when your encoder drops\./));
+  // docs/STORAGE.md:3-10, docs/MQTT.md, docs/HOOKS.md send data out when configured.
+  it("does not claim all data stays on the server", () => expect(run).not.toMatch(/keys and data stay/));
+  // docs/PLATFORMS.md:42-50: many platforms are unverified.
+  it("does not promise every platform in How it works", () => expect(how).not.toMatch(/to every platform/));
+  // Problem: competitor claims scoped to what docs/COMPARISON.md and the facts file show.
+  const problem = home("Problem.astro");
+  it("makes no universal competitor claims", () => {
+    expect(problem).not.toMatch(/Every way to multistream/);
+    expect(problem).not.toMatch(/usually means a paid plan/);
+    expect(problem).not.toMatch(/any mix you can script/);
+  });
+  // Spec "Decided": competitors stay generic (not named). Sources live in the PR claims table.
+  it("names no competitor in the problem cards", () =>
+    expect(problem).not.toMatch(/Restream|Streamlabs|StreamElements|Castr|Aitum|obs-multi-rtmp|MistServer/i));
+});
