@@ -271,6 +271,15 @@ var hexColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 // is validated by the same rule before it is stored.
 func (s CaptionStyle) Validate() error {
 	n := s.Normalized()
+	if err := n.validateAppearance(); err != nil {
+		return err
+	}
+	return n.validatePlacement()
+}
+
+// validateAppearance checks the font, size, colours and box/outline settings of
+// a normalised style.
+func (n CaptionStyle) validateAppearance() error {
 	if strings.ContainsAny(n.Font, `/\`) || n.Font == "." || n.Font == ".." {
 		return fmt.Errorf("%w: caption font %q is not a font name", ErrInvalidRequest, n.Font)
 	}
@@ -288,6 +297,12 @@ func (s CaptionStyle) Validate() error {
 	if n.BoxOpacity < 0 || n.BoxOpacity > 1 {
 		return fmt.Errorf("%w: caption box opacity is outside 0..1", ErrInvalidRequest)
 	}
+	return nil
+}
+
+// validatePlacement checks where the captions sit and how much text each cue
+// carries in a normalised style.
+func (n CaptionStyle) validatePlacement() error {
 	if n.PositionPct < 5 || n.PositionPct > 95 {
 		return fmt.Errorf("%w: caption position %.0f%% is outside 5..95", ErrInvalidRequest, n.PositionPct)
 	}
