@@ -156,9 +156,7 @@ func (x *X) Publish(ctx context.Context, r Run) (Done, error) {
 		}
 		var fin struct {
 			Data struct {
-				Processing *struct {
-					State string `json:"state"`
-				} `json:"processing_info"`
+				Processing *xProcessingInfo `json:"processing_info"`
 			} `json:"data"`
 		}
 		if f := x.do(ctx, http.MethodPost, "/2/media/upload/"+mediaID+"/finalize", r.Cred.AccessToken, nil, &fin); f != nil {
@@ -234,6 +232,11 @@ func (x *X) append(ctx context.Context, r Run, mediaID string, total int64) *Fai
 	return nil
 }
 
+// xProcessingInfo is the processing_info block of an X media upload status.
+type xProcessingInfo struct {
+	State string `json:"state"`
+}
+
 func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 	every := x.PollEvery
 	if every <= 0 {
@@ -242,9 +245,7 @@ func (x *X) waitProcessed(ctx context.Context, r Run, mediaID string) *Failure {
 	for i := 0; i < 90; i++ {
 		var st struct {
 			Data struct {
-				Processing *struct {
-					State string `json:"state"`
-				} `json:"processing_info"`
+				Processing *xProcessingInfo `json:"processing_info"`
 			} `json:"data"`
 		}
 		if f := x.do(ctx, http.MethodGet, "/2/media/upload?command=STATUS&media_id="+mediaID, r.Cred.AccessToken, nil, &st); f != nil {
