@@ -483,43 +483,60 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 		// Activity first, and before messageFrom drops an item with no text: a
 		// gifting event has none. The chat line is delivered below as before.
 		y.activityFrom(it, sink)
-		// A tombstone marks where a deleted message used to be: its id and
-		// publish time with nothing else. The reference says it is NOT sent at
-		// the moment of deletion, only shown in place of the message, so this
-		// catches a deletion when that stretch of chat is read again (the first
-		// page after a reconnect), not necessarily when it happens. The
-		// messageDeletedEvent and messageRetractedEvent types were removed from
-		// the reference (2026-06-23) because the API never returned them, and
-		// nothing here ever read them.
-		// https://developers.google.com/youtube/v3/live/docs/liveChatMessages
-		if it.Snippet.Type == "tombstone" {
-			retract(sink, it.ID)
+		if applyYouTubeRemoval(it, sink) {
 			continue
-		}
-		// A userBannedEvent IS sent when it happens, including a ban made by
-		// another moderator or in Studio. YouTube clears a banned user's
-		// backlog on its side, as Hub.Ban already assumes, so drop theirs here.
-		if it.Snippet.Type == "userBannedEvent" {
-			if d := it.Snippet.UserBannedDetails; d != nil && d.BannedUserDetails.ChannelID != "" {
-				retractUser(sink, d.BannedUserDetails.ChannelID)
-			}
-			// Falls through: the event line is still delivered, so a ban placed
-			// by another moderator or in Studio leaves a visible record.
 		}
 		if it.Snippet.PollDetails != nil {
 			y.notePoll(it)
 		}
-		m, ok := y.messageFrom(it)
-		if !ok {
-			continue
+		if y.deliverMessage(it, cutoff, sink) {
+			delivered++
 		}
-		if !cutoff.IsZero() && m.At.Before(cutoff) {
-			continue
-		}
-		delivered++
-		sink.Deliver(m)
 	}
 	return delivered
+}
+
+// applyYouTubeRemoval acts on a deleted message or a ban. It reports true when
+// the item is a tombstone, which is not delivered as a chat line.
+func applyYouTubeRemoval(it ytChatItem, sink Sink) bool {
+	// A tombstone marks where a deleted message used to be: its id and
+	// publish time with nothing else. The reference says it is NOT sent at
+	// the moment of deletion, only shown in place of the message, so this
+	// catches a deletion when that stretch of chat is read again (the first
+	// page after a reconnect), not necessarily when it happens. The
+	// messageDeletedEvent and messageRetractedEvent types were removed from
+	// the reference (2026-06-23) because the API never returned them, and
+	// nothing here ever read them.
+	// https://developers.google.com/youtube/v3/live/docs/liveChatMessages
+	if it.Snippet.Type == "tombstone" {
+		retract(sink, it.ID)
+		return true
+	}
+	// A userBannedEvent IS sent when it happens, including a ban made by
+	// another moderator or in Studio. YouTube clears a banned user's
+	// backlog on its side, as Hub.Ban already assumes, so drop theirs here.
+	if it.Snippet.Type == "userBannedEvent" {
+		if d := it.Snippet.UserBannedDetails; d != nil && d.BannedUserDetails.ChannelID != "" {
+			retractUser(sink, d.BannedUserDetails.ChannelID)
+		}
+		// Falls through: the event line is still delivered, so a ban placed
+		// by another moderator or in Studio leaves a visible record.
+	}
+	return false
+}
+
+// deliverMessage delivers the item's chat line when it has one at or after the
+// cutoff. It reports whether a line was delivered.
+func (y *YouTubeAdapter) deliverMessage(it ytChatItem, cutoff time.Time, sink Sink) bool {
+	m, ok := y.messageFrom(it)
+	if !ok {
+		return false
+	}
+	if !cutoff.IsZero() && m.At.Before(cutoff) {
+		return false
+	}
+	sink.Deliver(m)
+	return true
 }
 
 // handleListError decides what a failed poll means.
