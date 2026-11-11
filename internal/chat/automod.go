@@ -39,11 +39,11 @@ type nameLearner interface {
 	LearnProtectedName(name string)
 }
 
-// modelGate is the optional half of a Moderator that decides WHICH messages are
+// modelGater is the optional half of a Moderator that decides WHICH messages are
 // worth a paid model call (the hard-case scope). A separate interface, found by
 // type assertion, so a Moderator without it asks about every message as it
 // always did and no fake of Moderator changes.
-type modelGate interface {
+type modelGater interface {
 	WantsModel(p db.Platform, s automod.Subject, v automod.Verdict) bool
 }
 
@@ -209,7 +209,7 @@ func (h *Hub) checkAutomod(m Message) {
 		if o, ok := s.mod.(modelOutcomer); ok {
 			out := o.ModelOutcome(m.Platform, subj, v)
 			askModel, signal, declined = out.Ask, out.Signal, out.Declined()
-		} else if g, ok := s.mod.(modelGate); ok {
+		} else if g, ok := s.mod.(modelGater); ok {
 			askModel = g.WantsModel(m.Platform, subj, v)
 		}
 	}
