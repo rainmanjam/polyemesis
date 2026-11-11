@@ -64,7 +64,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: Reado
   );
   const past = history !== null && cells === history.now ? history.past : [];
   const undoAvailable = past.length > 0;
-  const lastWasClear = undoAvailable && past[past.length - 1].clear;
+  const lastWasClear = undoAvailable && past.at(-1)?.clear;
 
   /** Every change made here goes through this, so each one can be undone. */
   const commit = (next: MatrixCell[], clear = false) => {
@@ -74,7 +74,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: Reado
 
   const undo = () => {
     if (!undoAvailable) return;
-    const prev = past[past.length - 1].cells;
+    const prev = past.at(-1)!.cells;
     setHistory({ past: past.slice(0, -1), now: prev });
     onChange(prev);
   };
@@ -278,7 +278,7 @@ export function MixMatrix({ tracks, cells, onChange, muted = [], onMute }: Reado
                           // track the commentary was on while they read a grid
                           // whose whole job is deciding what each output hears.
                           label={
-                            `Track ${t.index + 1}${t.title ? ` (${t.title})` : ""}` +
+                            `Track ${t.index + 1}${t.title ? " (" + t.title + ")" : ""}` +
                             ` channel ${ch + 1} to ${out === 0 ? "left" : "right"}`
                           }
                         />
@@ -434,11 +434,15 @@ function MatrixQuickFills({
     const out: MatrixCell[] = [];
     for (const t of tracks) {
       if (t.channels === 1) {
-        out.push({ track: t.index, channel: 0, out: 0, gain: 1 });
-        out.push({ track: t.index, channel: 0, out: 1, gain: 1 });
+        out.push(
+          { track: t.index, channel: 0, out: 0, gain: 1 },
+          { track: t.index, channel: 0, out: 1, gain: 1 },
+        );
       } else {
-        out.push({ track: t.index, channel: 0, out: 0, gain: 1 });
-        out.push({ track: t.index, channel: 1, out: 1, gain: 1 });
+        out.push(
+          { track: t.index, channel: 0, out: 0, gain: 1 },
+          { track: t.index, channel: 1, out: 1, gain: 1 },
+        );
       }
     }
     onApply(out);

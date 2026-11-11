@@ -98,7 +98,7 @@ function XChatModerationForAccount({ account, label }: Readonly<{ account: strin
     }
   };
 
-  const idOk = /^[1-9][0-9]{0,18}$/.test(newId.trim());
+  const idOk = /^[1-9]\d{0,18}$/.test(newId.trim());
 
   return (
     <section
@@ -126,7 +126,7 @@ function XChatModerationForAccount({ account, label }: Readonly<{ account: strin
       <div className="flex flex-col gap-1">
         <p className="text-xs font-medium">{t("xmod.mutesTitle")}</p>
         {mutesError && <p className="text-sm text-warn">{t("xmod.loadFailed", { reason: mutesError })}</p>}
-        {!mutesError && mutes && mutes.length === 0 && (
+        {!mutesError && mutes?.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("xmod.mutesEmpty")}</p>
         )}
         {!mutesError && (
@@ -167,7 +167,7 @@ function XChatModerationForAccount({ account, label }: Readonly<{ account: strin
         <p className="text-xs font-medium">{t("xmod.modsTitle")}</p>
         <p className="text-xs text-muted-foreground">{t("xmod.modsAppliesAll")}</p>
         {modsError && <p className="text-sm text-warn">{t("xmod.loadFailed", { reason: modsError })}</p>}
-        {!modsError && mods && mods.length === 0 && (
+        {!modsError && mods?.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("xmod.modsEmpty")}</p>
         )}
         {!modsError && (

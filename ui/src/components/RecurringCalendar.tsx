@@ -110,7 +110,7 @@ export function RecurringCalendar() {
     <section className="rounded border border-border p-3" aria-label={t("wave3.recurring.calendarTitle")}>
       <h3 className="mb-2 text-sm font-medium">{t("wave3.recurring.calendarTitle")}</h3>
       {loadError ? <p role="alert" className="text-sm text-down">{loadError}</p> : null}
-      {rows && rows.length === 0 ? (
+      {rows?.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("wave3.recurring.calendarEmpty")}</p>
       ) : null}
       <ul className="grid gap-2">

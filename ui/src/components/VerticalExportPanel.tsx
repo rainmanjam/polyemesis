@@ -85,7 +85,7 @@ export function VerticalExportPanel({
   // canvas is not tainted; anything that fails falls back to the poster.
   const grabFrame = useCallback(() => {
     const v = videoRef.current;
-    if (!v || !v.videoWidth) {
+    if (!v?.videoWidth) {
       setFrame(poster);
       return;
     }

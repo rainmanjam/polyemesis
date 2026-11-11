@@ -142,7 +142,7 @@ function rulerStep(spanMs: number, widthPx: number): number {
   for (const step of RULER_STEPS_MS) {
     if (step >= target) return step;
   }
-  return RULER_STEPS_MS[RULER_STEPS_MS.length - 1];
+  return RULER_STEPS_MS.at(-1)!;
 }
 
 /** Ruler labels drop the milliseconds and the hour when there is not one. */

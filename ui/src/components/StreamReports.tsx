@@ -65,7 +65,7 @@ export function StreamReports() {
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {failed && <p className="text-sm text-muted-foreground">{t("aud.unavailable")}</p>}
-        {streams && streams.length === 0 && <EmptyState title={t("aud.noStreams")} className="py-4" />}
+        {streams?.length === 0 && <EmptyState title={t("aud.noStreams")} className="py-4" />}
         {streams && streams.length > 0 && (
           <ul className="flex flex-col gap-1">
             {streams.map((s) => (
@@ -92,7 +92,7 @@ export function StreamReports() {
             ))}
           </ul>
         )}
-        {report && open === report.stream.id && <Report report={report} />}
+        {open === report?.stream.id && report && <Report report={report} />}
       </CardContent>
     </Card>
   );

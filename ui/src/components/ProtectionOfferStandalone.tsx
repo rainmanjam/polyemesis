@@ -27,7 +27,7 @@ export function ProtectionOfferStandalone() {
   }, []);
 
   const prot = settings?.automod?.protection;
-  if (!settings?.automod || !prot || prot.state !== "") return null;
+  if (!settings?.automod || prot?.state !== "") return null;
   const automod = settings.automod;
 
   async function answer(a: ProtectionAnswer) {

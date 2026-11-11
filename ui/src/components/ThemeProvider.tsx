@@ -39,7 +39,7 @@ const ThemeContext = createContext<ThemeState>(DETACHED);
  *  a viewer never navigates out of /watch and the console never navigates into
  *  it without a reload (the same assumption App.tsx makes). */
 export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const [themed] = useState(() => isThemedPath(window.location.pathname, window.location.hash));
+  const [themed, _setThemed] = useState(() => isThemedPath(window.location.pathname, window.location.hash));
   const [choice, setChoiceState] = useState<ThemeChoice>(readStoredChoice);
   const [prefersLight, setPrefersLight] = useState(systemPrefersLight);
 

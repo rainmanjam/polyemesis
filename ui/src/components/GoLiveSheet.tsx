@@ -260,7 +260,7 @@ export function GoLiveSheet({
   useEffect(() => {
     if (phase !== "settling") return;
     const timer = setTimeout(
-      () => setRun((r) => (r && r.phase === "settling" ? { ...r, timedOut: true } : r)),
+      () => setRun((r) => (r?.phase === "settling" ? { ...r, timedOut: true } : r)),
       SETTLE_TIMEOUT_MS,
     );
     return () => clearTimeout(timer);

@@ -163,7 +163,7 @@ export function PublishClipDialog({ clipJobId, open, onOpenChange }: Readonly<Pr
 
   // A confirmation is for one form, once, for ten minutes: drop it the moment
   // the form changes or time runs out.
-  const confirmation = prepared && prepared.key === key ? prepared.value : null;
+  const confirmation = prepared?.key === key ? prepared.value : null;
   useEffect(() => {
     if (!confirmation) return;
     const ms = new Date(confirmation.expiresAt).getTime() - Date.now();

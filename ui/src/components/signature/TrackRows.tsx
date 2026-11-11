@@ -207,7 +207,10 @@ export function TrackRows({
   const queues = useRef(new Map<number, RowQueue>());
   const queueFor = (index: number): RowQueue => {
     let q = queues.current.get(index);
-    if (!q) queues.current.set(index, (q = { inFlight: false }));
+    if (!q) {
+      q = { inFlight: false };
+      queues.current.set(index, q);
+    }
     return q;
   };
   // Leaving the page does not drop a level the operator already set: a gain
@@ -276,7 +279,7 @@ export function TrackRows({
     const next = existing
       ? selection.map((s) => (s.track === index ? { ...s, ...patch } : s))
       : [...selection, { ...selFor(index), ...patch }];
-    onChange(next.sort((a, b) => a.track - b.track));
+    onChange(next.toSorted((a, b) => a.track - b.track));
   };
 
   return (

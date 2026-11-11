@@ -62,7 +62,7 @@ import type { ChatMessage } from "@/lib/types";
 /** The message ids X's mute call takes. X's own ids are digits; a line that
  *  arrived without one, or an echo that fell back to polyemesis's own, cannot
  *  be removed that way, so the item stays inert instead of failing on press. */
-const X_MUTE_MESSAGE_ID = /^[1-9][0-9]{0,18}$/;
+const X_MUTE_MESSAGE_ID = /^[1-9]\d{0,18}$/;
 
 export interface MenuAnchor {
   x: number;
