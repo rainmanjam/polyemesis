@@ -318,33 +318,50 @@ func checkFilterGraph(graph string) error {
 	g := strings.NewReplacer(`\`, "", `'`, "", `"`, "").Replace(graph)
 	for _, chain := range strings.Split(g, ";") {
 		for _, spec := range strings.Split(chain, ",") {
-			spec = strings.TrimSpace(spec)
-			// Leading input labels: [in][0:a:3]volume=...
-			for strings.HasPrefix(spec, "[") {
-				end := strings.IndexByte(spec, ']')
-				if end < 0 {
-					return fmt.Errorf("has an unterminated label in %q", spec)
-				}
-				spec = strings.TrimSpace(spec[end+1:])
-			}
-			if spec == "" {
-				continue
-			}
-			nameEnd := strings.IndexAny(spec, "=@[ \t")
-			name, args := spec, ""
-			if nameEnd >= 0 {
-				name, args = spec[:nameEnd], spec[nameEnd:]
-			}
-			if !allowedFilters[strings.ToLower(name)] {
-				return fmt.Errorf("uses %q, which is not on expert mode's list of filters known "+
-					"not to open files", name)
-			}
-			if fileValuedFilterOption.MatchString(args) {
-				return fmt.Errorf("loads a value of %s from a file (the /option= form)", name)
+			if err := checkFilterSpec(strings.TrimSpace(spec)); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+// checkFilterSpec checks one filter in a graph: that its name is on the allowed
+// list and that none of its options loads a file.
+func checkFilterSpec(spec string) error {
+	spec, err := stripInputLabels(spec)
+	if err != nil {
+		return err
+	}
+	if spec == "" {
+		return nil
+	}
+	nameEnd := strings.IndexAny(spec, "=@[ \t")
+	name, args := spec, ""
+	if nameEnd >= 0 {
+		name, args = spec[:nameEnd], spec[nameEnd:]
+	}
+	if !allowedFilters[strings.ToLower(name)] {
+		return fmt.Errorf("uses %q, which is not on expert mode's list of filters known "+
+			"not to open files", name)
+	}
+	if fileValuedFilterOption.MatchString(args) {
+		return fmt.Errorf("loads a value of %s from a file (the /option= form)", name)
+	}
+	return nil
+}
+
+// stripInputLabels removes the leading input labels from a filter spec:
+// [in][0:a:3]volume=... becomes volume=...
+func stripInputLabels(spec string) (string, error) {
+	for strings.HasPrefix(spec, "[") {
+		end := strings.IndexByte(spec, ']')
+		if end < 0 {
+			return "", fmt.Errorf("has an unterminated label in %q", spec)
+		}
+		spec = strings.TrimSpace(spec[end+1:])
+	}
+	return spec, nil
 }
 
 // codecParamOpensFile returns the first key in an x264/x265-style
