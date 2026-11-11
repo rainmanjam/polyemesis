@@ -2124,14 +2124,30 @@ func (p *Process) Status() Status {
 		r := *p.reason
 		st.Reason = &r
 	}
-	if len(p.failures) > 0 {
-		st.Failures = make(map[failreason.Cause]int, len(p.failures))
-		for c, n := range p.failures {
-			st.Failures[c] = n
-		}
-	}
+	st.Failures = p.failuresCopy()
 	st.RecentRestarts = p.recentRestartsLocked(time.Now())
 	st.RestartCause = p.restartCause
+	p.fillRunningLocked(&st)
+	p.fillRetryLocked(&st)
+	return st
+}
+
+// failuresCopy copies the per-cause failure counts, or returns nil when there
+// are none. Caller holds p.mu.
+func (p *Process) failuresCopy() map[failreason.Cause]int {
+	if len(p.failures) == 0 {
+		return nil
+	}
+	out := make(map[failreason.Cause]int, len(p.failures))
+	for c, n := range p.failures {
+		out[c] = n
+	}
+	return out
+}
+
+// fillRunningLocked fills the rate, drop, uptime and stall fields of a
+// snapshot for a running process. Caller holds p.mu.
+func (p *Process) fillRunningLocked(st *Status) {
 	if p.state == StateRunning {
 		st.Rate, st.RateKnown = p.rateLocked(time.Now())
 		st.DroppedRecent, st.FramesRecent, st.DropsKnown = p.dropsLocked(time.Now())
@@ -2167,12 +2183,16 @@ func (p *Process) Status() Status {
 			st.LiveForSec = time.Since(p.liveSince).Seconds()
 		}
 	}
+}
+
+// fillRetryLocked fills the retry countdown of a snapshot for a process that is
+// reconnecting. Caller holds p.mu.
+func (p *Process) fillRetryLocked(st *Status) {
 	if p.state == StateReconnecting && !p.nextRetry.IsZero() {
 		if d := time.Until(p.nextRetry).Seconds(); d > 0 {
 			st.NextRetryIn = d
 		}
 	}
-	return st
 }
 
 // Logs returns the buffered stderr tail, with every credential masked.
