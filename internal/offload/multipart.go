@@ -29,63 +29,12 @@ const maxParts = 10000
 // longer match the file is aborted and started over: its parts are of other
 // bytes.
 func (s *Service) putMultipart(ctx context.Context, t db.StorageTarget, c Client, f *os.File, it db.OffloadItem, n int64, sh string) (string, error) {
-	mp, err := s.store.GetOffloadMultipart(t.ID, it.RelPath)
-	if err == nil && (mp.Bytes != n || mp.SHA256 != sh || mp.Key != it.Key) {
-		_ = c.AbortMultipart(ctx, mp.Key, mp.UploadID)
-		_ = s.store.DeleteOffloadMultipart(t.ID, it.RelPath)
-		err = db.ErrNotFound
-	}
-	if errors.Is(err, db.ErrNotFound) {
-		partSize := s.partSize
-		if floor := (n + maxParts - 1) / maxParts; floor > partSize {
-			partSize = floor
-		}
-		id, cerr := c.CreateMultipart(ctx, it.Key, map[string]string{"sha256": sh})
-		if cerr != nil {
-			return "", cerr
-		}
-		mp = db.OffloadMultipart{TargetID: t.ID, RelPath: it.RelPath, Key: it.Key, UploadID: id,
-			PartSize: partSize, Bytes: n, SHA256: sh}
-		// Persisted before the first part, so a crash from here on leaves an
-		// upload the startup sweep knows about and can resume or abort.
-		if perr := s.store.PutOffloadMultipartIfBinding(mp, t.BindingGen); perr != nil {
-			_ = c.AbortMultipart(ctx, it.Key, id)
-			return "", perr
-		}
-	} else if err != nil {
+	mp, err := s.openMultipart(ctx, t, c, it, n, sh)
+	if err != nil {
 		return "", err
 	}
-
-	done := map[int]bool{}
-	for _, p := range mp.Parts {
-		done[p.Number] = true
-	}
-	count := int((n + mp.PartSize - 1) / mp.PartSize)
-	for i := 1; i <= count; i++ {
-		if done[i] {
-			continue
-		}
-		off := int64(i-1) * mp.PartSize
-		size := min(mp.PartSize, n-off)
-		sec := io.NewSectionReader(f, off, size)
-		psh, pmb, err := digestOf(sec)
-		if err != nil {
-			return "", err
-		}
-		etag, err := s.uploadPart(ctx, c, mp, i, sec, size, psh, pmb)
-		if err != nil {
-			return "", err
-		}
-		mp.Parts = append(mp.Parts, db.OffloadPart{Number: i, ETag: etag, MD5: pmb, Size: size})
-		// Conditioned on the binding generation like the claim: a target moved
-		// while parts were going up gets no progress row back, and the upload
-		// at the old address is abandoned there.
-		if err := s.store.PutOffloadMultipartIfBinding(mp, t.BindingGen); err != nil {
-			if errors.Is(err, db.ErrBindingChanged) {
-				_ = c.AbortMultipart(context.WithoutCancel(ctx), mp.Key, mp.UploadID)
-			}
-			return "", err
-		}
+	if err := s.sendMissingParts(ctx, t, c, f, n, &mp); err != nil {
+		return "", err
 	}
 	sort.Slice(mp.Parts, func(a, b int) bool { return mp.Parts[a].Number < mp.Parts[b].Number })
 	parts := make([]objstore.Part, len(mp.Parts))
@@ -103,6 +52,75 @@ func (s *Service) putMultipart(ctx context.Context, t db.StorageTarget, c Client
 	}
 	_ = s.store.DeleteOffloadMultipart(t.ID, it.RelPath)
 	return objstore.CompositeETag(parts)
+}
+
+// openMultipart resumes the recorded upload for this object, or starts a new
+// one, and persists it before any part is sent.
+func (s *Service) openMultipart(ctx context.Context, t db.StorageTarget, c Client, it db.OffloadItem, n int64, sh string) (db.OffloadMultipart, error) {
+	mp, err := s.store.GetOffloadMultipart(t.ID, it.RelPath)
+	if err == nil && (mp.Bytes != n || mp.SHA256 != sh || mp.Key != it.Key) {
+		_ = c.AbortMultipart(ctx, mp.Key, mp.UploadID)
+		_ = s.store.DeleteOffloadMultipart(t.ID, it.RelPath)
+		err = db.ErrNotFound
+	}
+	if errors.Is(err, db.ErrNotFound) {
+		partSize := s.partSize
+		if floor := (n + maxParts - 1) / maxParts; floor > partSize {
+			partSize = floor
+		}
+		id, cerr := c.CreateMultipart(ctx, it.Key, map[string]string{"sha256": sh})
+		if cerr != nil {
+			return db.OffloadMultipart{}, cerr
+		}
+		mp = db.OffloadMultipart{TargetID: t.ID, RelPath: it.RelPath, Key: it.Key, UploadID: id,
+			PartSize: partSize, Bytes: n, SHA256: sh}
+		// Persisted before the first part, so a crash from here on leaves an
+		// upload the startup sweep knows about and can resume or abort.
+		if perr := s.store.PutOffloadMultipartIfBinding(mp, t.BindingGen); perr != nil {
+			_ = c.AbortMultipart(ctx, it.Key, id)
+			return db.OffloadMultipart{}, perr
+		}
+	} else if err != nil {
+		return mp, err
+	}
+	return mp, nil
+}
+
+// sendMissingParts sends every part of the upload that has not been recorded
+// yet, persisting progress after each one.
+func (s *Service) sendMissingParts(ctx context.Context, t db.StorageTarget, c Client, f *os.File, n int64, mp *db.OffloadMultipart) error {
+	done := map[int]bool{}
+	for _, p := range mp.Parts {
+		done[p.Number] = true
+	}
+	count := int((n + mp.PartSize - 1) / mp.PartSize)
+	for i := 1; i <= count; i++ {
+		if done[i] {
+			continue
+		}
+		off := int64(i-1) * mp.PartSize
+		size := min(mp.PartSize, n-off)
+		sec := io.NewSectionReader(f, off, size)
+		psh, pmb, err := digestOf(sec)
+		if err != nil {
+			return err
+		}
+		etag, err := s.uploadPart(ctx, c, *mp, i, sec, size, psh, pmb)
+		if err != nil {
+			return err
+		}
+		mp.Parts = append(mp.Parts, db.OffloadPart{Number: i, ETag: etag, MD5: pmb, Size: size})
+		// Conditioned on the binding generation like the claim: a target moved
+		// while parts were going up gets no progress row back, and the upload
+		// at the old address is abandoned there.
+		if err := s.store.PutOffloadMultipartIfBinding(*mp, t.BindingGen); err != nil {
+			if errors.Is(err, db.ErrBindingChanged) {
+				_ = c.AbortMultipart(context.WithoutCancel(ctx), mp.Key, mp.UploadID)
+			}
+			return err
+		}
+	}
+	return nil
 }
 
 // uploadPart sends one part, retrying a retryable failure with backoff.
@@ -219,6 +237,38 @@ func (s *Service) AbortTarget(ctx context.Context, t db.StorageTarget) []db.Offl
 //   - a multipart upload that will not be resumed -- its item stuck, verified
 //     or gone, or its file gone -- is aborted on the service.
 //
+// keepMultipart reports whether a recorded upload should survive recovery: its
+// item is still pending, failed or uploading on the same target, and its file
+// is still on disk.
+func (s *Service) keepMultipart(mp db.OffloadMultipart, dir string) bool {
+	keep := false
+	if its, err := s.store.OffloadItemsFor(mp.RelPath); err == nil {
+		for _, it := range its {
+			if it.TargetID == mp.TargetID &&
+				(it.State == db.OffloadPending || it.State == db.OffloadFailed || it.State == db.OffloadUploading) {
+				keep = true
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(mp.RelPath))); err != nil {
+		keep = false
+	}
+	return keep
+}
+
+// clientFor returns the client for a target, building and caching it on first
+// use. It is nil when the target is gone or unusable.
+func (s *Service) clientFor(clients map[int64]Client, targetID int64) Client {
+	c, ok := clients[targetID]
+	if !ok {
+		if t, err := s.store.GetStorageTarget(s.box, targetID); err == nil {
+			c, _ = s.newClient(t)
+		}
+		clients[targetID] = c
+	}
+	return c
+}
+
 // A multipart upload whose item is still pending or failed is kept: the next
 // pass resumes it from the parts already sent.
 func (s *Service) Recover(ctx context.Context) {
@@ -234,28 +284,10 @@ func (s *Service) Recover(ctx context.Context) {
 	}
 	clients := map[int64]Client{}
 	for _, mp := range rows {
-		keep := false
-		if its, err := s.store.OffloadItemsFor(mp.RelPath); err == nil {
-			for _, it := range its {
-				if it.TargetID == mp.TargetID &&
-					(it.State == db.OffloadPending || it.State == db.OffloadFailed || it.State == db.OffloadUploading) {
-					keep = true
-				}
-			}
-		}
-		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(mp.RelPath))); err != nil {
-			keep = false
-		}
-		if keep {
+		if s.keepMultipart(mp, dir) {
 			continue
 		}
-		c, ok := clients[mp.TargetID]
-		if !ok {
-			if t, err := s.store.GetStorageTarget(s.box, mp.TargetID); err == nil {
-				c, _ = s.newClient(t)
-			}
-			clients[mp.TargetID] = c
-		}
+		c := s.clientFor(clients, mp.TargetID)
 		if c == nil {
 			// The target is gone or unusable: nothing can abort it from here,
 			// which is what the bucket lifecycle rule in STORAGE.md is for.
