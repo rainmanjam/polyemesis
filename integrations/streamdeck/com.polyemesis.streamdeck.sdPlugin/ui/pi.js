@@ -19,7 +19,7 @@
 
   // The actions whose inspector picks a destination from a list and one of its tracks.
   const TRACK_ACTIONS = ["com.polyemesis.streamdeck.track-mute", "com.polyemesis.streamdeck.track-gain"];
-  const isTrackAction = () => TRACK_ACTIONS.indexOf(actionType) >= 0;
+  const isTrackAction = () => TRACK_ACTIONS.includes(actionType);
   const isPollAction = () => actionType === "com.polyemesis.streamdeck.poll";
   const isDumpAction = () => actionType === "com.polyemesis.streamdeck.delay-dump";
   const isStopOneAction = () => actionType === "com.polyemesis.streamdeck.stop-destination";
@@ -38,18 +38,18 @@
 
   function loadStrings(sdkLanguage) {
     const all = window.POLYEMESIS_STRINGS || {};
-    strings = Object.assign({}, all.en || {}, all[localeFrom(sdkLanguage)] || {});
+    strings = { ...(all.en || {}), ...(all[localeFrom(sdkLanguage)] || {}) };
     applyStrings();
   }
   const fields = ["url", "token", "caPem"];
 
   function send(message) {
-    if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+    if (socket?.readyState === 1) socket.send(JSON.stringify(message));
   }
 
   function applyStrings() {
     document.querySelectorAll("[data-i18n]").forEach((el) => {
-      const value = strings[el.getAttribute("data-i18n")];
+      const value = strings[el.dataset.i18n];
       if (value !== undefined) el.textContent = value;
     });
   }
@@ -69,35 +69,48 @@
     result.textContent = strings["streamdeck.pi.saved"] || "";
   }
 
-  function saveAction() {
-    const payload = {};
+  // The programme's source and destination. The track control's destination is the picked one, not the field.
+  function addSourceAndDestination(payload) {
     const source = Number($("sourceId").value);
     if (Number.isSafeInteger(source) && source > 0) payload.sourceId = source;
     const dest = Number(isTrackAction() ? savedDestinationId : $("destinationId").value);
     if (Number.isSafeInteger(dest) && dest > 0) payload.destinationId = dest;
+  }
+
+  function addTrack(payload) {
     // Number("") is 0, which is a real track: an unchosen track saves nothing.
     const track = savedTrack === "" ? Number.NaN : Number(savedTrack);
     if (isTrackAction() && Number.isSafeInteger(track) && track >= 0) payload.track = track;
+  }
+
+  function addDumpSeconds(payload) {
+    // Empty is "since the last dump point". Anything typed is saved as typed text, so the key can refuse
+    // a value that is not a whole 1 to 900 instead of reading it as empty, which would dump more.
+    const seconds = $("dumpSeconds").value.trim();
+    if (seconds !== "") payload.dumpSeconds = seconds;
+  }
+
+  function addPoll(payload) {
+    // The poll key's poll: what it posts into every live chat when pressed. The plugin drops blank
+    // lines and the server checks the rest, so nothing is second-guessed here.
+    const question = $("pollQuestion").value.trim();
+    if (question) payload.pollQuestion = question;
+    const options = $("pollOptions").value.split(/\r?\n/).map((o) => o.trim()).filter((o) => o !== "");
+    if (options.length > 0) payload.pollOptions = options;
+    const duration = Number($("pollDuration").value);
+    if (Number.isSafeInteger(duration) && duration > 0) payload.pollDuration = duration;
+  }
+
+  function saveAction() {
+    const payload = {};
+    addSourceAndDestination(payload);
+    addTrack(payload);
     if ($("presetId").value) payload.presetId = $("presetId").value;
     // Saved only when ticked: an unticked box is the plain stop, and the plugin reads absent as that.
     if (isStopOneAction() && $("cutTail").checked) payload.cutTail = true;
-    if (isDumpAction()) {
-      // Empty is "since the last dump point". Anything typed is saved as typed text, so the key can refuse
-      // a value that is not a whole 1 to 900 instead of reading it as empty, which would dump more.
-      const seconds = $("dumpSeconds").value.trim();
-      if (seconds !== "") payload.dumpSeconds = seconds;
-    }
+    if (isDumpAction()) addDumpSeconds(payload);
     savedPresetId = $("presetId").value;
-    if (isPollAction()) {
-      // The poll key's poll: what it posts into every live chat when pressed. The plugin drops blank
-      // lines and the server checks the rest, so nothing is second-guessed here.
-      const question = $("pollQuestion").value.trim();
-      if (question) payload.pollQuestion = question;
-      const options = $("pollOptions").value.split(/\r?\n/).map((o) => o.trim()).filter((o) => o !== "");
-      if (options.length > 0) payload.pollOptions = options;
-      const duration = Number($("pollDuration").value);
-      if (Number.isSafeInteger(duration) && duration > 0) payload.pollDuration = duration;
-    }
+    if (isPollAction()) addPoll(payload);
     // The viewers key's platform; empty is the total, and saves nothing.
     if (isViewersAction() && $("viewersPlatform").value) payload.viewersPlatform = $("viewersPlatform").value;
     send({ event: "setSettings", context: actionContext, payload });
@@ -152,13 +165,13 @@
   }
 
   function renderDestinations() {
-    const items = destinationList && destinationList.map((d) => ({ value: String(d.id), label: d.name }));
+    const items = destinationList?.map((d) => ({ value: String(d.id), label: d.name }));
     fillPicker($("trackDestination"), "streamdeck.pi.destinationChoose", items, savedDestinationId);
     renderTracks();
   }
 
   function renderTracks() {
-    const dest = destinationList && destinationList.find((d) => String(d.id) === savedDestinationId);
+    const dest = destinationList?.find((d) => String(d.id) === savedDestinationId);
     const items = dest ? dest.tracks.map((tr) => ({ value: String(tr.track), label: tr.name })) : destinationList && [];
     fillPicker($("track"), "streamdeck.pi.trackChoose", items, savedTrack);
   }
@@ -199,12 +212,6 @@
   // A saved preset the install no longer lists stays visible, marked, instead of vanishing.
   function renderPresets() {
     const select = $("presetId");
-    const option = (value, label) => {
-      const o = document.createElement("option");
-      o.value = value;
-      o.textContent = label;
-      return o;
-    };
     select.replaceChildren(option("", strings["streamdeck.pi.presetChoose"] || ""));
     const list = presetList || [];
     list.forEach((p) => select.appendChild(option(p.id, p.name)));
@@ -309,7 +316,7 @@
   window.connectElgatoStreamDeckSocket = function (port, uuid, registerEvent, info, actionInfo) {
     const action = JSON.parse(actionInfo);
     const registration = typeof info === "string" ? JSON.parse(info) : info || {};
-    loadStrings(registration.application && registration.application.language);
+    loadStrings(registration.application?.language);
     pluginUUID = uuid;
     actionType = action.action;
     actionContext = action.context;
