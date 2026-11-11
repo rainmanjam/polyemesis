@@ -202,12 +202,7 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 			// the constant, the other compares the constant with its opening
 			// value. Both are arithmetic ABOUT the loop rather than observation
 			// OF it, and both passed throughout.
-			if idleFor < ytBroadcastPollMax {
-				idleFor *= 2
-				if idleFor > ytBroadcastPollMax {
-					idleFor = ytBroadcastPollMax
-				}
-			}
+			idleFor = nextBroadcastIdle(idleFor)
 			continue
 		}
 		idleFor = ytBroadcastPoll
@@ -508,6 +503,18 @@ func (y *YouTubeAdapter) deliverMessage(it ytChatItem, cutoff time.Time, sink Si
 	}
 	sink.Deliver(m)
 	return true
+}
+
+// nextBroadcastIdle doubles the wait while no broadcast is live, clamped to
+// ytBroadcastPollMax after doubling (see Run for why the clamp is not a guard).
+func nextBroadcastIdle(idleFor time.Duration) time.Duration {
+	if idleFor < ytBroadcastPollMax {
+		idleFor *= 2
+		if idleFor > ytBroadcastPollMax {
+			idleFor = ytBroadcastPollMax
+		}
+	}
+	return idleFor
 }
 
 // pollInterval takes the interval YouTube asked for, when it asked for one.
