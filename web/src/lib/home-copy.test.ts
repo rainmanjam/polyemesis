@@ -13,8 +13,8 @@ import { MUSIC_TRACK, TRACK_LAYOUT } from "../data/tracks.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const pages = (name: string) => readFileSync(join(here, "..", "pages", name), "utf8");
 
-describe("the home page's track layout (S7)", () => {
-  const home = pages("index.astro");
+describe("the features page's track layout (S7)", () => {
+  const home = pages("features.astro");
 
   /* The Proof capture numbers its tracks differently from the OBS layout in
    * the problem section. The fix is one layout per place it is used, with the
@@ -172,8 +172,8 @@ describe("the home hero (2026-11 redesign)", () => {
  * file records as UNSUPPORTED ("personal profiles only", "excludes Facebook
  * Pages") must not be published, and the word "watermark" is the page's own
  * word for Restream's branding, not the evidence file's. */
-describe("the home plan strip (S3)", () => {
-  const source = pages("index.astro");
+describe("the features plan strip (S3)", () => {
+  const source = pages("features.astro");
   // Only what renders: the explanatory comments legitimately quote the words
   // the page must not print.
   const home = source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -251,6 +251,18 @@ describe("the features page rooms (S6)", () => {
   });
 });
 
+describe("the who-it-is-for link sentences keep their spaces", () => {
+  const home = pages("index.astro");
+  it.each(["Hosted services are good at that.", "(experimental; Twitch requires a GPU):"])(
+    "%s is followed by a space",
+    (lead) => {
+      const at = home.indexOf(lead);
+      expect(at, lead).toBeGreaterThan(-1);
+      expect(home.slice(at + lead.length, at + lead.length + 5)).toBe('{" "}');
+    },
+  );
+});
+
 /* THE DASHBOARD'S INGEST UPTIME. #924 took "uptime" out of the features copy
  * because it read "—" on the one-port SRT/RTMP ingest, which has no ingest
  * process to time. The programme's relay hub now times the stream from when it
@@ -265,13 +277,14 @@ describe("the features page's dashboard copy", () => {
   });
 });
 
-/* THE HOME PAGE'S ORDER (2026-11 design review). A visitor should meet the
- * problem and try the patchbay before the hosted-pricing comparison, so the
- * price table answers "what does this cost" for someone who already wants it. */
-describe("the home page order", () => {
-  const home = pages("index.astro");
+/* THE FEATURES PAGE'S ORDER (2026-11 design review, moved from the home page
+ * in the redesign). A visitor should meet the problem and try the patchbay
+ * before the hosted-pricing comparison, so the price table answers "what does
+ * this cost" for someone who already wants it. */
+describe("the features page order", () => {
+  const features = pages("features.astro");
   const at = (needle: string) => {
-    const i = home.indexOf(needle);
+    const i = features.indexOf(needle);
     expect(i, needle).toBeGreaterThan(-1);
     return i;
   };
@@ -285,11 +298,53 @@ describe("the home page order", () => {
     expect(problem).toBeLessThan(patchbay);
     expect(patchbay).toBeLessThan(prices);
   });
+});
+
+describe("the home page order (2026-11 redesign)", () => {
+  const home = pages("index.astro");
+
+  it("runs the five beats, then who it is for, then explore", () => {
+    const order = ["<Hero", "<Problem", "<HowItWorks", "<Recovery", "<Run", "Is this for you?", 'aria-label="Explore"'].map((n) => home.indexOf(n));
+    expect(order.every((i) => i > -1)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
 
   it("phrases who-it-is-for as a choice, in sentence case", () => {
     expect(home).toMatch(/<h3[^>]*>Choose polyemesis if<\/h3>/);
     expect(home).toMatch(/<h3[^>]*>Choose a hosted service if<\/h3>/);
     expect(home).not.toMatch(/>\s*Not built for\s*</);
+  });
+
+  it("links the Twitch VOD track page and the trade-offs page", () => {
+    expect(home).toMatch(/href="\/twitch-vod-track"/);
+    expect(home).toMatch(/href="\/free-restream-service"/);
+  });
+
+  it("counts the documents rather than typing a number", () => {
+    expect(home).toMatch(/All \{PUBLISHED\.length\} documents/);
+  });
+});
+
+describe("nothing that left the home page left the site", () => {
+  const features = pages("features.astro");
+  it.each([
+    "<SpecStrip />",
+    "You send four tracks. Every platform will take one stereo pair.",
+    "<MixMatrix />",
+    "Loudness measured per destination, after routing, from one ingest.",
+    "<LoudnessBars />",
+    "Track layout in this capture",
+    "The rest of it is a broadcast server.",
+    "Decisions you can rely on.",
+    "Hosted restreamers charge by destination. This one charges for a server.",
+    "Checked 16 September 2026",
+  ])("features.astro carries %s", (s) => expect(features).toContain(s));
+
+  it("the home page carries none of them", () => {
+    const home = pages("index.astro");
+    for (const s of ["<MixMatrix />", "<LoudnessBars />", "<SpecStrip />", "The rest of it is a broadcast server."]) {
+      expect(home).not.toContain(s);
+    }
   });
 });
 
