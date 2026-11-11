@@ -151,29 +151,49 @@ func blockReason(j jobs.Job, snap jobs.Snapshot, paused bool, slotsFree bool, no
 	// it: the governor parks a blocked job a few seconds ahead and renews the
 	// parking every tick, so "available in 24s" is the symptom and "an ingest
 	// is live" is the cause.
-	if !snap.At.IsZero() && snap.Enabled {
-		for _, v := range snap.Verdicts {
-			if v.Kind != j.Kind || v.Start {
-				continue
-			}
-			return true, decorateReason(v, snap.Gates)
-		}
+	if reason, ok := kindVerdictReason(j, snap); ok {
+		return true, reason
 	}
 
-	if j.AvailableAt.After(now) {
-		wait := j.AvailableAt.Sub(now).Round(time.Second)
-		// Attempts counts STARTS, so a job that has started before and is
-		// waiting is waiting on retry backoff, not on the policy.
-		if j.Attempts > 0 && j.State == jobs.StateQueued {
-			return true, fmt.Sprintf("retrying in %s after %s", wait, attemptPhrase(j))
-		}
-		return true, "held back for another " + wait.String()
+	if reason, ok := availableAtReason(j, now); ok {
+		return true, reason
 	}
 
 	if !slotsFree {
 		return true, "waiting for a free slot"
 	}
 	return false, ""
+}
+
+// kindVerdictReason returns the governor's reason when it has a blocking
+// verdict against the job's kind, and false otherwise.
+func kindVerdictReason(j jobs.Job, snap jobs.Snapshot) (string, bool) {
+	if snap.At.IsZero() || !snap.Enabled {
+		return "", false
+	}
+	for _, v := range snap.Verdicts {
+		if v.Kind != j.Kind || v.Start {
+			continue
+		}
+		return decorateReason(v, snap.Gates), true
+	}
+	return "", false
+}
+
+// availableAtReason explains a job that is held until a later time: a retry
+// backoff when it has started before, otherwise the policy's hold. It returns
+// false when the job is not waiting on its timestamp.
+func availableAtReason(j jobs.Job, now time.Time) (string, bool) {
+	if !j.AvailableAt.After(now) {
+		return "", false
+	}
+	wait := j.AvailableAt.Sub(now).Round(time.Second)
+	// Attempts counts STARTS, so a job that has started before and is
+	// waiting is waiting on retry backoff, not on the policy.
+	if j.Attempts > 0 && j.State == jobs.StateQueued {
+		return fmt.Sprintf("retrying in %s after %s", wait, attemptPhrase(j)), true
+	}
+	return "held back for another " + wait.String(), true
 }
 
 // decorateReason puts the measurement beside the verdict. "host cpu is above
