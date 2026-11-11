@@ -176,120 +176,147 @@ func rumbleCents(cents int) *activity.Amount {
 // observe turns one successful poll into events. live is nil when nothing is
 // on air. It returns the events to send; the caller sends them.
 func (r *RumbleAdapter) observeActivity(st *rumbleActivityState, l rumbleActivityLists, live *rumbleLivestream) []activity.Event {
-	var out []activity.Event
-	var baseline bool
-	counts := map[string]int{}
-	// take counts a copy of an identity within THIS poll. It returns the
-	// event's Source.ID and whether it is new. A second identical entry gets a
-	// distinct id (":2"): the hub dedupes on Source.ID, so without it the
-	// second purchase would be dropped there although it is a real event.
-	take := func(kind, id string) (string, bool) {
-		key := kind + "\x00" + id
-		counts[key]++
-		n := counts[key]
-		fresh := st.fresh(key, n) && !baseline
-		if n > 1 {
-			id += ":" + itoa(n)
-		}
-		return id, fresh
-	}
-	note := func(bad int) { r.activityIgnored.Add(int64(bad)) }
+	o := &rumbleActivityObserver{r: r, st: st, counts: map[string]int{}}
 	followers, fOK, fBad := decodeRumbleList[rumbleFollower](l.followers)
 	subscribers, sOK, sBad := decodeRumbleList[rumbleSubscriber](l.subscribers)
 	gifted, gOK, gBad := decodeRumbleList[rumbleGiftedSub](l.gifted)
-	note(fBad + sBad + gBad)
-	emit := func(ev activity.Event, ok bool) {
-		if ok {
-			ev.Platform = string(db.PlatformRumble)
-			ev.Account = r.cfg.AccountRef
-			out = append(out, ev)
-		}
-	}
+	r.activityIgnored.Add(int64(fBad + sBad + gBad))
 
 	if fOK {
-		baseline = !st.seeded["follow"]
+		o.baseline = !st.seeded["follow"]
 		st.seeded["follow"] = true
-		for _, f := range followers {
-			name := strings.TrimSpace(f.Username)
-			if name == "" {
-				r.activityIgnored.Add(1)
-				continue
-			}
-			id := rumbleActivityID("follow", name, f.FollowedOn)
-			sid, fresh := take("follow", id)
-			emit(activity.Event{
-				Kind: activity.KindFollow, At: r.activityTime(f.FollowedOn),
-				Actor:  &activity.Actor{ID: name, Name: name},
-				Source: activity.Source{Type: "recent_followers", ID: sid},
-			}, fresh)
-		}
+		o.observeFollows(followers)
 	}
 	if sOK {
-		baseline = !st.seeded["subscribe"]
+		o.baseline = !st.seeded["subscribe"]
 		st.seeded["subscribe"] = true
-		for _, s := range subscribers {
-			name := strings.TrimSpace(firstNonEmpty(s.Username, s.User))
-			if name == "" || s.AmountCents < 0 {
-				r.activityIgnored.Add(1)
-				continue
-			}
-			id := rumbleActivityID("subscribe", name, s.SubscribedOn, itoa(s.AmountCents))
-			sid, fresh := take("subscribe", id)
-			ev := activity.Event{
-				Kind: activity.KindSubscribe, At: r.activityTime(s.SubscribedOn),
-				Actor: &activity.Actor{ID: name, Name: name}, Product: "paid_sub",
-				Source: activity.Source{Type: "recent_subscribers", ID: sid},
-			}
-			if s.AmountCents > 0 {
-				ev.Amount = rumbleCents(s.AmountCents)
-			}
-			emit(ev, fresh)
-		}
+		o.observeSubscribes(subscribers)
 	}
 	if gOK {
-		baseline = !st.seeded["gift"]
+		o.baseline = !st.seeded["gift"]
 		st.seeded["gift"] = true
-		for _, g := range gifted {
-			name := strings.TrimSpace(g.PurchasedBy)
-			if name == "" || g.TotalGifts < 1 {
-				r.activityIgnored.Add(1)
-				continue
-			}
-			// remaining_gifts is left out of the identity on purpose: it falls
-			// as the gifts are claimed, which would re-emit the same purchase.
-			id := rumbleActivityID("gift", name, g.GiftType, anyString(g.VideoID), itoa(g.TotalGifts))
-			sid, fresh := take("gift", id)
-			emit(activity.Event{
-				Kind: activity.KindGift, Actor: &activity.Actor{ID: name, Name: name},
-				Count: g.TotalGifts, Product: "paid_sub",
-				Source: activity.Source{Type: "recent_gifted_subs", ID: sid},
-			}, fresh)
-		}
+		o.observeGifts(gifted)
 	}
 	if live != nil {
-		baseline = !st.rantsSeeded
-		for _, e := range live.Chat.RecentRants {
-			name := strings.TrimSpace(e.Username)
-			if e.AmountCents == 0 {
-				continue // an ordinary message in the rant list
-			}
-			if name == "" || e.AmountCents < 0 {
-				r.activityIgnored.Add(1)
-				continue
-			}
-			id := rumbleActivityID("tip", name, e.CreatedOn, itoa(e.AmountCents), e.Text)
-			sid, fresh := take("tip", id)
-			emit(activity.Event{
-				Kind: activity.KindTip, At: r.activityTime(e.CreatedOn),
-				Actor: &activity.Actor{ID: name, Name: name}, Amount: rumbleCents(e.AmountCents),
-				Message: e.Text, // viewer text: gated by the overlay, never bypassed
-				Source:  activity.Source{Type: "rant", ID: sid},
-			}, fresh)
-		}
-		st.rantsSeeded = true
+		o.observeRants(live)
 	}
 	r.noteActivityBlocks(fOK, sOK, gOK, live != nil)
-	return out
+	return o.out
+}
+
+// rumbleActivityObserver gathers the activity events of one poll. baseline marks
+// a poll that only seeds a list, so nothing it finds is news.
+type rumbleActivityObserver struct {
+	r        *RumbleAdapter
+	st       *rumbleActivityState
+	counts   map[string]int
+	baseline bool
+	out      []activity.Event
+}
+
+// take counts a copy of an identity within THIS poll. It returns the
+// event's Source.ID and whether it is new. A second identical entry gets a
+// distinct id (":2"): the hub dedupes on Source.ID, so without it the
+// second purchase would be dropped there although it is a real event.
+func (o *rumbleActivityObserver) take(kind, id string) (string, bool) {
+	key := kind + "\x00" + id
+	o.counts[key]++
+	n := o.counts[key]
+	fresh := o.st.fresh(key, n) && !o.baseline
+	if n > 1 {
+		id += ":" + itoa(n)
+	}
+	return id, fresh
+}
+
+func (o *rumbleActivityObserver) emit(ev activity.Event, ok bool) {
+	if ok {
+		ev.Platform = string(db.PlatformRumble)
+		ev.Account = o.r.cfg.AccountRef
+		o.out = append(o.out, ev)
+	}
+}
+
+func (o *rumbleActivityObserver) observeFollows(followers []rumbleFollower) {
+	for _, f := range followers {
+		name := strings.TrimSpace(f.Username)
+		if name == "" {
+			o.r.activityIgnored.Add(1)
+			continue
+		}
+		id := rumbleActivityID("follow", name, f.FollowedOn)
+		sid, fresh := o.take("follow", id)
+		o.emit(activity.Event{
+			Kind: activity.KindFollow, At: o.r.activityTime(f.FollowedOn),
+			Actor:  &activity.Actor{ID: name, Name: name},
+			Source: activity.Source{Type: "recent_followers", ID: sid},
+		}, fresh)
+	}
+}
+
+func (o *rumbleActivityObserver) observeSubscribes(subscribers []rumbleSubscriber) {
+	for _, s := range subscribers {
+		name := strings.TrimSpace(firstNonEmpty(s.Username, s.User))
+		if name == "" || s.AmountCents < 0 {
+			o.r.activityIgnored.Add(1)
+			continue
+		}
+		id := rumbleActivityID("subscribe", name, s.SubscribedOn, itoa(s.AmountCents))
+		sid, fresh := o.take("subscribe", id)
+		ev := activity.Event{
+			Kind: activity.KindSubscribe, At: o.r.activityTime(s.SubscribedOn),
+			Actor: &activity.Actor{ID: name, Name: name}, Product: "paid_sub",
+			Source: activity.Source{Type: "recent_subscribers", ID: sid},
+		}
+		if s.AmountCents > 0 {
+			ev.Amount = rumbleCents(s.AmountCents)
+		}
+		o.emit(ev, fresh)
+	}
+}
+
+func (o *rumbleActivityObserver) observeGifts(gifted []rumbleGiftedSub) {
+	for _, g := range gifted {
+		name := strings.TrimSpace(g.PurchasedBy)
+		if name == "" || g.TotalGifts < 1 {
+			o.r.activityIgnored.Add(1)
+			continue
+		}
+		// remaining_gifts is left out of the identity on purpose: it falls
+		// as the gifts are claimed, which would re-emit the same purchase.
+		id := rumbleActivityID("gift", name, g.GiftType, anyString(g.VideoID), itoa(g.TotalGifts))
+		sid, fresh := o.take("gift", id)
+		o.emit(activity.Event{
+			Kind: activity.KindGift, Actor: &activity.Actor{ID: name, Name: name},
+			Count: g.TotalGifts, Product: "paid_sub",
+			Source: activity.Source{Type: "recent_gifted_subs", ID: sid},
+		}, fresh)
+	}
+}
+
+// observeRants reads the tips in the livestream's rant list. The list is only
+// seeded on the first poll, so it reports nothing then.
+func (o *rumbleActivityObserver) observeRants(live *rumbleLivestream) {
+	o.baseline = !o.st.rantsSeeded
+	for _, e := range live.Chat.RecentRants {
+		name := strings.TrimSpace(e.Username)
+		if e.AmountCents == 0 {
+			continue // an ordinary message in the rant list
+		}
+		if name == "" || e.AmountCents < 0 {
+			o.r.activityIgnored.Add(1)
+			continue
+		}
+		id := rumbleActivityID("tip", name, e.CreatedOn, itoa(e.AmountCents), e.Text)
+		sid, fresh := o.take("tip", id)
+		o.emit(activity.Event{
+			Kind: activity.KindTip, At: o.r.activityTime(e.CreatedOn),
+			Actor: &activity.Actor{ID: name, Name: name}, Amount: rumbleCents(e.AmountCents),
+			Message: e.Text, // viewer text: gated by the overlay, never bypassed
+			Source:  activity.Source{Type: "rant", ID: sid},
+		}, fresh)
+	}
+	o.st.rantsSeeded = true
 }
 
 // rumbleActivitySeen is the per-adapter record of which blocks the last
