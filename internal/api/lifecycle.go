@@ -1120,9 +1120,6 @@ func (c *lifecycleCoordinator) resetOnUpEdge(d *db.Destination, broadcastID stri
 	})
 }
 
-// skipStateRead reports whether this sweep leaves the row alone without
-// reading its broadcast's state, applying the untracking or reset each
-// skipping case calls for.
 // clearFinishedX forgets a finished X broadcast's record, so switching the
 // destination on again opens a new one. It writes only when there is a record to
 // clear.
@@ -1170,6 +1167,9 @@ func (c *lifecycleCoordinator) giveUpEnabled(d *db.Destination) bool {
 		!(d.Platform == db.PlatformX && !d.Lifecycle.Terminal && c.rearmDue(d.ID))
 }
 
+// skipStateRead reports whether this sweep leaves the row alone without
+// reading its broadcast's state, applying the untracking or reset each
+// skipping case calls for.
 func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID string, mode sweepMode) bool {
 	switch {
 	case !d.Enabled && d.Lifecycle.Phase == "":
@@ -1306,69 +1306,6 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 			return true
 		}
 		c.untrack(d.ID)
-		return true
-	}
-	return false
-}
-
-// skipEnabledRead is skipStateRead for a destination that is switched on.
-func (c *lifecycleCoordinator) skipEnabledRead(d *db.Destination, mode sweepMode) bool {
-	switch {
-	case d.Enabled && mode == sweepEndsOnly:
-		// Shutting down. Never go live on the way out.
-		return true
-	case d.Enabled && strings.EqualFold(d.Lifecycle.Phase, phaseLive) && d.Lifecycle.Fault == "" &&
-		!c.dueForLiveRecheck(d.ID):
-		// SETTLED, SO ASKED RARELY -- NOT NEVER. A confirmed-live broadcast on an
-		// enabled destination usually has nothing left to be done to it, and
-		// BroadcastState is TWO API calls: the broadcast, then its bound stream.
-		//
-		// THIS BRANCH USED TO RETURN FOR EVER, on the claim that "nothing is lost
-		// by not asking: the next thing that can matter is the operator disabling
-		// or deleting the row, and both change the row". THAT SENTENCE WAS FALSE.
-		// A broadcast can END WITH THE ROW UNTOUCHED, and at least three routine
-		// things do it:
-		//
-		//   - YouTube's own enableAutoStop (oauth.BroadcastSettings.EnableAutoStop)
-		//     completes the broadcast when the ingest stops. THE END POLICY ABOVE
-		//     LEANS ON IT BY NAME as the backstop for a crash -- so the coordinator
-		//     was depending on a mechanism whose result it then refused to look at.
-		//   - The operator ends the broadcast in YouTube Studio, or an
-		//     administrator removes it (phase `revoked`).
-		//   - The token is revoked, so nothing here can confirm anything again.
-		//
-		// A permanent skip makes all three invisible and the skip is permanent:
-		// the row says `live` for the rest of the daemon's life, on the card the
-		// design tells operators to read and in the phase the END policy consults.
-		//
-		// RE-READING EVERY SWEEP IS NOT THE FIX EITHER. 5,760 sweeps a day times
-		// two calls is 11,520 per destination per day against Google's published
-		// default project allocation of 10,000 units a day, SHARED with metadata
-		// pushes, chat and stats -- one destination would exhaust the install by
-		// mid-afternoon, and an install out of quota cannot END anything, which is
-		// strictly worse than a stale label.
-		//
-		// So it is a cadence: one read every fortieth sweep, 144 reads x 2 calls =
-		// 288 a day per destination, under 3% of the allocation, with a wrong
-		// label standing for at most ten minutes. See lifecycleLiveRecheckEvery
-		// for the full arithmetic, and forgetLiveRecheck for why the case that
-		// actually happens is noticed in one sweep rather than forty.
-		return true
-	case d.Enabled && d.Platform == db.PlatformYouTube && d.Lifecycle.Fault == "" && !c.isFlowing(d.ID) &&
-		(strings.EqualFold(d.Lifecycle.Phase, phaseCreated) || strings.EqualFold(d.Lifecycle.Phase, phaseReady)) &&
-		!c.dueForLiveRecheck(d.ID):
-		// WAITING FOR VIDEO, so asked rarely: see the comment at noteLiveRead's call in readAndAct.
-		return true
-	case d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter &&
-		!(d.Platform == db.PlatformX && !d.Lifecycle.Terminal && c.rearmDue(d.ID)):
-		// Held. (An X destination whose fault is not terminal is let through once every lifecycleRearmEvery: the
-		// read says whether the source has bytes, and if it does one go-live is tried. The first success clears it.) See lifecycleGiveUpAfter -- the fault stands, the stream keeps
-		// going out, and nothing here calls the platform again until an UP edge
-		// says the world changed.
-		//
-		// The hold is deliberately NOT applied to the disabled branch below: an
-		// operator who gives up on going live and switches the destination off
-		// must still have their broadcast ended.
 		return true
 	}
 	return false
