@@ -1088,8 +1088,8 @@ function SpeakerField({
  *
  *  Exported for its test, like ShareCard and VariantsCard are for PlayoutPage's. */
 /** The poster frame's address, when the recording has one. */
-function posterUrl(id: number, hasPoster: boolean): string | undefined {
-  return hasPoster ? api.libraryMediaUrl(id, "poster.jpg") : undefined;
+function posterUrl(id: number): string {
+  return api.libraryMediaUrl(id, "poster.jpg");
 }
 
 /** The captions track: the stored transcript when there is one, else the
@@ -1249,7 +1249,7 @@ export function PlayerDialog({
                   className="w-full rounded border border-border bg-black"
                   controls
                   preload="metadata"
-                  poster={posterUrl(rec.id, rec.assets.poster)}
+                  poster={rec.assets.poster ? posterUrl(rec.id) : undefined}
                   src={`${api.libraryMediaUrl(rec.id, "proxy.mp4")}#t=${(atMs / 1000).toFixed(2)}`}
                   onLoadedMetadata={(e) => {
                     if (atMs > 0) e.currentTarget.currentTime = atMs / 1000;
