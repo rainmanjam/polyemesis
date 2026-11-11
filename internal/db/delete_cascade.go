@@ -189,29 +189,47 @@ func pruneScheduleTargets(tx *sql.Tx, gone []int64, now time.Time) (SchedulePrun
 	for _, id := range gone {
 		dead[id] = true
 	}
-	type row struct {
-		id      int64
-		name    string
-		enabled bool
-		ids     []int64
+	hits, err := schedulesNamingDead(tx, dead)
+	if err != nil {
+		return SchedulePrune{}, err
 	}
+	var out SchedulePrune
+	for _, r := range hits {
+		if err := pruneSchedule(tx, r, dead, now, &out); err != nil {
+			return SchedulePrune{}, err
+		}
+	}
+	return out, nil
+}
+
+// pruneRow is a schedule that names at least one deleted destination.
+type pruneRow struct {
+	id      int64
+	name    string
+	enabled bool
+	ids     []int64
+}
+
+// schedulesNamingDead returns the schedules, in id order, that name a deleted
+// destination. A list that will not parse is left out.
+func schedulesNamingDead(tx *sql.Tx, dead map[int64]bool) ([]pruneRow, error) {
 	rows, err := tx.Query(`SELECT id, name, enabled, destination_ids FROM schedules
 		WHERE all_destinations = 0 AND action IN ('start', 'stop')
 		  AND destination_ids NOT IN ('[]', '', 'null')
 		ORDER BY id`)
 	if err != nil {
-		return SchedulePrune{}, err
+		return nil, err
 	}
-	var hits []row
+	var hits []pruneRow
 	for rows.Next() {
 		var (
-			r       row
+			r       pruneRow
 			enabled int
 			raw     string
 		)
 		if err := rows.Scan(&r.id, &r.name, &enabled, &raw); err != nil {
 			rows.Close()
-			return SchedulePrune{}, err
+			return nil, err
 		}
 		// A list that will not parse is left alone: scanSchedule already reads
 		// it as empty and Validate shows it to the operator as invalid.
@@ -227,38 +245,41 @@ func pruneScheduleTargets(tx *sql.Tx, gone []int64, now time.Time) (SchedulePrun
 		}
 	}
 	if err := rows.Close(); err != nil {
-		return SchedulePrune{}, err
+		return nil, err
 	}
+	return hits, nil
+}
 
-	var out SchedulePrune
-	for _, r := range hits {
-		kept := make([]int64, 0, len(r.ids))
-		for _, id := range r.ids {
-			if !dead[id] {
-				kept = append(kept, id)
-			}
+// pruneSchedule drops the deleted destinations from one schedule. A schedule
+// left naming nothing is switched off, and counted in out.Disabled only if this
+// is what switched it off; otherwise it is counted in out.Narrowed.
+func pruneSchedule(tx *sql.Tx, r pruneRow, dead map[int64]bool, now time.Time, out *SchedulePrune) error {
+	kept := make([]int64, 0, len(r.ids))
+	for _, id := range r.ids {
+		if !dead[id] {
+			kept = append(kept, id)
 		}
-		if len(kept) == 0 {
-			if _, err := tx.Exec(`UPDATE schedules SET enabled = 0, updated_at = ? WHERE id = ?`,
-				now.Unix(), r.id); err != nil {
-				return SchedulePrune{}, err
-			}
-			// Reported only when this delete is what switched it off: one that
-			// was already off has nothing new to tell the operator.
-			if r.enabled {
-				out.Disabled = append(out.Disabled, r.name)
-			}
-			continue
-		}
-		b, err := json.Marshal(kept)
-		if err != nil {
-			return SchedulePrune{}, err
-		}
-		if _, err := tx.Exec(`UPDATE schedules SET destination_ids = ?, updated_at = ? WHERE id = ?`,
-			string(b), now.Unix(), r.id); err != nil {
-			return SchedulePrune{}, err
-		}
-		out.Narrowed = append(out.Narrowed, r.name)
 	}
-	return out, nil
+	if len(kept) == 0 {
+		if _, err := tx.Exec(`UPDATE schedules SET enabled = 0, updated_at = ? WHERE id = ?`,
+			now.Unix(), r.id); err != nil {
+			return err
+		}
+		// Reported only when this delete is what switched it off: one that
+		// was already off has nothing new to tell the operator.
+		if r.enabled {
+			out.Disabled = append(out.Disabled, r.name)
+		}
+		return nil
+	}
+	b, err := json.Marshal(kept)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE schedules SET destination_ids = ?, updated_at = ? WHERE id = ?`,
+		string(b), now.Unix(), r.id); err != nil {
+		return err
+	}
+	out.Narrowed = append(out.Narrowed, r.name)
+	return nil
 }
