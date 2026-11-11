@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDestructive } from "@/components/ConfirmDestructive";
 import { Input } from "@/components/ui/input";
 import type { DelayDumpResult, DestStatus } from "@/lib/types";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 /** A destination's broadcast delay on its card (#11).
@@ -155,8 +155,6 @@ export function DelayPanel({
     }
   };
 
-  const fig = (x: number) => Number(x.toFixed(1));
-
   return (
     <div data-testid="delay-on-air" className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -181,24 +179,12 @@ export function DelayPanel({
         </p>
       )}
       {result && (
-        <p
+        <output
           data-testid="delay-dump-result"
-          role="status"
-          className={cn("text-[11px]", result.ok ? "text-muted-foreground" : "text-down")}
+          className={cn("block text-[11px]", result.ok ? "text-muted-foreground" : "text-down")}
         >
-          {result.ok
-            ? [
-                t("delay.dumped", {
-                  dumped: fig(result.answer.dumpedSeconds),
-                  after: fig(result.answer.delayAfterSeconds),
-                }),
-                result.answer.clamped ? t("delay.dumpClamped") : "",
-                result.answer.complete ? "" : t("delay.dumpPending"),
-              ]
-                .filter(Boolean)
-                .join(" ")
-            : t("delay.dumpFailed", { message: result.message })}
-        </p>
+          {dumpResultText(result, t)}
+        </output>
       )}
       {onDump && (
         <ConfirmDestructive
@@ -267,3 +253,23 @@ export function DelayPanel({
     </div>
   );
 }
+
+// What the dump line says: the dumped amount and its after-delay, or the reason it failed.
+function dumpResultText(
+  result: { ok: true; answer: DelayDumpResult } | { ok: false; message: string },
+  t: Translator,
+): string {
+  if (!result.ok) return t("delay.dumpFailed", { message: result.message });
+  return [
+    t("delay.dumped", {
+      dumped: fig(result.answer.dumpedSeconds),
+      after: fig(result.answer.delayAfterSeconds),
+    }),
+    result.answer.clamped ? t("delay.dumpClamped") : "",
+    result.answer.complete ? "" : t("delay.dumpPending"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+const fig = (x: number) => Number(x.toFixed(1));
