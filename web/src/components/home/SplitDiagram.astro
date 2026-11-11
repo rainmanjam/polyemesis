@@ -138,15 +138,17 @@ const pct = (g: number) => `${g * 100}%`;
       minmax(0, 44fr);
     min-height: 36rem;
   }
-  /* Language lanes: room or ambience, then the commentary and language feeds. */
+  /* Language lanes: each story maps its four lanes one-to-one onto the four
+     track tokens. Never --color-muted: that is --dg-mix, the hub-to-destination
+     audio line, so a lane in it would read as the mix. */
   .dg[data-story="sports"] {
-    --t1: var(--color-muted); /* ambience */
+    --t1: var(--color-cohost); /* ambience */
     --t2: var(--color-meter); /* home commentary */
     --t3: var(--color-game); /* away commentary */
     --t4: var(--color-second-voice); /* Spanish */
   }
   .dg[data-story="worship"] {
-    --t1: var(--color-muted); /* room */
+    --t1: var(--color-game); /* room */
     --t2: var(--color-meter); /* English */
     --t3: var(--color-second-voice); /* Spanish */
     --t4: var(--color-cohost); /* music */

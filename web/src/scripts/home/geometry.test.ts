@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { STORIES } from "./stories";
+import { STORIES, STORY_ORDER } from "./stories";
 import { VIEWBOX, anchors, linesFor, type Layout } from "./geometry";
 
 const LAYOUTS: readonly Layout[] = ["h", "v"];
@@ -38,6 +38,11 @@ describe("split diagram geometry", () => {
         expect(Math.round(p.y * 10) / 10).toBe(p.y);
       }
     }
+  });
+
+  /* SplitDiagram's CSS hard-codes four destination rows (h) and a 2 x 2 grid (v). */
+  it.each(STORY_ORDER)("gives the %s story exactly four destinations", (key) => {
+    expect(STORIES[key].dests).toHaveLength(4);
   });
 
   it("pins the horizontal anchors to the grid's column centres", () => {
