@@ -1,0 +1,184 @@
+---
+/* Beat 2: every way to multistream today gives something up.
+ *
+ * The meters are truthful. Cloud relays and nginx/FFmpeg scripts also take ONE
+ * upload from home; only the OBS multi-output plugin sends a copy per platform.
+ * What polyemesis adds is a separate mix per platform on that one upload, so
+ * the strip below says it keeps all three, not that it alone stays at one.
+ *
+ * Rendered at its resting state (3 platforms, plugin bar 3x and over the
+ * limit); upload-meter.ts animates it only while on screen and motion is
+ * allowed. The bars move by transform: scaleX() alone.
+ *
+ * The platform count is ordinary text for screen readers (not live): it is
+ * what the 1x / 3x values under each card are counted against. */
+import { MAX_PLATFORMS, START_PLATFORMS, UPLOAD_LIMIT, uploadFor, type MeterKind } from "../../scripts/home/upload-meter";
+
+const cards: Array<{ kind: MeterKind; title: string; body: string }> = [
+  {
+    kind: "relay",
+    title: "Cloud relays",
+    body: "One upload, but a relay can send every platform the same mix, and free plans can stop at two destinations.",
+  },
+  {
+    kind: "plugin",
+    title: "OBS multi-output plugins",
+    body: "Your home connection uploads a full copy of the video for every platform you add.",
+  },
+  {
+    kind: "scripts",
+    title: "nginx and FFmpeg scripts",
+    body: "One upload, and FFmpeg can build a different mix per platform, but you write and maintain those scripts yourself.",
+  },
+];
+
+const meter = (kind: MeterKind) => {
+  const k = uploadFor(kind, START_PLATFORMS);
+  return { kind, k, scale: k / MAX_PLATFORMS, over: k > UPLOAD_LIMIT };
+};
+const limitPct = `${(UPLOAD_LIMIT / MAX_PLATFORMS) * 100}%`;
+const strip = meter("polyemesis");
+---
+
+<section class="problem border-y border-line bg-surface/40" id="problem" aria-labelledby="h-problem" data-upload-meter>
+  <div class="wrap py-20 sm:py-24">
+    <h2 id="h-problem" class="text-balance font-display text-3xl font-bold leading-tight sm:text-4xl">
+      The usual ways to multistream each ask you to give something up.
+    </h2>
+    <p class="pc">Platforms you stream to: <span data-pcount>{START_PLATFORMS}</span></p>
+
+    <div class="card-grid card-grid--3 mt-8" data-foot="required">
+      {
+        cards.map((c) => {
+          const m = meter(c.kind);
+          return (
+            <article class="card p-6">
+              <h3 class="font-display text-xl font-bold">{c.title}</h3>
+              <p class="mt-3 text-muted">{c.body}</p>
+              <div class="card-foot">
+                <div class="mt">
+                  <span class="mt-l">Upload from home</span>
+                  <div class="bar">
+                    <i data-kind={m.kind} class:list={{ over: m.over }} style={`--k:${m.scale}`} />
+                    <b class="lim" title="your upload" style={`left:${limitPct}`} />
+                  </div>
+                  <span class="val" data-val={m.kind}>{m.k}×</span>
+                </div>
+              </div>
+            </article>
+          );
+        })
+      }
+    </div>
+
+    <div class="strip">
+      <div>
+        <h3 class="font-display text-xl font-bold"><i class="lamp" aria-hidden="true"></i>polyemesis keeps all three.</h3>
+        <p class="mt-2 text-muted">
+          One upload from home, a separate mix for each destination, and no glue scripts to maintain.
+        </p>
+      </div>
+      <div class="mt">
+        <span class="mt-l">Upload from home</span>
+        <div class="bar">
+          <i data-kind={strip.kind} style={`--k:${strip.scale}`} />
+          <b class="lim" title="your upload" style={`left:${limitPct}`} />
+        </div>
+        <span class="val" data-val={strip.kind}>{strip.k}×</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .pc {
+    margin-top: 1.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-muted);
+  }
+  .pc span {
+    color: var(--color-fg);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+  .mt {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 0.375rem 0.75rem;
+  }
+  .mt-l {
+    grid-column: 1 / -1;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-subtle);
+  }
+  .bar {
+    position: relative;
+    height: 10px;
+    border-radius: 5px;
+    background: var(--color-raised);
+  }
+  .bar i {
+    position: absolute;
+    inset: 0;
+    border-radius: 5px;
+    background: var(--color-muted);
+    transform-origin: left;
+    transform: scaleX(var(--k, 0.2));
+  }
+  .bar i.over {
+    background: var(--down);
+  }
+  .bar .lim {
+    position: absolute;
+    top: -4px;
+    bottom: -4px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--color-subtle);
+  }
+  .val {
+    min-width: 2.5ch;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .strip {
+    margin-top: 1.5rem;
+    padding: 1.375rem 1.5rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: var(--radius-token);
+    display: grid;
+    gap: 1.5rem;
+    align-items: center;
+  }
+  .strip h3 {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .lamp {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--tally);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--tally) 25%, transparent);
+  }
+  @media (min-width: 48rem) {
+    .strip {
+      grid-template-columns: 1.1fr 1fr;
+    }
+  }
+  /* Motion only under no-preference and the gate's class. */
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.motion-on) .bar i {
+      transition:
+        transform 0.5s var(--ease-out, ease-out),
+        background-color 0.3s;
+    }
+  }
+</style>

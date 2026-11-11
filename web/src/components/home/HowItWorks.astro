@@ -1,0 +1,232 @@
+---
+/* Beat 3, "how it works". Five steps beside the split diagram.
+ *
+ * With JS at 768px and up, how-steps.ts adds .is-enhanced: the track becomes
+ * four screens tall and the stage sticks beneath the nav while the steps light
+ * up in turn as the track scrolls past. That is plain CSS sticky; scrolling is
+ * never captured. Without JS, or on a phone, nothing pins, every step stays
+ * open and (on a phone) the diagram is hidden, since the hero already showed it.
+ *
+ * No ancestor of .how-stage may set overflow hidden/auto/clip, or sticky stops
+ * working. main, .page-grid and this section set none. */
+import SplitDiagram from "./SplitDiagram.astro";
+
+const STEPS = [
+  {
+    title: "Send one stream",
+    body: "Point OBS or an IRL backpack at polyemesis over SRT or SRTLA. The video and every audio track arrive together in one upload. Plain RTMP works too, with one stereo pair.",
+  },
+  {
+    title: "The video goes through untouched",
+    body: "It is copied to each destination, not re-encoded, unless you add a rendition. No quality loss, very little CPU, and your upload stays at one stream.",
+  },
+  {
+    title: "The audio tracks split apart",
+    body: "Mic, music, game and co-host stay separate tracks, so each one can be on, lowered or off for any destination.",
+  },
+  {
+    title: "Each destination gets its own mix",
+    body: "Twitch gets the full mix. YouTube gets the same video without the music. Kick gets the music turned down.",
+  },
+  {
+    title: "Everyone gets a normal live stream",
+    body: "Each platform receives a regular broadcast, and the archive keeps every track separate for editing later.",
+  },
+];
+---
+
+<section class="how" id="how" aria-labelledby="h-how">
+  <div class="how-track">
+    <div class="how-stage">
+      <div class="how-h">
+        <h2 id="h-how">How it works</h2>
+        <p class="sub-h">Five steps from your encoder to each destination.</p>
+      </div>
+      <div class="how-s">
+        <ol class="steps">
+          {
+            STEPS.map((s, i) => (
+              <li class="step" data-step={i + 1}>
+                <h3>
+                  <span class="n">{i + 1}</span>{" "}
+                  {s.title}
+                </h3>
+                <div class="body">
+                  <div>
+                    <p>{s.body}</p>
+                  </div>
+                </div>
+              </li>
+            ))
+          }
+        </ol>
+        <div class="prog" role="group" aria-label="Jump to step">
+          {STEPS.map((_, i) => <button type="button" data-goto={i + 1} aria-label={`Step ${i + 1}`} />)}
+        </div>
+      </div>
+      <div class="how-dg">
+        <SplitDiagram story="streamer" mode="steps" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .how {
+    --nav-h: 56px;
+    margin-block: clamp(2.5rem, 6vw, 5rem);
+  }
+  .how-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    grid-template-areas: "h dg" "s dg";
+    align-content: center;
+    column-gap: clamp(24px, 5vw, 72px);
+    row-gap: 18px;
+    max-width: 72rem;
+    margin-inline: auto;
+    padding: 20px 1rem;
+  }
+  .how-h {
+    grid-area: h;
+    align-self: end;
+  }
+  .how-s {
+    grid-area: s;
+    align-self: start;
+  }
+  .how-dg {
+    grid-area: dg;
+    align-self: center;
+    min-width: 0;
+  }
+  .how-h h2 {
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+  }
+  .sub-h {
+    margin-top: 10px;
+    font-size: 1.0625rem;
+  }
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .step {
+    border-left: 2px solid var(--color-line);
+    padding: 6px 0 6px 16px;
+  }
+  .step h3 {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    font-size: 1.125rem;
+    letter-spacing: -0.015em;
+    font-weight: 500;
+  }
+  .n {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+  }
+  .step p {
+    padding: 8px 0 4px 28px;
+    max-width: 46ch;
+    font-size: 1rem;
+  }
+  /* Without JS the pips would jump to nothing, so they only appear enhanced. */
+  .prog {
+    display: none;
+    gap: 6px;
+    margin-top: 18px;
+  }
+  .prog button {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .prog button::before {
+    content: "";
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-line-strong);
+  }
+  .prog button[aria-current="step"]::before {
+    background: var(--tally);
+  }
+
+  /* Phones and tablets under 768px: nothing pins, and the hero already showed
+   * the diagram. */
+  @media (max-width: 767.98px) {
+    .how-stage {
+      grid-template-columns: 1fr;
+      grid-template-areas: "h" "s";
+    }
+    .how-dg {
+      display: none;
+    }
+  }
+
+  /* Pinned layout: only when how-steps.ts has enhanced the section. */
+  @media (min-width: 768px) {
+    .how.is-enhanced .how-track {
+      height: 400vh;
+    }
+    .how.is-enhanced .how-stage {
+      position: sticky;
+      top: var(--nav-h);
+      height: calc(100svh - var(--nav-h));
+      box-sizing: border-box;
+    }
+    .how.is-enhanced .prog {
+      display: flex;
+    }
+    .how.is-enhanced .step h3 {
+      color: var(--color-subtle);
+    }
+    .how.is-enhanced .step.on {
+      border-left-color: var(--tally);
+    }
+    .how.is-enhanced .step.on h3 {
+      color: var(--color-fg);
+    }
+    .how.is-enhanced .body {
+      display: grid;
+      grid-template-rows: 0fr;
+    }
+    .how.is-enhanced .body > div {
+      overflow: hidden;
+    }
+    .how.is-enhanced .step.on .body {
+      grid-template-rows: 1fr;
+    }
+  }
+
+  /* All motion sits behind no-preference and .motion-on, which only the
+   * page's script sets, so reduced motion and the Pause control both get
+   * instant changes. */
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.motion-on) .how.is-enhanced .step {
+      transition: border-color 0.25s;
+    }
+    :global(.motion-on) .how.is-enhanced .step h3 {
+      transition: color 0.25s;
+    }
+    :global(.motion-on) .how.is-enhanced .body {
+      transition: grid-template-rows 0.35s var(--ease-out);
+    }
+    :global(.motion-on) .how.is-enhanced .prog button::before {
+      transition: background-color 0.25s;
+    }
+  }
+</style>

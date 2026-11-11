@@ -1,0 +1,83 @@
+---
+import CodeBlock from "../CodeBlock.astro";
+
+/* The commands are the site's real ones: the docker line is the home hero's,
+ * the script is docs/INSTALL.md's "The scripted install". home-copy.test.ts
+ * checks both, so a placeholder cannot slip in. */
+const docker = `docker run -d --name polyemesis \\
+  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
+  -v polyemesis-data:/data \\
+  rainmanjam/polyemesis:latest`;
+
+const script = `curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLO \\
+  https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
+less install.sh          # it runs as root; read it first
+sudo bash install.sh`;
+---
+
+<section id="run" class="wrap run py-20 sm:py-24">
+  <h2 class="text-3xl font-semibold tracking-tight">A small server is enough.</h2>
+  <p class="run-sub">
+    polyemesis copies the video instead of re-encoding it, so a small VPS can feed several destinations.
+  </p>
+
+  <div class="run-code">
+    <CodeBlock label="docker" codeId="install-docker" code={docker} />
+    <details class="run-alt">
+      <summary>Linux without Docker: the install script</summary>
+      <CodeBlock label="bash" codeId="install-script" code={script} />
+    </details>
+  </div>
+
+  <ol class="three">
+    <li>
+      <strong>Run the command</strong>
+      <span>Then open port 8080 in a browser and create your admin account with the setup code from <code>docker logs polyemesis</code>. With the install script, its closing summary shows where to open it and the code.</span>
+    </li>
+    <li>
+      <strong>Add your destinations</strong>
+      <span>Connect Twitch, YouTube and Kick, then choose which tracks each one gets.</span>
+    </li>
+    <li>
+      <strong>Point OBS at it</strong>
+      <span>Paste the stream URL polyemesis gives you into OBS and go live. That is your only upload.</span>
+    </li>
+  </ol>
+
+  <div class="run-cta">
+    <a class="btn btn-onair" href="/docs/quickstart">Read the quickstart</a>
+    <a class="btn btn-ghost" href="https://github.com/rainmanjam/polyemesis" rel="noopener">View on GitHub</a>
+  </div>
+
+  <p class="newbie">
+    Never run a server before? The <a href="/docs/install">install guide</a> has the careful version for each platform.
+  </p>
+  <p class="keeps">
+    <span>Free and open source (MIT)</span>
+    <span>Your keys and settings are stored on your server</span>
+    <span>Stream Deck plugin with every release</span>
+  </p>
+</section>
+
+<style>
+  .run-sub { margin-top: 0.75rem; max-width: 40rem; color: var(--color-muted); }
+  .run-code { margin-top: 2rem; max-width: 44rem; display: grid; gap: 0.75rem; }
+  .run-alt summary { cursor: pointer; font-size: 0.875rem; color: var(--color-muted); padding-block: 0.25rem; }
+  .run-alt[open] summary { margin-bottom: 0.5rem; }
+  .three { margin-top: 2.5rem; display: grid; gap: 1.5rem; padding: 0; list-style: none; counter-reset: step; }
+  .three li { counter-increment: step; display: grid; gap: 0.25rem; }
+  .three li::before {
+    content: counter(step);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-subtle);
+  }
+  .three strong { font-weight: 600; }
+  .three span { color: var(--color-muted); }
+  .run-cta { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .newbie { margin-top: 1.25rem; max-width: 40rem; font-size: 0.9375rem; color: var(--color-muted); }
+  .keeps { margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; font-size: 0.8125rem; color: var(--color-subtle); }
+  @media (min-width: 48rem) {
+    .three { grid-template-columns: repeat(3, 1fr); gap: 2rem; }
+  }
+</style>

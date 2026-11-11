@@ -247,14 +247,14 @@ test("meters — loudness measured after routing", async ({ page }) => {
   // buy: integrated loudness needs about twenty seconds of programme before it
   // means anything, and the page says so in its own words while showing
   // "NOT UPDATING". A shot taken before then has no per-destination figures in
-  // it at all -- and web/src/pages/index.astro quotes three of them in body
+  // it at all -- and web/src/pages/features.astro quotes three of them in body
   // copy and alt text as the whole of its proof section. Waiting on the badge
   // rather than on another sleep, because the analyser's start-up is not a
   // fixed cost.
   await expect(
     page.getByText("NOT UPDATING"),
     "the loudness analyser never reported, so this shot has no per-destination " +
-      "figures and the front page's proof section quotes numbers that are not in it",
+      "figures and the /features proof section quotes numbers that are not in it",
   ).toHaveCount(0, { timeout: 90_000 });
   // AND EVERY TRACK IS METERING.
   //

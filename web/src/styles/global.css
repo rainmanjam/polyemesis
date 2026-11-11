@@ -106,6 +106,10 @@
      product renders in one pair of typefaces for the first time. Re-declaring
      either name here would take that back silently. */
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  /* The one italic word in the home headline (.it). Not preloaded: it paints
+     in the serif fallback, then swaps. No ui-serif/Georgia in the stack, so a
+     visitor without the file sees a plain serif, not a system-dependent one. */
+  --font-accent: "IBM Plex Serif", serif;
 
   /* --- 60 / NEUTRAL --- */
   --color-ink: var(--background); /* the page; the app paints its shell with it */
@@ -180,17 +184,18 @@
   --color-meter: var(--cat-cyan);
   --color-cohost: oklch(80.0% 0.1900 328.0);
   --color-game: oklch(65.7% 0.1262 298.0);
-  /* The second voice: the patchbay's track 2, Co-host mic, as the hero's
-     signal path draws it. Not --color-cohost: despite its name, that magenta
-     is the hero's Music lane (the hero predates the four-track layout), and
-     a co-host lane in the same magenta would be one colour on two tracks.
-     Chosen like --color-cohost was, by maximising its smallest ΔEOK to every
-     signal, meter, track and wire colour in the hero, over L 60-90 with at
-     least 3:1 on a card (a wire, not text) and away from the status hues:
-     0.150 to --color-ok and to the video lane (the nearest), 0.160 to the
-     mic cyan, 0.19 to --meter-mid. 12.3:1 against a card. That is below
-     the 0.18 --color-cohost got; the free hues left on this page are teal or
-     olive, and olive sits between the ok green and the warn amber. */
+  /* The second voice: the patchbay's track 2, Co-host mic, as the homepage
+     split diagram's co-host lane draws it. Not --color-cohost: despite its
+     name, that magenta is the split diagram's Music lane (it predates the
+     four-track layout), and a co-host lane in the same magenta would be one
+     colour on two tracks. Chosen like --color-cohost was, by maximising its
+     smallest ΔEOK to every signal, meter, track and wire colour in the
+     diagram, over L 60-90 with at least 3:1 on a card (a wire, not text) and
+     away from the status hues: 0.150 to --color-ok and to the video lane (the
+     nearest), 0.160 to the mic cyan, 0.19 to --meter-mid. 12.3:1 against a
+     card. That is below the 0.18 --color-cohost got; the free hues left on
+     this page are teal or olive, and olive sits between the ok green and the
+     warn amber. */
   --color-second-voice: oklch(86.0% 0.1500 186.0);
 
   --radius-token: 0.5rem;
@@ -219,6 +224,15 @@
     background-color: var(--color-ink);
     color-scheme: dark;
   }
+  /* The home page has a motion gate (scripts/home/motion.ts) that sets
+     html.motion-on only while motion is allowed: not under reduced motion,
+     not while its Pause control is pressed, not before its script runs.
+     There, smooth scrolling is motion like any other and follows the gate.
+     Every other page keeps smooth scrolling (reduced motion still turns it
+     off in the block at the end of this file). */
+  html:has(.home):not(.motion-on) {
+    scroll-behavior: auto;
+  }
   body {
     background-color: var(--color-ink);
     color: var(--color-fg);
@@ -228,6 +242,18 @@
   h1, h2, h3 {
     font-family: var(--font-display);
     letter-spacing: -0.02em;
+  }
+  /* THE HOMEPAGE'S BONE INK, declared once on the wrapper and carried by
+     inheritance, so text-muted / text-subtle utilities still win and nothing
+     outside the home page changes. check-home pins it at 7:1 on the ground. */
+  .home {
+    --home-bone: oklch(93% 0.014 85);
+    color: var(--home-bone);
+  }
+  .it {
+    font-family: var(--font-accent);
+    font-style: italic;
+    font-weight: 400;
   }
   /* Every figure on this page sits in a column that has to line up. */
   .tnum, table td, table th {
@@ -424,7 +450,7 @@
   /* EVERY wide table, not just the comparison ones.
    *
    * This started as a fix for /comparison and was measured afterwards on the
-   * other two: the routing matrix on the home page hides 403px of 736 (55%) at
+   * other two: the routing matrix (on the home page then, on /features now) hides 403px of 736 (55%) at
    * a 390px viewport, and it is the worse case of the two. That table is
    * INTERACTIVE -- you scroll right to reach a destination column and click a
    * crosspoint -- so losing the track label means clicking a cell without
@@ -744,6 +770,11 @@
   }
   .btn-primary { background: var(--color-primary); color: var(--color-ink); }
   .btn-primary:hover { background: var(--color-primary-bright); }
+  /* The "on air" action: tally red as a FILL only, never as text (see
+     tokens.css). The inset ring on hover keeps it distinguishable without a
+     lighter red, which would fail its own label contrast. */
+  .btn-onair { background: var(--tally); color: var(--tally-foreground); }
+  .btn-onair:hover { box-shadow: inset 0 0 0 1px var(--tally-foreground); }
   .btn-ghost { border: 1px solid var(--color-line-strong); color: var(--color-fg); }
   .btn-ghost:hover { border-color: var(--color-primary); background: var(--color-primary-dim); }
 
