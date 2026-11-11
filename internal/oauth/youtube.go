@@ -147,14 +147,10 @@ type ytLiveStream struct {
 		Title string `json:"title"`
 	} `json:"snippet"`
 	CDN struct {
-		IngestionType string `json:"ingestionType"`
-		Resolution    string `json:"resolution"`
-		FrameRate     string `json:"frameRate"`
-		IngestionInfo struct {
-			StreamName          string `json:"streamName"`
-			IngestionAddress    string `json:"ingestionAddress"`
-			BackupIngestionAddr string `json:"backupIngestionAddress"`
-		} `json:"ingestionInfo"`
+		IngestionType string          `json:"ingestionType"`
+		Resolution    string          `json:"resolution"`
+		FrameRate     string          `json:"frameRate"`
+		IngestionInfo ytIngestionInfo `json:"ingestionInfo"`
 	} `json:"cdn"`
 	// ContentDetails is only present in a response that asked for the
 	// contentDetails part, which is liveStreams.insert on the caption path. The
@@ -166,11 +162,21 @@ type ytLiveStream struct {
 	} `json:"contentDetails"`
 	// Status is present only when the list asked for the status part (the stream picker does).
 	Status struct {
-		StreamStatus string `json:"streamStatus"`
-		HealthStatus struct {
-			Status string `json:"status"`
-		} `json:"healthStatus"`
+		StreamStatus string             `json:"streamStatus"`
+		HealthStatus ytLiveStreamHealth `json:"healthStatus"`
 	} `json:"status"`
+}
+
+// ytLiveStreamHealth is the healthStatus part of a liveStream's status block.
+type ytLiveStreamHealth struct {
+	Status string `json:"status"`
+}
+
+// ytIngestionInfo is the ingestionInfo part of a liveStream's cdn block.
+type ytIngestionInfo struct {
+	StreamName          string `json:"streamName"`
+	IngestionAddress    string `json:"ingestionAddress"`
+	BackupIngestionAddr string `json:"backupIngestionAddress"`
 }
 
 // Ingest returns the channel's reusable RTMP ingest, creating one if the

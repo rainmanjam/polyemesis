@@ -43,6 +43,18 @@ const (
 	ytTransitionParts = "id,status"
 )
 
+// ytLifecycleMonitor is the monitorStream part of a liveBroadcast read for
+// the lifecycle state.
+type ytLifecycleMonitor struct {
+	// A POINTER, so an absent key stays absent. See
+	// BroadcastLifecycleState for why a precondition read as
+	// false when it was never reported is worse here than
+	// anywhere else in this package.
+	EnableMonitorStream *bool `json:"enableMonitorStream"`
+	// A pointer for the same reason: an unreported delay is not 0.
+	BroadcastStreamDelayMs *int `json:"broadcastStreamDelayMs"`
+}
+
 // BroadcastState reads what YouTube says the broadcast is, plus the two things
 // that gate a transition to testing.
 //
@@ -78,18 +90,10 @@ func (y *YouTube) BroadcastState(ctx context.Context, accessToken, broadcastID s
 				LifeCycleStatus string `json:"lifeCycleStatus"`
 			} `json:"status"`
 			ContentDetails struct {
-				BoundStreamID      string `json:"boundStreamId"`
-				ClosedCaptionsType string `json:"closedCaptionsType"`
-				LatencyPreference  string `json:"latencyPreference"`
-				MonitorStream      struct {
-					// A POINTER, so an absent key stays absent. See
-					// BroadcastLifecycleState for why a precondition read as
-					// false when it was never reported is worse here than
-					// anywhere else in this package.
-					EnableMonitorStream *bool `json:"enableMonitorStream"`
-					// A pointer for the same reason: an unreported delay is not 0.
-					BroadcastStreamDelayMs *int `json:"broadcastStreamDelayMs"`
-				} `json:"monitorStream"`
+				BoundStreamID      string             `json:"boundStreamId"`
+				ClosedCaptionsType string             `json:"closedCaptionsType"`
+				LatencyPreference  string             `json:"latencyPreference"`
+				MonitorStream      ytLifecycleMonitor `json:"monitorStream"`
 			} `json:"contentDetails"`
 		} `json:"items"`
 	}

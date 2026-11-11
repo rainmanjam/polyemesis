@@ -123,10 +123,8 @@ func (y *YouTube) VerticalStreamHealth(ctx context.Context, accessToken, streamI
 		Items []struct {
 			ID     string `json:"id"`
 			Status struct {
-				StreamStatus string `json:"streamStatus"`
-				HealthStatus struct {
-					Status string `json:"status"`
-				} `json:"healthStatus"`
+				StreamStatus string               `json:"streamStatus"`
+				HealthStatus verticalHealthStatus `json:"healthStatus"`
 			} `json:"status"`
 		} `json:"items"`
 	}
@@ -143,4 +141,9 @@ func (y *YouTube) VerticalStreamHealth(ctx context.Context, accessToken, streamI
 		StreamStatus: it.Status.StreamStatus,
 		HealthStatus: it.Status.HealthStatus.Status,
 	}, nil
+}
+
+// verticalHealthStatus is the healthStatus part of a vertical stream's status block.
+type verticalHealthStatus struct {
+	Status string `json:"status"`
 }

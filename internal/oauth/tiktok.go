@@ -97,10 +97,7 @@ func (t *TikTok) Refresh(ctx context.Context, clientID, clientSecret, refreshTok
 
 type tikTokUser struct {
 	Data struct {
-		User struct {
-			OpenID      string `json:"open_id"`
-			DisplayName string `json:"display_name"`
-		} `json:"user"`
+		User tikTokUserInfo `json:"user"`
 	} `json:"data"`
 	Error struct {
 		Code    string `json:"code"`
@@ -137,4 +134,10 @@ func (t *TikTok) ManualKeyReason() string {
 	return "TikTok issues the LIVE server URL and key per broadcast, and only to accounts granted LIVE access, " +
 		"so polyemesis cannot fetch one. Connecting a TikTok account is for posting finished clips; " +
 		"copy the URL and key from TikTok LIVE Studio or LIVE Center and paste them into the destination."
+}
+
+// tikTokUserInfo is the user block of a TikTok user-info response.
+type tikTokUserInfo struct {
+	OpenID      string `json:"open_id"`
+	DisplayName string `json:"display_name"`
 }

@@ -401,14 +401,17 @@ type ytBroadcast struct {
 		// because a broadcast that did not report one must not be sent a
 		// made-up false: that would switch recording or embedding off.
 		// BoundStreamID is the liveStream the broadcast is bound to, empty when none.
-		BoundStreamID   string `json:"boundStreamId"`
-		RecordFromStart *bool  `json:"recordFromStart"`
-		EnableEmbed     *bool  `json:"enableEmbed"`
-		MonitorStream   struct {
-			EnableMonitorStream    bool `json:"enableMonitorStream"`
-			BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`
-		} `json:"monitorStream"`
+		BoundStreamID   string             `json:"boundStreamId"`
+		RecordFromStart *bool              `json:"recordFromStart"`
+		EnableEmbed     *bool              `json:"enableEmbed"`
+		MonitorStream   ytBroadcastMonitor `json:"monitorStream"`
 	} `json:"contentDetails"`
+}
+
+// ytBroadcastMonitor is the monitorStream part of a liveBroadcast's contentDetails.
+type ytBroadcastMonitor struct {
+	EnableMonitorStream    bool `json:"enableMonitorStream"`
+	BroadcastStreamDelayMs int  `json:"broadcastStreamDelayMs"`
 }
 
 // broadcastRank orders candidates: whatever is on air now, then whatever is

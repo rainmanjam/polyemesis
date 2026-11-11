@@ -36,19 +36,25 @@ type StreamHealthReader interface {
 // ytHealthStream is the part of a liveStream resource the health read uses.
 type ytHealthStream struct {
 	CDN struct {
-		IngestionInfo struct {
-			StreamName string `json:"streamName"`
-		} `json:"ingestionInfo"`
+		IngestionInfo ytHealthIngestionInfo `json:"ingestionInfo"`
 	} `json:"cdn"`
 	Status struct {
-		HealthStatus struct {
-			Status              string `json:"status"`
-			ConfigurationIssues []struct {
-				Type     string `json:"type"`
-				Severity string `json:"severity"`
-			} `json:"configurationIssues"`
-		} `json:"healthStatus"`
+		HealthStatus ytHealthStatus `json:"healthStatus"`
 	} `json:"status"`
+}
+
+// ytHealthIngestionInfo is the ingestionInfo part of a liveStream's cdn block.
+type ytHealthIngestionInfo struct {
+	StreamName string `json:"streamName"`
+}
+
+// ytHealthStatus is the healthStatus part of a liveStream's status block.
+type ytHealthStatus struct {
+	Status              string `json:"status"`
+	ConfigurationIssues []struct {
+		Type     string `json:"type"`
+		Severity string `json:"severity"`
+	} `json:"configurationIssues"`
 }
 
 // StreamHealths lists the channel's liveStreams with part=cdn,status: every
