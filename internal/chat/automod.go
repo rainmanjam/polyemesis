@@ -39,11 +39,11 @@ type nameLearner interface {
 	LearnProtectedName(name string)
 }
 
-// modelGate is the optional half of a Moderator that decides WHICH messages are
+// modelGater is the optional half of a Moderator that decides WHICH messages are
 // worth a paid model call (the hard-case scope). A separate interface, found by
 // type assertion, so a Moderator without it asks about every message as it
 // always did and no fake of Moderator changes.
-type modelGate interface {
+type modelGater interface {
 	WantsModel(p db.Platform, s automod.Subject, v automod.Verdict) bool
 }
 
@@ -170,19 +170,7 @@ func (h *Hub) checkAutomod(m Message) {
 	s := h.automod
 	h.mu.Unlock()
 	if s == nil || m.Trusted() {
-		// No automod, or a message automod does not judge (the operator's own,
-		// the broadcaster's, a moderator's): nothing will act on it, so
-		// nothing need be waited for.
-		//
-		// But this is where the broadcaster and moderators are SEEN: an
-		// account named like one of them is an impostor, and these are the only
-		// messages that say who they are.
-		if s != nil && (m.Author.Broadcaster || m.Author.Moderator) && m.Author.Name != "" {
-			if l, ok := s.mod.(nameLearner); ok {
-				l.LearnProtectedName(m.Author.Name)
-			}
-		}
-		h.offerDisplay(m, DisplayClear)
+		h.passUnjudged(s, m)
 		return
 	}
 
@@ -194,55 +182,13 @@ func (h *Hub) checkAutomod(m Message) {
 		ReplyToID:  m.ReplyToID,
 	}
 	v := s.mod.CheckFast(m.Platform, subj)
-	// NOT for a message the fast verdict removes. It used to be every
-	// non-empty message while the model was on, including one a rule had just
-	// deleted: a paid call -- against the hourly ceiling every other message
-	// shares -- whose answer could change nothing. A fast verdict that only
-	// FLAGS removes nothing, so that message is still asked about.
-	askModel := s.mod.ModelEnabled() && m.Text != "" && !removes(v)
-	// Under the hard-case scope only a message the free checkers could not
-	// settle, with a sign of a hard case, is worth the call. Asked LAST, after
-	// the cheap tests: the gate spends a per-author allowance when it says yes.
-	// A message it declines is not Pending, so it reaches the overlay at once.
-	var signal, declined bool
-	if askModel {
-		if o, ok := s.mod.(modelOutcomer); ok {
-			out := o.ModelOutcome(m.Platform, subj, v)
-			askModel, signal, declined = out.Ask, out.Signal, out.Declined()
-		} else if g, ok := s.mod.(modelGate); ok {
-			askModel = g.WantsModel(m.Platform, subj, v)
-		}
-	}
-	// A line with a hard-case signal that the gate's limits kept from the
-	// model (the per-author cap, a full table, the raid brake) was judged by
-	// nothing. Treating it as clear is what a decoy-then-attack or a flood past
-	// the brake would engineer, so it follows the model-outage policy exactly:
-	// held off the overlay when holdWhenUnavailable is on, as before when off,
-	// and review-listed either way.
-	holdDeclined := false
-	if declined && !removes(v) && !v.Hold {
-		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
-			holdDeclined = true
-		}
-	}
+	askModel, signal, declined := modelDecision(s, m, subj, v)
+	holdDeclined := declinedHeld(s, v, declined)
 
 	// The overlay is told BEFORE anything is queued, so neither an action the
 	// fast verdict permits nor the model's answer can reach the sink ahead of
 	// the message it is about.
-	switch {
-	case removes(v):
-		h.offerDisplay(m, DisplayBlocked)
-	case v.Hold:
-		// Flagged in the console, off every overlay, and releasable from the
-		// review list (overlay.Gate.Release). Nothing goes to a platform.
-		h.offerDisplay(m, DisplayHeld)
-	case holdDeclined:
-		h.offerDisplay(m, DisplayHeld)
-	case askModel:
-		h.offerDisplay(m, DisplayPending)
-	default:
-		h.offerDisplay(m, DisplayClear)
-	}
+	h.offerVerdictDisplay(m, v, askModel, holdDeclined)
 	h.recordAutomod(s, m, v)
 	if !removes(v) && v.Hold {
 		h.markFlagHeld(m.Platform, m.Account, m.ID)
@@ -265,6 +211,79 @@ func (h *Hub) checkAutomod(m Message) {
 		}) {
 			h.setModelAsked(m.Key(), false)
 		}
+	}
+}
+
+// passUnjudged handles a message automod does not judge (the operator's own,
+// the broadcaster's, a moderator's), or any message when automod is off:
+// nothing will act on it, so nothing need be waited for.
+func (h *Hub) passUnjudged(s *automodState, m Message) {
+	// But this is where the broadcaster and moderators are SEEN: an
+	// account named like one of them is an impostor, and these are the only
+	// messages that say who they are.
+	if s != nil && (m.Author.Broadcaster || m.Author.Moderator) && m.Author.Name != "" {
+		if l, ok := s.mod.(nameLearner); ok {
+			l.LearnProtectedName(m.Author.Name)
+		}
+	}
+	h.offerDisplay(m, DisplayClear)
+}
+
+// modelDecision says whether the model is asked about this message, whether
+// the model's gate reported a hard-case signal, and whether the gate declined.
+func modelDecision(s *automodState, m Message, subj automod.Subject, v automod.Verdict) (askModel, signal, declined bool) {
+	// NOT for a message the fast verdict removes. It used to be every
+	// non-empty message while the model was on, including one a rule had just
+	// deleted: a paid call -- against the hourly ceiling every other message
+	// shares -- whose answer could change nothing. A fast verdict that only
+	// FLAGS removes nothing, so that message is still asked about.
+	askModel = s.mod.ModelEnabled() && m.Text != "" && !removes(v)
+	// Under the hard-case scope only a message the free checkers could not
+	// settle, with a sign of a hard case, is worth the call. Asked LAST, after
+	// the cheap tests: the gate spends a per-author allowance when it says yes.
+	// A message it declines is not Pending, so it reaches the overlay at once.
+	if askModel {
+		if o, ok := s.mod.(modelOutcomer); ok {
+			out := o.ModelOutcome(m.Platform, subj, v)
+			askModel, signal, declined = out.Ask, out.Signal, out.Declined()
+		} else if g, ok := s.mod.(modelGater); ok {
+			askModel = g.WantsModel(m.Platform, subj, v)
+		}
+	}
+	return askModel, signal, declined
+}
+
+// declinedHeld reports whether a message the model gate declined is held off
+// the overlay. A line with a hard-case signal that the gate's limits kept from
+// the model (the per-author cap, a full table, the raid brake) was judged by
+// nothing. Treating it as clear is what a decoy-then-attack or a flood past
+// the brake would engineer, so it follows the model-outage policy exactly:
+// held off the overlay when holdWhenUnavailable is on, as before when off,
+// and review-listed either way.
+func declinedHeld(s *automodState, v automod.Verdict, declined bool) bool {
+	if declined && !removes(v) && !v.Hold {
+		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
+			return true
+		}
+	}
+	return false
+}
+
+// offerVerdictDisplay tells the overlay which state the message is in.
+func (h *Hub) offerVerdictDisplay(m Message, v automod.Verdict, askModel, holdDeclined bool) {
+	switch {
+	case removes(v):
+		h.offerDisplay(m, DisplayBlocked)
+	case v.Hold:
+		// Flagged in the console, off every overlay, and releasable from the
+		// review list (overlay.Gate.Release). Nothing goes to a platform.
+		h.offerDisplay(m, DisplayHeld)
+	case holdDeclined:
+		h.offerDisplay(m, DisplayHeld)
+	case askModel:
+		h.offerDisplay(m, DisplayPending)
+	default:
+		h.offerDisplay(m, DisplayClear)
 	}
 }
 
@@ -348,37 +367,7 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 	}
 	v, err := s.mod.CheckModel(ctx, job.platform, text)
 	if err != nil {
-		// Fail open, loudly. Silence would be indistinguishable from "the model
-		// looked and was fine with it", and the operator needs to know their
-		// moderation is degraded.
-		h.log.Warn("automod model check failed; the message passes",
-			"platform", job.platform, "err", err)
-		// err names each checker that failed. The endpoint inside it has
-		// been through redactEndpoint, and no response body is ever in it.
-		// It passes on the overlay too: the console is showing it, and an
-		// overlay that went silent whenever the model endpoint did would be a
-		// second, invisible outage.
-		//
-		// Not HELD for a spent hourly ceiling, though: the model was not down,
-		// the spend limit did its job, and every line after call N holding off
-		// the overlay would turn a cost control into an outage. It passes like
-		// any decline. But a line that showed a hard-case signal was not
-		// checked, and that is not left silent: it is listed for review
-		// (never held), and the engine's stats say moderation is degraded.
-		if automod.IsBudgetSpent(err) {
-			if job.signal {
-				h.listUnchecked(job.platform, job.account, job.msgID, job.authorID, uncheckedBudgetReason, false)
-			}
-			h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
-			return
-		}
-		if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
-			// The operator asked for it: a message nobody could judge waits off
-			// the overlay, and is listed for review so it can be released.
-			h.holdUnjudged(job)
-			return
-		}
-		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+		h.modelCheckFailed(s, job, err)
 		return
 	}
 	if v.DecidedBy == automod.SlotSecondary {
@@ -390,13 +379,7 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 	}
 	// Judged before the actions are queued, for the ordering reason in
 	// checkAutomod.
-	if removes(v) {
-		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayBlocked)
-	} else if v.Hold {
-		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
-	} else {
-		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
-	}
+	h.judgeModelVerdict(job, v)
 	if v.Flagged() {
 		h.noteFlag(h.messageFor(job.platform, job.account, job.msgID, job.authorID), v.Findings)
 		if !removes(v) && v.Hold {
@@ -409,6 +392,57 @@ func (h *Hub) askModel(ctx context.Context, s *automodState, job automodJob) {
 			msgID: job.msgID, authorID: job.authorID, finding: f,
 		})
 	}
+	logModelFindings(h, job, v)
+}
+
+// modelCheckFailed handles a model call that returned an error. It fails open.
+func (h *Hub) modelCheckFailed(s *automodState, job automodJob, err error) {
+	// Fail open, loudly. Silence would be indistinguishable from "the model
+	// looked and was fine with it", and the operator needs to know their
+	// moderation is degraded.
+	h.log.Warn("automod model check failed; the message passes",
+		"platform", job.platform, "err", err)
+	// err names each checker that failed. The endpoint inside it has
+	// been through redactEndpoint, and no response body is ever in it.
+	// It passes on the overlay too: the console is showing it, and an
+	// overlay that went silent whenever the model endpoint did would be a
+	// second, invisible outage.
+	//
+	// Not HELD for a spent hourly ceiling, though: the model was not down,
+	// the spend limit did its job, and every line after call N holding off
+	// the overlay would turn a cost control into an outage. It passes like
+	// any decline. But a line that showed a hard-case signal was not
+	// checked, and that is not left silent: it is listed for review
+	// (never held), and the engine's stats say moderation is degraded.
+	if automod.IsBudgetSpent(err) {
+		if job.signal {
+			h.listUnchecked(job.platform, job.account, job.msgID, job.authorID, uncheckedBudgetReason, false)
+		}
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+		return
+	}
+	if fh, ok := s.mod.(modelFailureHolder); ok && fh.HoldOnModelError() {
+		// The operator asked for it: a message nobody could judge waits off
+		// the overlay, and is listed for review so it can be released.
+		h.holdUnjudged(job)
+		return
+	}
+	h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+}
+
+// judgeModelVerdict tells the overlay how the model's verdict settles the line.
+func (h *Hub) judgeModelVerdict(job automodJob, v automod.Verdict) {
+	if removes(v) {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayBlocked)
+	} else if v.Hold {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayHeld)
+	} else {
+		h.judgeDisplay(job.platform, job.account, job.msgID, DisplayClear)
+	}
+}
+
+// logModelFindings logs each finding the model returned.
+func logModelFindings(h *Hub, job automodJob, v automod.Verdict) {
 	for _, f := range v.Findings {
 		// modelNote is the model's own prose and is LABELLED as such, because
 		// the model was handed a viewer's message and anything here may be that

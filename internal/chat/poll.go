@@ -184,18 +184,30 @@ func (y *YouTubeAdapter) CreatePoll(ctx context.Context, question string, option
 }
 
 type ytPollItem struct {
-	Snippet struct {
-		PollDetails struct {
-			Metadata struct {
-				Status  string `json:"status"`
-				Options []struct {
-					// Tally is a STRING in the resource, and present only
-					// when the request is authorised by the channel owner.
-					Tally string `json:"tally"`
-				} `json:"options"`
-			} `json:"metadata"`
-		} `json:"pollDetails"`
-	} `json:"snippet"`
+	Snippet ytPollSnippet `json:"snippet"`
+}
+
+// ytPollSnippet is the snippet block of a poll message.
+type ytPollSnippet struct {
+	PollDetails ytPollDetails `json:"pollDetails"`
+}
+
+// ytPollDetails is the poll's details block.
+type ytPollDetails struct {
+	Metadata ytPollMetadata `json:"metadata"`
+}
+
+// ytPollMetadata is the poll's status and its options.
+type ytPollMetadata struct {
+	Status  string         `json:"status"`
+	Options []ytPollOption `json:"options"`
+}
+
+// ytPollOption is one poll option.
+type ytPollOption struct {
+	// Tally is a STRING in the resource, and present only
+	// when the request is authorised by the channel owner.
+	Tally string `json:"tally"`
 }
 
 // ClosePoll closes the poll (liveChatMessages.transition, status=closed) and

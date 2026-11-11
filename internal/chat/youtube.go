@@ -202,12 +202,7 @@ func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
 			// the constant, the other compares the constant with its opening
 			// value. Both are arithmetic ABOUT the loop rather than observation
 			// OF it, and both passed throughout.
-			if idleFor < ytBroadcastPollMax {
-				idleFor *= 2
-				if idleFor > ytBroadcastPollMax {
-					idleFor = ytBroadcastPollMax
-				}
-			}
+			idleFor = nextBroadcastIdle(idleFor)
 			continue
 		}
 		idleFor = ytBroadcastPoll
@@ -402,11 +397,7 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 	)
 
 	for ctx.Err() == nil {
-		endpoint := y.cfg.APIBase + "/liveChat/messages?part=snippet,authorDetails&maxResults=200" +
-			"&liveChatId=" + url.QueryEscape(chatID)
-		if pageToken != "" {
-			endpoint += "&pageToken=" + url.QueryEscape(pageToken)
-		}
+		endpoint := youtubeMessagesURL(y.cfg.APIBase, chatID, pageToken)
 
 		var resp ytListResponse
 		err := doJSON(ctx, y.cfg.HTTP, http.MethodGet, endpoint, y.cfg.Token, nil, &resp)
@@ -414,22 +405,11 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 		y.budget.spend(QuotaCostListMessages)
 
 		if err != nil {
-			if statusOf(err) == http.StatusUnauthorized && !authRetried {
-				authRetried = true
+			cont, ret := y.listFailed(ctx, err, &failures, &authRetried)
+			if cont {
 				continue
 			}
-			failures++
-			done, retry, cerr := y.handleListError(ctx, err, failures)
-			if cerr != nil {
-				return cerr
-			}
-			if done {
-				return nil
-			}
-			if retry {
-				continue
-			}
-			return err
+			return ret
 		}
 
 		failures, authRetried = 0, false
@@ -444,14 +424,8 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 		delivered := y.deliverPage(resp.Items, cutoff, sink)
 
 		pageToken = resp.NextPageToken
-		if resp.PollingIntervalMillis > 0 {
-			apiInterval = time.Duration(resp.PollingIntervalMillis) * time.Millisecond
-		}
-		if delivered == 0 {
-			idle *= IdleBackoffStep
-		} else {
-			idle = 1
-		}
+		apiInterval = pollInterval(resp.PollingIntervalMillis, apiInterval)
+		idle = nextIdle(idle, delivered)
 		// offlineAt is YouTube telling us the broadcast has ended and the chat
 		// is closing. Believing it saves the rest of the day's quota that
 		// polling a dead chat would spend.
@@ -460,15 +434,7 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 			return nil
 		}
 
-		wait, ok := y.budget.intervalFor(apiInterval, idle)
-		if !ok {
-			if !y.waitForQuota(ctx) {
-				return nil
-			}
-			continue
-		}
-		y.setHealth(StateLive, "")
-		if !y.cfg.Sleep(ctx, wait) {
+		if y.pauseBeforeNext(ctx, apiInterval, idle) {
 			return nil
 		}
 	}
@@ -483,43 +449,133 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 		// Activity first, and before messageFrom drops an item with no text: a
 		// gifting event has none. The chat line is delivered below as before.
 		y.activityFrom(it, sink)
-		// A tombstone marks where a deleted message used to be: its id and
-		// publish time with nothing else. The reference says it is NOT sent at
-		// the moment of deletion, only shown in place of the message, so this
-		// catches a deletion when that stretch of chat is read again (the first
-		// page after a reconnect), not necessarily when it happens. The
-		// messageDeletedEvent and messageRetractedEvent types were removed from
-		// the reference (2026-06-23) because the API never returned them, and
-		// nothing here ever read them.
-		// https://developers.google.com/youtube/v3/live/docs/liveChatMessages
-		if it.Snippet.Type == "tombstone" {
-			retract(sink, it.ID)
+		if applyYouTubeRemoval(it, sink) {
 			continue
-		}
-		// A userBannedEvent IS sent when it happens, including a ban made by
-		// another moderator or in Studio. YouTube clears a banned user's
-		// backlog on its side, as Hub.Ban already assumes, so drop theirs here.
-		if it.Snippet.Type == "userBannedEvent" {
-			if d := it.Snippet.UserBannedDetails; d != nil && d.BannedUserDetails.ChannelID != "" {
-				retractUser(sink, d.BannedUserDetails.ChannelID)
-			}
-			// Falls through: the event line is still delivered, so a ban placed
-			// by another moderator or in Studio leaves a visible record.
 		}
 		if it.Snippet.PollDetails != nil {
 			y.notePoll(it)
 		}
-		m, ok := y.messageFrom(it)
-		if !ok {
-			continue
+		if y.deliverMessage(it, cutoff, sink) {
+			delivered++
 		}
-		if !cutoff.IsZero() && m.At.Before(cutoff) {
-			continue
-		}
-		delivered++
-		sink.Deliver(m)
 	}
 	return delivered
+}
+
+// applyYouTubeRemoval acts on a deleted message or a ban. It reports true when
+// the item is a tombstone, which is not delivered as a chat line.
+func applyYouTubeRemoval(it ytChatItem, sink Sink) bool {
+	// A tombstone marks where a deleted message used to be: its id and
+	// publish time with nothing else. The reference says it is NOT sent at
+	// the moment of deletion, only shown in place of the message, so this
+	// catches a deletion when that stretch of chat is read again (the first
+	// page after a reconnect), not necessarily when it happens. The
+	// messageDeletedEvent and messageRetractedEvent types were removed from
+	// the reference (2026-06-23) because the API never returned them, and
+	// nothing here ever read them.
+	// https://developers.google.com/youtube/v3/live/docs/liveChatMessages
+	if it.Snippet.Type == "tombstone" {
+		retract(sink, it.ID)
+		return true
+	}
+	// A userBannedEvent IS sent when it happens, including a ban made by
+	// another moderator or in Studio. YouTube clears a banned user's
+	// backlog on its side, as Hub.Ban already assumes, so drop theirs here.
+	if it.Snippet.Type == "userBannedEvent" {
+		if d := it.Snippet.UserBannedDetails; d != nil && d.BannedUserDetails.ChannelID != "" {
+			retractUser(sink, d.BannedUserDetails.ChannelID)
+		}
+		// Falls through: the event line is still delivered, so a ban placed
+		// by another moderator or in Studio leaves a visible record.
+	}
+	return false
+}
+
+// deliverMessage delivers the item's chat line when it has one at or after the
+// cutoff. It reports whether a line was delivered.
+func (y *YouTubeAdapter) deliverMessage(it ytChatItem, cutoff time.Time, sink Sink) bool {
+	m, ok := y.messageFrom(it)
+	if !ok {
+		return false
+	}
+	if !cutoff.IsZero() && m.At.Before(cutoff) {
+		return false
+	}
+	sink.Deliver(m)
+	return true
+}
+
+// nextBroadcastIdle doubles the wait while no broadcast is live, clamped to
+// ytBroadcastPollMax after doubling (see Run for why the clamp is not a guard).
+func nextBroadcastIdle(idleFor time.Duration) time.Duration {
+	if idleFor < ytBroadcastPollMax {
+		idleFor *= 2
+		if idleFor > ytBroadcastPollMax {
+			idleFor = ytBroadcastPollMax
+		}
+	}
+	return idleFor
+}
+
+// pollInterval takes the interval YouTube asked for, when it asked for one.
+func pollInterval(millis int, current time.Duration) time.Duration {
+	if millis > 0 {
+		return time.Duration(millis) * time.Millisecond
+	}
+	return current
+}
+
+// nextIdle backs off after an empty page and resets after one that delivered.
+func nextIdle(idle float64, delivered int) float64 {
+	if delivered == 0 {
+		return idle * IdleBackoffStep
+	}
+	return 1
+}
+
+// pauseBeforeNext waits out the next read. It reports true when pump should
+// stop: the quota wait was cancelled, or the sleep was.
+func (y *YouTubeAdapter) pauseBeforeNext(ctx context.Context, apiInterval time.Duration, idle float64) bool {
+	wait, ok := y.budget.intervalFor(apiInterval, idle)
+	if !ok {
+		return !y.waitForQuota(ctx)
+	}
+	y.setHealth(StateLive, "")
+	return !y.cfg.Sleep(ctx, wait)
+}
+
+// youtubeMessagesURL is the liveChatMessages page to read next.
+func youtubeMessagesURL(apiBase, chatID, pageToken string) string {
+	endpoint := apiBase + "/liveChat/messages?part=snippet,authorDetails&maxResults=200" +
+		"&liveChatId=" + url.QueryEscape(chatID)
+	if pageToken != "" {
+		endpoint += "&pageToken=" + url.QueryEscape(pageToken)
+	}
+	return endpoint
+}
+
+// listFailed decides what a failed page read means for pump. cont says to read
+// again; otherwise pump returns ret.
+func (y *YouTubeAdapter) listFailed(ctx context.Context, err error, failures *int, authRetried *bool) (cont bool, ret error) {
+	// authRetried allows one reactive retry of a 401: the TokenFunc is
+	// asked again, so a token that expired between refresh and call is
+	// replaced. A second 401 is the account's, not the clock's.
+	if statusOf(err) == http.StatusUnauthorized && !*authRetried {
+		*authRetried = true
+		return true, nil
+	}
+	*failures++
+	done, retry, cerr := y.handleListError(ctx, err, *failures)
+	if cerr != nil {
+		return false, cerr
+	}
+	if done {
+		return false, nil
+	}
+	if retry {
+		return true, nil
+	}
+	return false, err
 }
 
 // handleListError decides what a failed poll means.

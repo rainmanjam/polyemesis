@@ -147,9 +147,23 @@ func (a *xActivityState) kindStatus(kind activity.Kind) activity.KindStatus {
 	if !a.wanted {
 		return activity.KindStatus{Kind: kind, State: activity.KindOff, Detail: "X activity is not running for this account"}
 	}
-	var on, total int
-	var worst xActivityEvent
-	var haveWorst bool
+	on, total, worst, haveWorst := a.tallyKind(kind)
+	switch {
+	case total > 0 && on == total:
+		if kind == activity.KindSubscribe && !a.seen[kind] {
+			return activity.KindStatus{Kind: kind, State: activity.KindUnknown,
+				Detail: "Subscribed. X sends Premium subscriptions only when Creator Subscriptions are on for this account, which polyemesis cannot read, so this shows as on once one arrives."}
+		}
+		return activity.KindStatus{Kind: kind, State: activity.KindOn}
+	case haveWorst:
+		return activity.KindStatus{Kind: kind, State: worst.state, Detail: worst.detail}
+	}
+	return activity.KindStatus{Kind: kind, State: activity.KindOff}
+}
+
+// tallyKind counts the specs of one kind that are on, and picks the worst of the
+// rest. Caller holds a.mu.
+func (a *xActivityState) tallyKind(kind activity.Kind) (on, total int, worst xActivityEvent, haveWorst bool) {
 	for _, s := range xActivitySpecs {
 		if s.kind != kind {
 			continue
@@ -167,17 +181,7 @@ func (a *xActivityState) kindStatus(kind activity.Kind) activity.KindStatus {
 			worst, haveWorst = st, true
 		}
 	}
-	switch {
-	case total > 0 && on == total:
-		if kind == activity.KindSubscribe && !a.seen[kind] {
-			return activity.KindStatus{Kind: kind, State: activity.KindUnknown,
-				Detail: "Subscribed. X sends Premium subscriptions only when Creator Subscriptions are on for this account, which polyemesis cannot read, so this shows as on once one arrives."}
-		}
-		return activity.KindStatus{Kind: kind, State: activity.KindOn}
-	case haveWorst:
-		return activity.KindStatus{Kind: kind, State: worst.state, Detail: worst.detail}
-	}
-	return activity.KindStatus{Kind: kind, State: activity.KindOff}
+	return on, total, worst, haveWorst
 }
 
 func xKindRank(s activity.KindState) int {
@@ -235,59 +239,64 @@ func (x *XAdapter) ensureActivity(ctx context.Context, userID, webhookID string,
 		if cur, ok := x.act.get(sp.event); ok && cur.final {
 			continue
 		}
-		reuse := false
-		for _, s := range existing {
-			if s.EventType != sp.event || s.Filter.UserID != userID || s.expired(now) || strings.TrimSpace(s.ID) == "" {
-				continue
-			}
-			if s.WebhookID == webhookID && (sp.direction == "" || s.direction() == sp.direction) {
-				reuse = true
-				break
-			}
-			if s.Tag == xSubTag {
-				// Ours by tag but on another webhook, or without the direction we need: either would keep the
-				// right one from being made.
-				if s.WebhookID != webhookID {
-					x.noteReplaced(ctx, s.WebhookID, hosts)
-				}
-				x.removeSubscription(s.ID)
-			}
-		}
-		if reuse {
+		if x.reuseOrPrune(ctx, sp, existing, userID, webhookID, now, hosts) {
 			x.act.set(sp.event, xActivityEvent{state: activity.KindOn})
 			continue
 		}
-		filter := map[string]string{"user_id": userID}
-		if sp.direction != "" {
-			filter["direction"] = sp.direction
+		if err := x.createActivity(ctx, sp, userID, webhookID); err != nil {
+			return err
 		}
-		var sub struct {
-			Data struct {
-				Subscription struct {
-					ID string `json:"subscription_id"`
-				} `json:"subscription"`
-			} `json:"data"`
-		}
-		err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
-			"event_type": sp.event,
-			"filter":     filter,
-			"webhook_id": webhookID,
-			"tag":        xSubTag,
-		}, &sub)
-		if err != nil {
-			if stop := x.activityRefusal(sp, err); stop != nil {
-				return stop
-			}
-			continue
-		}
-		if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
-			// A subscription this run cannot name can never be removed, and a retry would leak another.
-			x.act.set(sp.event, xActivityEvent{state: activity.KindUnavailable, final: true,
-				detail: "X created the " + sp.event + " subscription but did not name it, so polyemesis left it alone"})
-			continue
-		}
-		x.act.set(sp.event, xActivityEvent{state: activity.KindOn})
 	}
+	return nil
+}
+
+// reuseOrPrune reports whether a live subscription for sp already sits on
+// webhookID. Along the way it removes the stale copies polyemesis made itself
+// (tagged with xSubTag) that would keep the right one from being made.
+func (x *XAdapter) reuseOrPrune(ctx context.Context, sp xActivitySpec, existing []xSubRec, userID, webhookID string, now time.Time, hosts map[string]string) bool {
+	for _, s := range existing {
+		if s.EventType != sp.event || s.Filter.UserID != userID || s.expired(now) || strings.TrimSpace(s.ID) == "" {
+			continue
+		}
+		if s.WebhookID == webhookID && (sp.direction == "" || s.direction() == sp.direction) {
+			return true
+		}
+		if s.Tag == xSubTag {
+			// Ours by tag but on another webhook, or without the direction we need: either would keep the
+			// right one from being made.
+			if s.WebhookID != webhookID {
+				x.noteReplaced(ctx, s.WebhookID, hosts)
+			}
+			x.removeSubscription(s.ID)
+		}
+	}
+	return false
+}
+
+// createActivity subscribes sp on webhookID. A refusal either stops the run
+// (returned) or is recorded and the run carries on (nil).
+func (x *XAdapter) createActivity(ctx context.Context, sp xActivitySpec, userID, webhookID string) error {
+	filter := map[string]string{"user_id": userID}
+	if sp.direction != "" {
+		filter["direction"] = sp.direction
+	}
+	var sub xSubscribeResponse
+	err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
+		"event_type": sp.event,
+		"filter":     filter,
+		"webhook_id": webhookID,
+		"tag":        xSubTag,
+	}, &sub)
+	if err != nil {
+		return x.activityRefusal(sp, err)
+	}
+	if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
+		// A subscription this run cannot name can never be removed, and a retry would leak another.
+		x.act.set(sp.event, xActivityEvent{state: activity.KindUnavailable, final: true,
+			detail: "X created the " + sp.event + " subscription but did not name it, so polyemesis left it alone"})
+		return nil
+	}
+	x.act.set(sp.event, xActivityEvent{state: activity.KindOn})
 	return nil
 }
 
@@ -361,70 +370,15 @@ func (u xUserRef) actor() *activity.Actor {
 func (x *XAdapter) activityEvent(ev xWebhookEvent) (activity.Event, bool) {
 	a := &x.act
 	now := x.cfg.Now()
-	at := now
-	t, err := time.Parse(time.RFC3339Nano, ev.CreatedAt)
-	if err != nil {
-		// Without a creation time the replay floor and age limit cannot be applied, and a
-		// restart clears the in-memory dedupe, so an activity delivery is treated as stale.
-		switch ev.Type {
-		case xEventFollow, xEventSubscribe, xEventBroadcastStart, xEventBroadcastEnd:
-			a.bump(&a.stale)
-			return activity.Event{}, false
-		}
-	} else {
-		if t.Before(a.floor) || now.Sub(t) > xActivityMaxAge {
-			a.bump(&a.stale)
-			return activity.Event{}, false
-		}
-		if t.Before(now) {
-			at = t
-		}
+	at, ok := a.eventAt(ev, now)
+	if !ok {
+		return activity.Event{}, false
 	}
 	out := activity.Event{
 		Platform: string(db.PlatformX), Account: x.cfg.AccountRef, At: at,
 		Source: activity.Source{Type: ev.Type, ID: ev.UUID},
 	}
-	switch ev.Type {
-	case xEventFollow, xEventSubscribe:
-		var p struct {
-			Source xUserRef `json:"source"`
-			Target xUserRef `json:"target"`
-		}
-		if json.Unmarshal(ev.Payload, &p) != nil || strings.TrimSpace(p.Source.Data.ID) == "" || strings.TrimSpace(p.Target.Data.ID) == "" ||
-			(strings.TrimSpace(p.Source.Data.Name) == "" && strings.TrimSpace(p.Source.Data.Username) == "") {
-			x.malformed(ev)
-			return activity.Event{}, false
-		}
-		if p.Target.Data.ID != x.cfg.AccountRef {
-			// The broadcaster followed or subscribed to someone else: not an alert.
-			a.bump(&a.notInbound)
-			return activity.Event{}, false
-		}
-		out.Actor = p.Source.actor()
-		if ev.Type == xEventFollow {
-			out.Kind = activity.KindFollow
-		} else {
-			out.Kind, out.Product = activity.KindSubscribe, "premium"
-		}
-	case xEventBroadcastStart, xEventBroadcastEnd:
-		var p struct {
-			Title string   `json:"title"`
-			State string   `json:"broadcast_state"`
-			User  xUserRef `json:"user"`
-		}
-		if json.Unmarshal(ev.Payload, &p) != nil {
-			x.malformed(ev)
-			return activity.Event{}, false
-		}
-		if id := strings.TrimSpace(p.User.Data.ID); id != "" && id != x.cfg.AccountRef {
-			a.bump(&a.notInbound)
-			return activity.Event{}, false
-		}
-		out.Kind, out.Title, out.Phase = activity.KindStream, p.Title, "online"
-		if ev.Type == xEventBroadcastEnd {
-			out.Phase = "offline"
-		}
-	default:
+	if !x.decodeActivity(ev, &out) {
 		return activity.Event{}, false
 	}
 	if err := out.Normalise(x.cfg.Now).Validate(); err != nil {
@@ -439,6 +393,91 @@ func (x *XAdapter) activityEvent(ev xWebhookEvent) (activity.Event, bool) {
 	a.seen[out.Kind] = true
 	a.mu.Unlock()
 	return out, true
+}
+
+// eventAt returns the time an activity is stamped with, or false when the
+// delivery is stale and must not be emitted.
+func (a *xActivityState) eventAt(ev xWebhookEvent, now time.Time) (time.Time, bool) {
+	t, err := time.Parse(time.RFC3339Nano, ev.CreatedAt)
+	if err != nil {
+		// Without a creation time the replay floor and age limit cannot be applied, and a
+		// restart clears the in-memory dedupe, so an activity delivery is treated as stale.
+		switch ev.Type {
+		case xEventFollow, xEventSubscribe, xEventBroadcastStart, xEventBroadcastEnd:
+			a.bump(&a.stale)
+			return time.Time{}, false
+		}
+		return now, true
+	}
+	if t.Before(a.floor) || now.Sub(t) > xActivityMaxAge {
+		a.bump(&a.stale)
+		return time.Time{}, false
+	}
+	if t.Before(now) {
+		return t, true
+	}
+	return now, true
+}
+
+// decodeActivity fills out from the payload for the event types polyemesis
+// turns into activity. An unknown type, or a payload that is not for this
+// account, is not an activity.
+func (x *XAdapter) decodeActivity(ev xWebhookEvent, out *activity.Event) bool {
+	switch ev.Type {
+	case xEventFollow, xEventSubscribe:
+		return x.decodeFollowActivity(ev, out)
+	case xEventBroadcastStart, xEventBroadcastEnd:
+		return x.decodeBroadcastActivity(ev, out)
+	default:
+		return false
+	}
+}
+
+func (x *XAdapter) decodeFollowActivity(ev xWebhookEvent, out *activity.Event) bool {
+	a := &x.act
+	var p struct {
+		Source xUserRef `json:"source"`
+		Target xUserRef `json:"target"`
+	}
+	if json.Unmarshal(ev.Payload, &p) != nil || strings.TrimSpace(p.Source.Data.ID) == "" || strings.TrimSpace(p.Target.Data.ID) == "" ||
+		(strings.TrimSpace(p.Source.Data.Name) == "" && strings.TrimSpace(p.Source.Data.Username) == "") {
+		x.malformed(ev)
+		return false
+	}
+	if p.Target.Data.ID != x.cfg.AccountRef {
+		// The broadcaster followed or subscribed to someone else: not an alert.
+		a.bump(&a.notInbound)
+		return false
+	}
+	out.Actor = p.Source.actor()
+	if ev.Type == xEventFollow {
+		out.Kind = activity.KindFollow
+	} else {
+		out.Kind, out.Product = activity.KindSubscribe, "premium"
+	}
+	return true
+}
+
+func (x *XAdapter) decodeBroadcastActivity(ev xWebhookEvent, out *activity.Event) bool {
+	a := &x.act
+	var p struct {
+		Title string   `json:"title"`
+		State string   `json:"broadcast_state"`
+		User  xUserRef `json:"user"`
+	}
+	if json.Unmarshal(ev.Payload, &p) != nil {
+		x.malformed(ev)
+		return false
+	}
+	if id := strings.TrimSpace(p.User.Data.ID); id != "" && id != x.cfg.AccountRef {
+		a.bump(&a.notInbound)
+		return false
+	}
+	out.Kind, out.Title, out.Phase = activity.KindStream, p.Title, "online"
+	if ev.Type == xEventBroadcastEnd {
+		out.Phase = "offline"
+	}
+	return true
 }
 
 func (a *xActivityState) bump(c *int) {

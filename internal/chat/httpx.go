@@ -140,7 +140,7 @@ func reasonOf(err error) string {
 // package can leak it — which is exactly how tokens escape in projects that
 // pass ?access_token=.
 func doJSON(ctx context.Context, hc *http.Client, method, endpoint string, token TokenFunc, payload, out any) error {
-	return doJSONHeaders(ctx, hc, method, endpoint, token, nil, payload, out)
+	return doJSONHeaders(ctx, hc, jsonCall{method: method, endpoint: endpoint, token: token}, payload, out)
 }
 
 // respDateKey asks doJSONHeaders to store the response's Date header (the
@@ -154,38 +154,56 @@ type respDateKey struct{}
 // widening doJSON's signature at thirty call sites, and headers are for
 // IDENTIFIERS only -- the Authorization header is still built here from the
 // TokenFunc, so no caller is able to route a credential through this map.
-func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string, token TokenFunc, headers map[string]string, payload, out any) error {
+func doJSONHeaders(ctx context.Context, hc *http.Client, call jsonCall, payload, out any) error {
 	if hc == nil {
 		hc = &http.Client{Timeout: defaultHTTPTimeout}
 	}
+	req, err := buildJSONRequest(ctx, call, payload)
+	if err != nil {
+		return err
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	recordResponseDate(ctx, resp)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return jsonStatusError(resp, raw, call.endpoint)
+	}
+	return decodeJSONBody(resp, raw, call.endpoint, out)
+}
+
+// jsonCall is what doJSONHeaders sends: the verb, the URL, how to get the bearer
+// token and any identifier headers. Grouped so each call site names its fields
+// rather than passing a run of positional arguments.
+type jsonCall struct {
+	method   string
+	endpoint string
+	token    TokenFunc
+	headers  map[string]string
+}
+
+// buildJSONRequest encodes the payload and assembles the request: the body, the
+// bearer token, then the headers.
+func buildJSONRequest(ctx context.Context, call jsonCall, payload any) (*http.Request, error) {
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	req, err := http.NewRequestWithContext(ctx, call.method, call.endpoint, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if token != nil {
-		tok, err := token(ctx)
-		if err != nil {
-			// A refresh the platform refused because the grant is gone
-			// (revoked, expired for good) cannot be fixed by trying again.
-			// Left as a plain error, the Hub would redial the token endpoint
-			// every few seconds for ever, showing raw token-endpoint JSON.
-			if errors.Is(err, oauth.ErrReconnectRequired) {
-				return Fatal(fmt.Errorf("the account's authorization was revoked or has expired; reconnect it in Settings → Platforms: %w", oauth.ErrReconnectRequired))
-			}
-			return fmt.Errorf("no usable access token: %w", err)
+	if call.token != nil {
+		if err := setBearer(ctx, req, call.token); err != nil {
+			return nil, err
 		}
-		if tok == "" {
-			return fmt.Errorf("no access token; reconnect the account in Settings → Platforms")
-		}
-		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	req.Header.Set("Accept", "application/json")
 	if payload != nil {
@@ -193,44 +211,69 @@ func doJSONHeaders(ctx context.Context, hc *http.Client, method, endpoint string
 	}
 	// After Authorization, never before: a caller cannot overwrite the bearer
 	// token by putting "Authorization" in this map.
-	for k, v := range headers {
+	for k, v := range call.headers {
 		if strings.EqualFold(k, "Authorization") {
 			continue
 		}
 		req.Header.Set(k, v)
 	}
+	return req, nil
+}
 
-	resp, err := hc.Do(req)
+// setBearer fetches the access token and sets the Authorization header from it.
+func setBearer(ctx context.Context, req *http.Request, token TokenFunc) error {
+	tok, err := token(ctx)
 	if err != nil {
-		return err
+		// A refresh the platform refused because the grant is gone
+		// (revoked, expired for good) cannot be fixed by trying again.
+		// Left as a plain error, the Hub would redial the token endpoint
+		// every few seconds for ever, showing raw token-endpoint JSON.
+		if errors.Is(err, oauth.ErrReconnectRequired) {
+			return Fatal(fmt.Errorf("the account's authorization was revoked or has expired; reconnect it in Settings → Platforms: %w", oauth.ErrReconnectRequired))
+		}
+		return fmt.Errorf("no usable access token: %w", err)
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if tok == "" {
+		return fmt.Errorf("no access token; reconnect the account in Settings → Platforms")
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	return nil
+}
+
+// recordResponseDate hands the response's Date header back to a caller that
+// asked for it through the context.
+func recordResponseDate(ctx context.Context, resp *http.Response) {
 	if p, ok := ctx.Value(respDateKey{}).(*time.Time); ok {
 		if d, err := http.ParseTime(resp.Header.Get("Date")); err == nil {
 			*p = d
 		}
 	}
+}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return &apiError{
-			Status:     resp.StatusCode,
-			URL:        stripQuery(endpoint),
-			Body:       shorten(raw),
-			Reason:     errorReason(raw),
-			full:       string(raw),
-			Wait:       oauth.GraphWait(resp.Header),
-			Raw:        raw[:min(len(raw), 4096)],
-			Header:     resp.Header,
-			RetryAfter: retryAfterOf(resp.Header, time.Now()),
-			// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
-			Problem:       oauth.XProblemText(raw),
-			Types:         oauth.XProblemTypes(raw),
-			Message:       errorMessage(raw),
-			Edge:          isEdgeAnswer(resp.Header, raw),
-			RateRemaining: strings.TrimSpace(resp.Header.Get("Ratelimit-Remaining")),
-		}
+// jsonStatusError builds the apiError for a non-2xx answer.
+func jsonStatusError(resp *http.Response, raw []byte, endpoint string) error {
+	return &apiError{
+		Status:     resp.StatusCode,
+		URL:        stripQuery(endpoint),
+		Body:       shorten(raw),
+		Reason:     errorReason(raw),
+		full:       string(raw),
+		Wait:       oauth.GraphWait(resp.Header),
+		Raw:        raw[:min(len(raw), 4096)],
+		Header:     resp.Header,
+		RetryAfter: retryAfterOf(resp.Header, time.Now()),
+		// Parsed from raw, not Body: Body is cut at 300 characters and a cut envelope does not parse.
+		Problem:       oauth.XProblemText(raw),
+		Types:         oauth.XProblemTypes(raw),
+		Message:       errorMessage(raw),
+		Edge:          isEdgeAnswer(resp.Header, raw),
+		RateRemaining: strings.TrimSpace(resp.Header.Get("Ratelimit-Remaining")),
 	}
+}
+
+// decodeJSONBody unmarshals a successful answer into out. An empty body or a
+// nil out is not an error.
+func decodeJSONBody(resp *http.Response, raw []byte, endpoint string, out any) error {
 	if out == nil || len(raw) == 0 {
 		return nil
 	}

@@ -138,49 +138,11 @@ func (x *XAdapter) ListMutes(ctx context.Context) ([]ChatMute, bool, error) {
 		truncated bool
 	)
 	for page := 0; page < xMuteListPages; page++ {
-		q := url.Values{
-			"max_results":                {"100"},
-			"expansions":                 {"user_id"},
-			"user.fields":                {"username,name"},
-			"broadcast_chat_mute.fields": {"end_at_ms"},
-		}
-		if token != "" {
-			q.Set("pagination_token", token)
-		}
-		var resp struct {
-			Data []struct {
-				UserID  string `json:"user_id"`
-				EndAtMS string `json:"end_at_ms"`
-			} `json:"data"`
-			Includes struct {
-				Users []struct {
-					ID       string `json:"id"`
-					Username string `json:"username"`
-					Name     string `json:"name"`
-				} `json:"users"`
-			} `json:"includes"`
-			Meta struct {
-				NextToken string `json:"next_token"`
-			} `json:"meta"`
-		}
-		if err := x.xCall(ctx, http.MethodGet, xBroadcastsPath+"chat/mutes?"+q.Encode(), false, nil, &resp); err != nil {
+		resp, err := x.fetchMutePage(ctx, token)
+		if err != nil {
 			return nil, false, fmt.Errorf("X would not list the muted viewers: %s", xRefusal(err))
 		}
-		users := make(map[string]int, len(resp.Includes.Users))
-		for i, u := range resp.Includes.Users {
-			users[u.ID] = i
-		}
-		for _, m := range resp.Data {
-			row := ChatMute{UserID: m.UserID}
-			if i, ok := users[m.UserID]; ok {
-				row.Username, row.Name = resp.Includes.Users[i].Username, resp.Includes.Users[i].Name
-			}
-			if ms, err := strconv.ParseInt(strings.TrimSpace(m.EndAtMS), 10, 64); err == nil && ms > 0 {
-				t := time.UnixMilli(ms).UTC()
-				row.EndsAt = &t
-			}
-			out = append(out, row)
-		}
+		out = append(out, muteRows(resp)...)
 		// X sets next_token on every full page, so a last page can be followed by an empty one.
 		if len(resp.Data) == 0 || resp.Meta.NextToken == "" {
 			break
@@ -190,6 +152,81 @@ func (x *XAdapter) ListMutes(ctx context.Context) ([]ChatMute, bool, error) {
 		truncated = page == xMuteListPages-1
 	}
 	return out, truncated, nil
+}
+
+// fetchMutePage reads one page of the account's chat mutes, from token onward.
+func (x *XAdapter) fetchMutePage(ctx context.Context, token string) (xMuteListPage, error) {
+	q := url.Values{
+		"max_results":                {"100"},
+		"expansions":                 {"user_id"},
+		"user.fields":                {"username,name"},
+		"broadcast_chat_mute.fields": {"end_at_ms"},
+	}
+	if token != "" {
+		q.Set("pagination_token", token)
+	}
+	var resp xMuteListPage
+	err := x.xCall(ctx, http.MethodGet, xBroadcastsPath+"chat/mutes?"+q.Encode(), false, nil, &resp)
+	return resp, err
+}
+
+// muteRows joins each mute to its user's name and turns its end time into a
+// time, one row per mute in the page's order.
+func muteRows(resp xMuteListPage) []ChatMute {
+	var rows []ChatMute
+	users := make(map[string]int, len(resp.Includes.Users))
+	for i, u := range resp.Includes.Users {
+		users[u.ID] = i
+	}
+	for _, m := range resp.Data {
+		row := ChatMute{UserID: m.UserID}
+		if i, ok := users[m.UserID]; ok {
+			row.Username, row.Name = resp.Includes.Users[i].Username, resp.Includes.Users[i].Name
+		}
+		row.EndsAt = muteEndsAt(m.EndAtMS)
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// muteEndsAt reads an end time in epoch milliseconds. A missing or non-positive
+// value is an indefinite mute, and gives nil.
+func muteEndsAt(endAtMS string) *time.Time {
+	if ms, err := strconv.ParseInt(strings.TrimSpace(endAtMS), 10, 64); err == nil && ms > 0 {
+		t := time.UnixMilli(ms).UTC()
+		return &t
+	}
+	return nil
+}
+
+// xMuteListPage is one page of GET /2/broadcasts/chat/mutes.
+type xMuteListPage struct {
+	Data     []xMuteEntry  `json:"data"`
+	Includes xMuteIncludes `json:"includes"`
+	Meta     xMuteMeta     `json:"meta"`
+}
+
+// xMuteEntry is one mute on the page.
+type xMuteEntry struct {
+	UserID  string `json:"user_id"`
+	EndAtMS string `json:"end_at_ms"`
+}
+
+// xMuteIncludes carries the users the page's mutes refer to.
+type xMuteIncludes struct {
+	Users []xMuteUser `json:"users"`
+}
+
+// xMuteUser is one user named by a mute.
+type xMuteUser struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
+}
+
+// xMuteMeta holds the cursor for the next page.
+type xMuteMeta struct {
+	NextToken string `json:"next_token"`
 }
 
 // ------------------------------------------------------- mute and delete

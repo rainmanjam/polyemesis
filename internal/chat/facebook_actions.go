@@ -33,7 +33,10 @@ var (
 // time one out. The Page block list (/{page-id}/blocked) has no duration: a
 // block stays until it is lifted, so a timeout would silently become a
 // permanent ban.
-func (f *FacebookAdapter) NoTimeout() {}
+func (f *FacebookAdapter) NoTimeout() {
+	// Deliberately empty: a Page block has no duration to set, so there is
+	// nothing to do. The doc comment above explains why.
+}
 
 // graphCode is the numeric code of Meta's error envelope, or zero when err is
 // not one. The body is the apiError's own, already shortened, which is whole

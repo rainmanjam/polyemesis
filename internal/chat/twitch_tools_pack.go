@@ -126,19 +126,49 @@ func (t *TwitchAdapter) SyncTrackedTerms(ctx context.Context, want []string, rec
 	if err != nil {
 		return res, err
 	}
-	have := make(map[string]bool, len(existing))
-	listed := make(map[string]bool, len(existing))
+	have, listed := indexBlockedTerms(existing)
+	wanted := wantedKeys(want)
+	forgotten, stale := sortRecordedTerms(recorded, wanted, have, &res)
+	if err := t.removeTracked(ctx, stale, &res); err != nil {
+		return res, err
+	}
+	res.Remaining = len(stale) - res.Removed
+
+	pending := pendingTerms(want, have, &res)
+	if err := t.addPendingTerms(ctx, pending, maxAdds, listed, forgotten, &res); err != nil {
+		return res, err
+	}
+	res.Done = res.Remaining == 0
+	return res, nil
+}
+
+// indexBlockedTerms maps each term key Twitch has to present, and each term id
+// it lists.
+func indexBlockedTerms(existing []BlockedTerm) (have, listed map[string]bool) {
+	have = make(map[string]bool, len(existing))
+	listed = make(map[string]bool, len(existing))
 	for _, e := range existing {
 		have[TermKey(e.Text)] = true
 		listed[e.ID] = true
 	}
+	return have, listed
+}
+
+// wantedKeys maps the key of each wanted term.
+func wantedKeys(want []string) map[string]bool {
 	wanted := make(map[string]bool, len(want))
 	for _, w := range want {
 		wanted[TermKey(w)] = true
 	}
-	forgotten := map[string]bool{}
-	// Recorded ids that are still wanted stay recorded, and count as present.
-	stale := map[string]string{}
+	return wanted
+}
+
+// sortRecordedTerms splits the recorded terms into those to remove and those
+// that are gone from Twitch. Recorded ids that are still wanted stay recorded,
+// and count as present.
+func sortRecordedTerms(recorded map[string]string, wanted, have map[string]bool, res *TrackedTermSync) (forgotten map[string]bool, stale map[string]string) {
+	forgotten = map[string]bool{}
+	stale = map[string]string{}
 	for id, key := range recorded {
 		switch {
 		case !wanted[key]:
@@ -151,13 +181,13 @@ func (t *TwitchAdapter) SyncTrackedTerms(ctx context.Context, want []string, rec
 			forgotten[key] = true
 		}
 	}
-	if err := t.removeTracked(ctx, stale, &res); err != nil {
-		return res, err
-	}
-	res.Remaining = len(stale) - res.Removed
+	return forgotten, stale
+}
 
+// pendingTerms returns the wanted terms Twitch does not have yet, recording the
+// ones it skips and the ones it already has.
+func pendingTerms(want []string, have map[string]bool, res *TrackedTermSync) []string {
 	seen := map[string]bool{}
-	adds := 0
 	var pending []string
 	for _, raw := range want {
 		term := strings.TrimSpace(raw)
@@ -176,6 +206,13 @@ func (t *TwitchAdapter) SyncTrackedTerms(ctx context.Context, want []string, rec
 		}
 		seen[key] = true
 	}
+	return pending
+}
+
+// addPendingTerms adds the pending terms, up to maxAdds and the deadline. A
+// failed add stops the run and is returned; what was added before it is kept.
+func (t *TwitchAdapter) addPendingTerms(ctx context.Context, pending []string, maxAdds int, listed, forgotten map[string]bool, res *TrackedTermSync) error {
+	adds := 0
 	for i, term := range pending {
 		if adds >= maxAdds || nearDeadline(ctx) {
 			res.Remaining += len(pending) - i
@@ -184,7 +221,7 @@ func (t *TwitchAdapter) SyncTrackedTerms(ctx context.Context, want []string, rec
 		got, ref, err := t.addBlockedTerm(ctx, term)
 		if err != nil {
 			res.Remaining += len(pending) - i
-			return res, fmt.Errorf("stopped after adding %d of %d: %w", adds, len(pending), err)
+			return fmt.Errorf("stopped after adding %d of %d: %w", adds, len(pending), err)
 		}
 		adds++
 		if !listed[got.ID] && ours(got, ref) {
@@ -199,8 +236,7 @@ func (t *TwitchAdapter) SyncTrackedTerms(ctx context.Context, want []string, rec
 			res.Present++
 		}
 	}
-	res.Done = res.Remaining == 0
-	return res, nil
+	return nil
 }
 
 // RemoveTrackedTerms deletes the recorded terms: the reversal. Only ids the

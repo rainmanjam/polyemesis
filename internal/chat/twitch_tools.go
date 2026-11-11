@@ -193,6 +193,13 @@ type UnbanRequest struct {
 	ResolutionText string `json:"resolutionText,omitempty"`
 }
 
+// Helix paths used by more than one moderation tool. Kept as constants so the
+// path cannot drift between the pin tools or the blocked-terms tools.
+const (
+	twitchPinsPath         = "/chat/pins"
+	twitchBlockedTermsPath = "/moderation/blocked_terms"
+)
+
 // Twitch's published limits, enforced here so the operator is told in words
 // rather than by a 400 that names a field.
 const (
@@ -262,14 +269,14 @@ func (t *TwitchAdapter) helix(ctx context.Context, method, path string, q url.Va
 	if t.cfg.HelixToken != nil {
 		tokenFn = capture
 	}
-	err := doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, tokenFn, headers, body, out)
+	err := doJSONHeaders(ctx, t.cfg.HTTP, jsonCall{method: method, endpoint: endpoint, token: tokenFn, headers: headers}, body, out)
 	if statusOf(err) == http.StatusUnauthorized && t.cfg.HelixRefresh != nil && !missingScope(err) && !clientMismatch(err) {
 		// Not a scope problem, so the token is stale, revoked or invalid. One
 		// forced refresh settles which: if it works the call is retried, and if
 		// it does not the original 401 stands for unauthorizedAdvice to explain.
 		tok, rerr := t.cfg.HelixRefresh(ctx, used)
 		if rerr == nil && tok != "" {
-			err = doJSONHeaders(ctx, t.cfg.HTTP, method, endpoint, StaticToken(tok), headers, body, out)
+			err = doJSONHeaders(ctx, t.cfg.HTTP, jsonCall{method: method, endpoint: endpoint, token: StaticToken(tok), headers: headers}, body, out)
 		} else if rerr != nil {
 			err = &refreshFailedError{err: err, cause: rerr}
 		}
@@ -410,10 +417,10 @@ func (t *TwitchAdapter) resolveUser(ctx context.Context, u UserRef) (string, err
 
 // pageAll follows a Helix cursor up to twitchPageCap pages. more reports that
 // the cap stopped it.
-func (t *TwitchAdapter) pageAll(ctx context.Context, path string, q url.Values, cap int,
+func (t *TwitchAdapter) pageAll(ctx context.Context, path string, q url.Values, pageCap int,
 	each func(raw []byte) (n int, cursor string, err error)) (more bool, err error) {
 	after := ""
-	for i := 0; i < cap; i++ {
+	for i := 0; i < pageCap; i++ {
 		qq := url.Values{}
 		for k, v := range q {
 			qq[k] = v
@@ -596,7 +603,7 @@ func (t *TwitchAdapter) PinMessage(ctx context.Context, messageID string, sec in
 	if err != nil {
 		return err
 	}
-	return t.toolError(t.helix(ctx, http.MethodPut, "/chat/pins", q, nil, nil), "pin that message", pinHints)
+	return t.toolError(t.helix(ctx, http.MethodPut, twitchPinsPath, q, nil, nil), "pin that message", pinHints)
 }
 
 // UpdatePin changes how long the pinned message stays. PATCH /helix/chat/pins.
@@ -605,7 +612,7 @@ func (t *TwitchAdapter) UpdatePin(ctx context.Context, messageID string, sec int
 	if err != nil {
 		return err
 	}
-	return t.toolError(t.helix(ctx, http.MethodPatch, "/chat/pins", q, nil, nil), "change that pin", pinHints)
+	return t.toolError(t.helix(ctx, http.MethodPatch, twitchPinsPath, q, nil, nil), "change that pin", pinHints)
 }
 
 // Unpin removes a pin. DELETE /helix/chat/pins.
@@ -614,7 +621,7 @@ func (t *TwitchAdapter) Unpin(ctx context.Context, messageID string) error {
 	if err != nil {
 		return err
 	}
-	return t.toolError(t.helix(ctx, http.MethodDelete, "/chat/pins", q, nil, nil), "unpin that message", pinHints)
+	return t.toolError(t.helix(ctx, http.MethodDelete, twitchPinsPath, q, nil, nil), "unpin that message", pinHints)
 }
 
 // GetPin reads the pinned message, nil if none. GET /helix/chat/pins.
@@ -634,7 +641,7 @@ func (t *TwitchAdapter) GetPin(ctx context.Context) (*PinnedMessage, error) {
 			} `json:"message"`
 		} `json:"data"`
 	}
-	if err := t.helix(ctx, http.MethodGet, "/chat/pins", t.modQuery(), nil, &out); err != nil {
+	if err := t.helix(ctx, http.MethodGet, twitchPinsPath, t.modQuery(), nil, &out); err != nil {
 		return nil, t.toolError(err, "read the pinned message", nil)
 	}
 	if len(out.Data) == 0 {
@@ -733,7 +740,7 @@ func (t *TwitchAdapter) ListBlockedTerms(ctx context.Context) ([]BlockedTerm, er
 	q := t.modQuery()
 	q.Set("first", "100")
 	var out []BlockedTerm
-	_, err := t.pageAll(ctx, "/moderation/blocked_terms", q, twitchPageCap, func(raw []byte) (int, string, error) {
+	_, err := t.pageAll(ctx, twitchBlockedTermsPath, q, twitchPageCap, func(raw []byte) (int, string, error) {
 		var page struct {
 			Data []struct {
 				ID        string `json:"id"`
@@ -808,7 +815,7 @@ func (t *TwitchAdapter) addBlockedTermReq(ctx context.Context, text string) (Blo
 			CreatedAt string `json:"created_at"`
 		} `json:"data"`
 	}
-	err := t.helix(ctx, http.MethodPost, "/moderation/blocked_terms", t.modQuery(),
+	err := t.helix(ctx, http.MethodPost, twitchBlockedTermsPath, t.modQuery(),
 		map[string]string{"text": text}, &out)
 	if err != nil {
 		return BlockedTerm{}, t.toolError(err, "block that term", nil)
@@ -832,7 +839,7 @@ func (t *TwitchAdapter) DeleteBlockedTerm(ctx context.Context, id string) error 
 	}
 	q := t.modQuery()
 	q.Set("id", id)
-	return t.toolError(t.helix(ctx, http.MethodDelete, "/moderation/blocked_terms", q, nil, nil), "remove that term", nil)
+	return t.toolError(t.helix(ctx, http.MethodDelete, twitchBlockedTermsPath, q, nil, nil), "remove that term", nil)
 }
 
 // SyncBlockedTerms pushes terms to Twitch, ADDING ONLY.

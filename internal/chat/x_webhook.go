@@ -285,51 +285,59 @@ func (x *XAdapter) ensureSubscriptions(ctx context.Context, userID, webhookID st
 	now := x.cfg.Now()
 	hosts := map[string]string{} // webhook id -> host, read lazily and only when a replacement needs it
 	for _, event := range []string{xEventChat, xEventChatRemove} {
-		reuse := false
-		for _, s := range existing {
-			if s.EventType != event || s.Filter.UserID != userID || s.expired(now) || strings.TrimSpace(s.ID) == "" {
-				continue
-			}
-			if s.WebhookID == webhookID {
-				reuse = true
-				break
-			}
-			if s.Tag == xSubTag {
-				// X allows one subscription per event and user. This one is ours by tag but on another webhook, which
-				// is either our own old address or ANOTHER polyemesis install sharing this X app. Either way it
-				// would keep ours from being made; replacing it is the only option, and the operator is told.
-				x.noteReplaced(ctx, s.WebhookID, hosts)
-				x.removeSubscription(s.ID)
-			}
-		}
-		if reuse {
+		if x.reuseOrReplaceChat(ctx, event, existing, userID, webhookID, now, hosts) {
 			continue
 		}
-		var sub struct {
-			Data struct {
-				Subscription struct {
-					ID string `json:"subscription_id"`
-				} `json:"subscription"`
-			} `json:"data"`
-		}
-		if err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
-			"event_type": event,
-			"filter":     map[string]string{"user_id": userID},
-			"webhook_id": webhookID,
-			"tag":        xSubTag,
-		}, &sub); err != nil {
-			return xFail("X refused the "+event+" subscription", err)
-		}
-		if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
-			// X created a subscription this run cannot name, so it can never be removed. Fatal, because a retry would
-			// only create, and leak, another one.
-			return Fatal(fmt.Errorf("X created the %s subscription but returned no subscription_id, "+
-				"so polyemesis could not find it again; live chat is stopped rather than creating more", event))
+		if err := x.createChatSubscription(ctx, event, userID, webhookID); err != nil {
+			return err
 		}
 	}
 	// The viewer-activity events come after chat, so a refusal of one can never keep chat from registering.
 	if x.act.want() {
 		return x.ensureActivity(ctx, userID, webhookID, existing)
+	}
+	return nil
+}
+
+// reuseOrReplaceChat reports whether a live chat subscription for event already
+// sits on webhookID. Along the way it replaces the polyemesis-tagged copies on
+// any other webhook, since X allows one subscription per event and user.
+func (x *XAdapter) reuseOrReplaceChat(ctx context.Context, event string, existing []xSubRec, userID, webhookID string, now time.Time, hosts map[string]string) bool {
+	for _, s := range existing {
+		if s.EventType != event || s.Filter.UserID != userID || s.expired(now) || strings.TrimSpace(s.ID) == "" {
+			continue
+		}
+		if s.WebhookID == webhookID {
+			return true
+		}
+		if s.Tag == xSubTag {
+			// X allows one subscription per event and user. This one is ours by tag but on another webhook, which
+			// is either our own old address or ANOTHER polyemesis install sharing this X app. Either way it
+			// would keep ours from being made; replacing it is the only option, and the operator is told.
+			x.noteReplaced(ctx, s.WebhookID, hosts)
+			x.removeSubscription(s.ID)
+		}
+	}
+	return false
+}
+
+// createChatSubscription subscribes event on webhookID. A subscription X does
+// not name is fatal, because a retry would only create, and leak, another one.
+func (x *XAdapter) createChatSubscription(ctx context.Context, event, userID, webhookID string) error {
+	var sub xSubscribeResponse
+	if err := x.xCall(ctx, http.MethodPost, "/2/activity/subscriptions", false, map[string]any{
+		"event_type": event,
+		"filter":     map[string]string{"user_id": userID},
+		"webhook_id": webhookID,
+		"tag":        xSubTag,
+	}, &sub); err != nil {
+		return xFail("X refused the "+event+" subscription", err)
+	}
+	if strings.TrimSpace(sub.Data.Subscription.ID) == "" {
+		// X created a subscription this run cannot name, so it can never be removed. Fatal, because a retry would
+		// only create, and leak, another one.
+		return Fatal(fmt.Errorf("X created the %s subscription but returned no subscription_id, "+
+			"so polyemesis could not find it again; live chat is stopped rather than creating more", event))
 	}
 	return nil
 }
@@ -741,16 +749,38 @@ type xWebhookEvent struct {
 	Payload   json.RawMessage
 }
 
+// xSubscribeResponse is the reply to POST /2/activity/subscriptions: the new
+// subscription's id sits under data.subscription.
+type xSubscribeResponse struct {
+	Data xSubscribeData `json:"data"`
+}
+
+// xSubscribeData is the data block of a subscribe reply.
+type xSubscribeData struct {
+	Subscription xSubscription `json:"subscription"`
+}
+
+// xSubscription names the subscription the reply created.
+type xSubscription struct {
+	ID string `json:"subscription_id"`
+}
+
+// xEnvelopeData is the data block of an X activity webhook envelope.
+type xEnvelopeData struct {
+	EventUUID string          `json:"event_uuid"`
+	CreatedAt string          `json:"created_at"`
+	EventType string          `json:"event_type"`
+	Filter    xEnvelopeFilter `json:"filter"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+// xEnvelopeFilter names the user whose activity the envelope carries.
+type xEnvelopeFilter struct {
+	UserID string `json:"user_id"`
+}
+
 type xEnvelope struct {
-	Data *struct {
-		EventUUID string `json:"event_uuid"`
-		CreatedAt string `json:"created_at"`
-		EventType string `json:"event_type"`
-		Filter    struct {
-			UserID string `json:"user_id"`
-		} `json:"filter"`
-		Payload json.RawMessage `json:"payload"`
-	} `json:"data"`
+	Data *xEnvelopeData `json:"data"`
 }
 
 func parseXEnvelope(body []byte) (xWebhookEvent, bool) {
@@ -856,20 +886,26 @@ func (x *XAdapter) RemoveSubscriptions(ctx context.Context, userToken string) er
 	return first
 }
 
+// xChatAuthor is the author block of a broadcast.chat payload.
+type xChatAuthor struct {
+	Data xChatAuthorData `json:"data"`
+}
+
+// xChatAuthorData is the author's identity inside xChatAuthor.
+type xChatAuthorData struct {
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
+}
+
 // xChatPayload is the broadcast.chat payload as docs.x.com/x-api/activity/event-payloads documents it: the text is in
 // message, the message id is message_id, and the author sits under author.data.
 type xChatPayload struct {
-	MessageID   string `json:"message_id"`
-	BroadcastID string `json:"broadcast_id"`
-	Message     string `json:"message"`
-	ReplyTo     string `json:"reply_to"`
-	Author      struct {
-		Data struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-			Name     string `json:"name"`
-		} `json:"data"`
-	} `json:"author"`
+	MessageID   string      `json:"message_id"`
+	BroadcastID string      `json:"broadcast_id"`
+	Message     string      `json:"message"`
+	ReplyTo     string      `json:"reply_to"`
+	Author      xChatAuthor `json:"author"`
 }
 
 // deliver turns one queued event into a Message or a retraction. The event_uuid is recorded only once the event has
@@ -941,8 +977,8 @@ type xSeen struct {
 	m   map[string]*list.Element
 }
 
-func newXSeen(max int) *xSeen {
-	return &xSeen{max: max, ll: list.New(), m: make(map[string]*list.Element, max)}
+func newXSeen(size int) *xSeen {
+	return &xSeen{max: size, ll: list.New(), m: make(map[string]*list.Element, size)}
 }
 
 // has reports whether id was recorded, and counts the lookup as a use.

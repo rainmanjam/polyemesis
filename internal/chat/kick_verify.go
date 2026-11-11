@@ -245,8 +245,9 @@ func (f *KickKeyFetcher) joinLocked(ctx context.Context) *kickFlight {
 	f.flight = fl
 	// Detached from the first caller's context: that caller may give up while
 	// others are still waiting on this fetch. Bounded on its own instead.
-	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	parent := context.WithoutCancel(ctx)
 	go func() {
+		fctx, cancel := context.WithTimeout(parent, 10*time.Second)
 		defer cancel()
 		fl.key, fl.err = f.fetch(fctx)
 		f.mu.Lock()
