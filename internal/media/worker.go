@@ -597,26 +597,11 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 	if err := params.Validate(); err != nil {
 		return jobs.Permanent(err)
 	}
-	if !p.cfg.ArchiveEnabled {
-		return jobs.Permanent(errors.New(
-			"archive compression is not available yet. It re-encodes recordings with a lossy codec " +
-				"and can replace the multitrack master, so it stays off until it can be enabled deliberately; " +
-				"this job was queued by an earlier version and will not run"))
+	if err := p.archiveRefusal(params); err != nil {
+		return err
 	}
-	if !params.AcknowledgeLossy {
-		return jobs.Permanent(errors.New(
-			"this archive job was submitted without acknowledging that the re-encode is lossy"))
-	}
-
-	var recordedAt time.Time
-	if params.RecordedAtUnix > 0 {
-		recordedAt = time.Unix(params.RecordedAtUnix, 0)
-	}
-	// Deliberately Permanent rather than deferred. A too-young recording is a
-	// submission mistake, and a job that quietly waits a month is a job whose
-	// eventual destruction nobody remembers authorising.
-	if err := CheckArchiveAge(recordedAt, p.now(), p.cfg.ArchiveMinAge); err != nil {
-		return jobs.Permanent(err)
+	if err := p.checkArchiveAge(params); err != nil {
+		return err
 	}
 
 	input, layout, err := p.prepare(params.Recording)
@@ -637,21 +622,7 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 	}
 	rep.Logf("original: %.1fs, %d audio track(s), %d bytes", src.DurationSeconds, len(src.Audio), src.Bytes)
 
-	spec := ArchiveSpec{
-		Input:   input,
-		Output:  layout.Archive + PartialSuffix,
-		Codec:   params.Codec,
-		Encoder: params.Encoder,
-		Quality: params.Quality,
-		Preset:  params.Preset,
-	}
-	if spec.Codec == "" {
-		spec.Codec = DefaultArchiveCodec
-	}
-	if spec.Encoder == "" {
-		spec.Encoder = ArchiveEncoder(spec.Codec, p.cfg.HasEncoder)
-	}
-
+	spec := p.archiveSpec(params, input, layout.Archive)
 	rep.Logf("re-encoding with %s; every audio track is copied, not re-encoded", spec.Encoder)
 	if err := p.run(ctx, rep, ffmpeg.Command{Name: p.cfg.FFmpeg, Args: ArchiveArgs(spec)},
 		params.DurationMS, 0, 0.75); err != nil {
@@ -683,37 +654,91 @@ func (p *Processor) RunArchive(ctx context.Context, job jobs.Job, rep jobs.Repor
 		Verification: v,
 	}
 	if !v.OK {
-		p.discard(spec.Output)
-		for _, r := range v.Reasons {
-			rep.Logf("verification failed: %s", r)
-		}
-		rep.SetResult(res)
-		return jobs.Permanent(fmt.Errorf(
-			"the archive copy did not verify against the original, so nothing was changed: %s",
-			strings.Join(v.Reasons, "; ")))
+		return p.rejectUnverifiedArchive(spec, rep, res)
 	}
 	if err := ffmpeg.Publish(spec.Output, layout.Archive); err != nil {
 		return err
 	}
 	rep.Logf("verified: %.1f%% smaller, all %d audio track(s) present", v.SavedPercent, len(out.Audio))
 
-	if params.ReplaceOriginal {
-		if !p.cfg.ArchiveAllowReplace {
-			rep.Logf("the job asked to replace the original but replacement is switched off; " +
-				"the archive copy has been left beside the recording")
-		} else if err := replaceOriginal(layout.Archive, input); err != nil {
-			// The copy survives, the original survives, and the operator is
-			// told. Failing here loses nothing.
-			return fmt.Errorf("replace the original with the archive copy: %w", err)
-		} else {
-			res.Path = input
-			res.ReplacedOriginal = true
-			rep.Logf("the original has been replaced by the archive copy")
-		}
+	if err := p.replaceWithArchive(params, layout.Archive, input, rep, &res); err != nil {
+		return err
 	}
 
 	rep.Progress(1)
 	rep.SetResult(res)
+	return nil
+}
+
+// archiveRefusal refuses an archive job that may not run: the feature is off,
+// or the submitter did not acknowledge that the re-encode is lossy.
+func (p *Processor) archiveRefusal(params ArchiveParams) error {
+	if !p.cfg.ArchiveEnabled {
+		return jobs.Permanent(errors.New(
+			"archive compression is not available yet. It re-encodes recordings with a lossy codec " +
+				"and can replace the multitrack master, so it stays off until it can be enabled deliberately; " +
+				"this job was queued by an earlier version and will not run"))
+	}
+	if !params.AcknowledgeLossy {
+		return jobs.Permanent(errors.New(
+			"this archive job was submitted without acknowledging that the re-encode is lossy"))
+	}
+	return nil
+}
+
+// archiveSpec builds the encode for an archive job, filling in the codec and
+// encoder the submitter left out.
+func (p *Processor) archiveSpec(params ArchiveParams, input, archive string) ArchiveSpec {
+	spec := ArchiveSpec{
+		Input:   input,
+		Output:  archive + PartialSuffix,
+		Codec:   params.Codec,
+		Encoder: params.Encoder,
+		Quality: params.Quality,
+		Preset:  params.Preset,
+	}
+	if spec.Codec == "" {
+		spec.Codec = DefaultArchiveCodec
+	}
+	if spec.Encoder == "" {
+		spec.Encoder = ArchiveEncoder(spec.Codec, p.cfg.HasEncoder)
+	}
+	return spec
+}
+
+// rejectUnverifiedArchive discards a copy that did not verify, logs why, and
+// fails the job. Nothing is changed.
+func (p *Processor) rejectUnverifiedArchive(spec ArchiveSpec, rep jobs.Reporter, res ArchiveResult) error {
+	p.discard(spec.Output)
+	for _, r := range res.Verification.Reasons {
+		rep.Logf("verification failed: %s", r)
+	}
+	rep.SetResult(res)
+	return jobs.Permanent(fmt.Errorf(
+		"the archive copy did not verify against the original, so nothing was changed: %s",
+		strings.Join(res.Verification.Reasons, "; ")))
+}
+
+// replaceWithArchive swaps the original for the verified archive copy when the
+// job asks for it and the operator allows it. A failed swap loses nothing: the
+// copy and the original both survive.
+func (p *Processor) replaceWithArchive(params ArchiveParams, archive, input string, rep jobs.Reporter, res *ArchiveResult) error {
+	if !params.ReplaceOriginal {
+		return nil
+	}
+	if !p.cfg.ArchiveAllowReplace {
+		rep.Logf("the job asked to replace the original but replacement is switched off; " +
+			"the archive copy has been left beside the recording")
+		return nil
+	}
+	if err := replaceOriginal(archive, input); err != nil {
+		// The copy survives, the original survives, and the operator is
+		// told. Failing here loses nothing.
+		return fmt.Errorf("replace the original with the archive copy: %w", err)
+	}
+	res.Path = input
+	res.ReplacedOriginal = true
+	rep.Logf("the original has been replaced by the archive copy")
 	return nil
 }
 
@@ -825,5 +850,20 @@ func (p *Processor) run(ctx context.Context, rep jobs.Reporter, cmd ffmpeg.Comma
 		return err
 	}
 	rep.Progress(hi)
+	return nil
+}
+
+// checkArchiveAge refuses a recording that is too young to archive.
+func (p *Processor) checkArchiveAge(params ArchiveParams) error {
+	var recordedAt time.Time
+	if params.RecordedAtUnix > 0 {
+		recordedAt = time.Unix(params.RecordedAtUnix, 0)
+	}
+	// Deliberately Permanent rather than deferred. A too-young recording is a
+	// submission mistake, and a job that quietly waits a month is a job whose
+	// eventual destruction nobody remembers authorising.
+	if err := CheckArchiveAge(recordedAt, p.now(), p.cfg.ArchiveMinAge); err != nil {
+		return jobs.Permanent(err)
+	}
 	return nil
 }
