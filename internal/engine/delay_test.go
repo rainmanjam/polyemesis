@@ -693,7 +693,8 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 		seen = append(seen, env)
 	}
 	expect(DelayBuffering)
-	go feed(e.hub, 200)
+	fed := make(chan struct{})
+	go func() { feed(e.hub, 200); close(fed) }()
 	expect(DelayOnAir)
 	time.Sleep(300 * time.Millisecond)
 	row.Enabled = false
@@ -703,6 +704,22 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 	e.stopDestinations(map[int64]destPlan{})
 	expect(DelayDraining)
 	expect(delayEventDrained)
+	// "drained" is announced before teardownDest has finished (it still stops
+	// the process and deletes the spill), and on Windows the feed's 1 ms sleeps
+	// round up to the timer tick, so both can outlive the assertions. Returning
+	// then left polyemesis.db open when TempDir's cleanup ran, and Windows
+	// refuses to unlink an open file. Wait for the whole teardown -- retiring
+	// is cleared only after teardownDest returns, as in the drain test above --
+	// and for the feed, before the test ends.
+	eventually(t, "the drain's teardown to finish", 9*time.Second, func() bool {
+		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil &&
+			retiringOf(e, row.ID) == nil
+	})
+	select {
+	case <-fed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the background feed never finished")
+	}
 
 	for _, env := range seen {
 		raw, err := json.Marshal(env)
@@ -760,10 +777,20 @@ func TestWhenTheFeedStopsTheBufferKeepsReleasingForTheDelay(t *testing.T) {
 		t.Fatalf("startDest: %v", err)
 	}
 	d := destOf(e, row.ID)
+	began := time.Now()
 	feed(e.hub, 300) // ~0.3 s of feed, then the encoder is gone
 	stopped := time.Now()
-	if got := d.delay.hub.Stats().RxPackets; got != 0 {
-		t.Fatalf("%d datagrams released before the delay was up", got)
+	// feed sleeps 1 ms per datagram, and Windows rounds a 1 ms sleep up to its
+	// timer tick (up to ~15.6 ms), so 300 datagrams can take longer than the
+	// 2 s delay itself. The buffer is then right to have started releasing the
+	// oldest ones, so "nothing out yet" is only a claim while the feed finished
+	// comfortably inside the delay.
+	if fed := stopped.Sub(began); fed < 1500*time.Millisecond {
+		if got := d.delay.hub.Stats().RxPackets; got != 0 {
+			t.Fatalf("%d datagrams released %s into a 2 s delay", got, fed)
+		}
+	} else {
+		t.Logf("feeding took %s (coarse timer); not asserting an empty output", fed)
 	}
 	eventually(t, "the held programme to play out after the feed stopped", 6*time.Second, func() bool {
 		return d.delay.hub.Stats().RxPackets >= 300
