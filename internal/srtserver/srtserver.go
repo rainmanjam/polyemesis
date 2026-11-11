@@ -678,6 +678,19 @@ func (s *Server) Stop() {
 // streamer sees a generic failure in OBS; a code that distinguishes "wrong
 // credentials" from "already publishing" from "disabled" is the difference
 // between fixing it and guessing.
+// refuseUnknownToken answers a token that matches no source. Deliberately the
+// same outcome as a well-formed token for a source that does not exist: an
+// attacker must not be able to tell the two apart. The token is never logged.
+func (s *Server) refuseUnknownToken(host, peer string) verdict {
+	s.log.Warn("srt publish refused: token not recognised", "peer", peer)
+	// Only an unrecognised token counts as a guess -- every refusal below
+	// this point already proved the caller holds a real one.
+	if s.gate.Fail(host) {
+		s.log.Warn("srt: peer rate-limited after repeated wrong tokens", "peer", peer)
+	}
+	return refuse(srt.REJ_BADSECRET)
+}
+
 func (s *Server) handleConnect(req srt.ConnRequest) verdict {
 	peer := req.RemoteAddr().String()
 	streamID := req.StreamId()
@@ -699,16 +712,7 @@ func (s *Server) handleConnect(req srt.ConnRequest) verdict {
 
 	target, ok := s.lookup(strings.TrimSpace(streamID))
 	if !ok {
-		// Deliberately the same outcome as a well-formed token for a source
-		// that does not exist: an attacker must not be able to tell the two
-		// apart. The token is never logged.
-		s.log.Warn("srt publish refused: token not recognised", "peer", peer)
-		// Only an unrecognised token counts as a guess -- every refusal below
-		// this point already proved the caller holds a real one.
-		if s.gate.Fail(host) {
-			s.log.Warn("srt: peer rate-limited after repeated wrong tokens", "peer", peer)
-		}
-		return refuse(srt.REJ_BADSECRET)
+		return s.refuseUnknownToken(host, peer)
 	}
 	if !target.Enabled {
 		s.log.Warn("srt publish refused: source disabled", "peer", peer, "source", target.Name)
