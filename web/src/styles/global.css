@@ -993,9 +993,9 @@
   html { scroll-behavior: auto; }
 
   *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important; /* NOSONAR S9423: reduced-motion block must beat every animation and transition on the page */
+    animation-iteration-count: 1 !important; /* NOSONAR S9423: reduced-motion block must beat every animation and transition on the page */
+    transition-duration: 0.001ms !important; /* NOSONAR S9423: reduced-motion block must beat every animation and transition on the page */
     /* THE DELAY HAD TO GO TOO, and leaving it out was a hole in this block
        rather than a nuance of it. The standard recipe zeroes duration and stops
        there, which is correct for anything that merely animates — but the hero's
@@ -1006,8 +1006,8 @@
        appearance, minus the easing that made it legible: five blocks popping
        into existence one after another. Zeroing the delay is what makes the
        whole hero paint at once, which is what "reduce" means here. */
-    animation-delay: 0s !important;
-    transition-delay: 0s !important;
+    animation-delay: 0s !important; /* NOSONAR S9423: reduced-motion block must beat every animation and transition on the page */
+    transition-delay: 0s !important; /* NOSONAR S9423: reduced-motion block must beat every animation and transition on the page */
   }
 }
 

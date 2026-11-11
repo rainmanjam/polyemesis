@@ -725,10 +725,10 @@
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important; /* NOSONAR S9423: reduced-motion block must override every animation and transition, including component-level ones */
+    animation-iteration-count: 1 !important; /* NOSONAR S9423: reduced-motion block must override every animation and transition, including component-level ones */
+    transition-duration: 0.01ms !important; /* NOSONAR S9423: reduced-motion block must override every animation and transition, including component-level ones */
+    scroll-behavior: auto !important; /* NOSONAR S9423: reduced-motion block must override every animation and transition, including component-level ones */
   }
 
   /* MEANING-CARRYING MOTION IS REPLACED, NOT REMOVED.
@@ -745,16 +745,16 @@
      revealing pinned invisible: suppressing motion must never suppress what the
      motion was saying. */
   .animate-signal-fast {
-    animation: none !important;
-    opacity: 1 !important;
-    background-color: transparent !important;
+    animation: none !important; /* NOSONAR S9423: reduced-motion override of the signal pulse, keeping the static ring; must beat the animation utility class */
+    opacity: 1 !important; /* NOSONAR S9423: reduced-motion override of the signal pulse, keeping the static ring; must beat the animation utility class */
+    background-color: transparent !important; /* NOSONAR S9423: reduced-motion override of the signal pulse, keeping the static ring; must beat the animation utility class */
     box-shadow: 0 0 0 1.5px var(--warn);
   }
   /* Live needs no substitute: its solid core already reads as on-air, and a
      second ring here would make the two states look MORE alike, not less. */
   .animate-signal {
-    animation: none !important;
-    opacity: 0 !important;
+    animation: none !important; /* NOSONAR S9423: reduced-motion override of the signal pulse utility class */
+    opacity: 0 !important; /* NOSONAR S9423: reduced-motion override of the signal pulse utility class */
   }
 }
 
