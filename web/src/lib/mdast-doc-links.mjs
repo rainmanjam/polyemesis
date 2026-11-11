@@ -110,5 +110,5 @@ function rewrite(node, ctx) {
   if (typeof node.url !== "string") return;
   const from = (ctx.fileURL?.pathname ?? "").split("/").pop() ?? "";
   const next = rewriteDocLink(node.url, from);
-  if (next !== node.url) ctx.setProperty(node, "url", next);
+  if (next !== node.url) ctx.setField(node, "url", next);
 }
