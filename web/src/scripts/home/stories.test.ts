@@ -32,9 +32,12 @@ describe("story data", () => {
   it("is mutable enough for a test to change a name and restore it (F23)", () => {
     const d = STORIES.streamer.dests[0];
     const old = d.name;
-    d.name = "X";
-    expect(statusFor(STORIES.streamer, d.id, false).name).toBe("X");
-    d.name = old;
+    try {
+      d.name = "X";
+      expect(statusFor(STORIES.streamer, d.id, false).name).toBe("X");
+    } finally {
+      d.name = old;
+    }
     expect(statusFor(STORIES.streamer, d.id, false).name).toBe(old);
   });
 });

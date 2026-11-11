@@ -38,6 +38,8 @@ interface Props {
   mode: "hero" | "steps";
 }
 
+// `mode` (the brief's F11 prop) is emitted as data-mode only: it names which
+// instance a test or a style is looking at; nothing in this file branches on it.
 const { story, mode } = Astro.props;
 const s = STORIES[story];
 const layouts: Layout[] = ["h", "v"];
@@ -283,6 +285,8 @@ const pct = (g: number) => `${g * 100}%`;
   .dg :global(button.dest) {
     cursor: pointer;
   }
+  /* A pinned card shows it: the pin is also aria-pressed, but state must not
+     live only in the accessibility tree. */
   .dg :global(.dest[aria-pressed="true"]) {
     border-color: var(--color-fg);
   }

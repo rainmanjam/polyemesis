@@ -443,7 +443,10 @@ describe("the run beat", () => {
     expect(run).toContain("-p 8080:8080 -p 6000:6000/udp -p 1935:1935");
     const install = readFileSync(join(here, "..", "..", "..", "docs", "INSTALL.md"), "utf8");
     const script = install.slice(install.indexOf("curl --proto"), install.indexOf("sudo bash install.sh") + "sudo bash install.sh".length);
-    expect(run).toContain(script.split("\n")[1].trim()); // the raw.githubusercontent URL line
+    // Every line of the script block, not just its URL: Run.astro's template
+    // literal escapes the line-continuation backslash, so unescape it first.
+    const shipped = run.match(/const script = `([\s\S]*?)`;/)?.[1].replace(/\\\\/g, "\\");
+    expect(shipped).toBe(script);
   });
   it("names no placeholder install", () => expect(run).not.toMatch(/polyemesis\.com\/install|polyemesis\/polyemesis\b|href="#"/));
   it("does not claim the console address is printed", () => expect(run).not.toMatch(/prints the address/));
