@@ -36,7 +36,7 @@ export function ActivitySourceChips({
   }
   const sources = data.sources ?? [];
   return (
-    <div className="flex flex-col gap-1.5" role="group" aria-label={t("activity.sources.label")}>
+    <fieldset className="m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0" aria-label={t("activity.sources.label")}>
       {sources.length === 0 ? (
         <p className="rounded-md border border-border bg-card px-2 py-1.5 text-sm text-muted-foreground">
           {t("activity.sources.none")}
@@ -85,6 +85,6 @@ export function ActivitySourceChips({
           })}
         </p>
       )}
-    </div>
+    </fieldset>
   );
 }
