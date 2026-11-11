@@ -224,36 +224,9 @@ func (s *Server) handleExportPolls(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, `format must be "csv" or "json"`)
 		return
 	}
-	var hist []polls.Result
-	if v := r.URL.Query().Get("id"); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, errInvalidPollID)
-			return
-		}
-		p, err := s.store.Poll(id)
-		if errors.Is(err, db.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "no such poll")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		hist = []polls.Result{storedResult(*p)}
-	} else {
-		q, err := pollQuery(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if q.Limit == 0 {
-			q.Limit = 1000
-		}
-		if hist, err = s.pollHistory(q); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+	hist, ok := s.pollExportHistory(w, r)
+	if !ok {
+		return
 	}
 	name := "polyemesis-polls." + format
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
@@ -266,25 +239,72 @@ func (s *Server) handleExportPolls(w http.ResponseWriter, r *http.Request) {
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"poll_id", "started_at", "ended_at", "state", "question", "option", "label", "platform", "votes"})
 	for _, p := range hist {
-		ended := ""
-		if p.EndedAt != nil {
-			ended = p.EndedAt.UTC().Format(time.RFC3339)
-		}
-		for i, o := range p.Options {
-			base := []string{strconv.FormatInt(p.ID, 10), p.StartedAt.UTC().Format(time.RFC3339), ended,
-				string(p.State), csvSafe(p.Question), strconv.Itoa(i + 1), csvSafe(o.Label)}
-			plats := make([]string, 0, len(o.ByPlatform))
-			for pl := range o.ByPlatform {
-				plats = append(plats, pl)
-			}
-			sort.Strings(plats)
-			for _, pl := range plats {
-				_ = cw.Write(append(append([]string(nil), base...), pl, strconv.Itoa(o.ByPlatform[pl])))
-			}
-			_ = cw.Write(append(append([]string(nil), base...), "total", strconv.Itoa(o.Votes)))
+		for _, row := range pollCSVRows(p) {
+			_ = cw.Write(row)
 		}
 	}
 	cw.Flush()
+}
+
+// pollExportHistory returns the polls an export names: the one with ?id=, or the
+// filtered history. On a refusal it has already written the error and reports
+// false.
+func (s *Server) pollExportHistory(w http.ResponseWriter, r *http.Request) ([]polls.Result, bool) {
+	if v := r.URL.Query().Get("id"); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, errInvalidPollID)
+			return nil, false
+		}
+		p, err := s.store.Poll(id)
+		if errors.Is(err, db.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no such poll")
+			return nil, false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return nil, false
+		}
+		return []polls.Result{storedResult(*p)}, true
+	}
+	q, err := pollQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	if q.Limit == 0 {
+		q.Limit = 1000
+	}
+	hist, err := s.pollHistory(q)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	return hist, true
+}
+
+// pollCSVRows is the CSV lines for one poll: per option, one line per platform
+// and a total line.
+func pollCSVRows(p polls.Result) [][]string {
+	ended := ""
+	if p.EndedAt != nil {
+		ended = p.EndedAt.UTC().Format(time.RFC3339)
+	}
+	var rows [][]string
+	for i, o := range p.Options {
+		base := []string{strconv.FormatInt(p.ID, 10), p.StartedAt.UTC().Format(time.RFC3339), ended,
+			string(p.State), csvSafe(p.Question), strconv.Itoa(i + 1), csvSafe(o.Label)}
+		plats := make([]string, 0, len(o.ByPlatform))
+		for pl := range o.ByPlatform {
+			plats = append(plats, pl)
+		}
+		sort.Strings(plats)
+		for _, pl := range plats {
+			rows = append(rows, append(append([]string(nil), base...), pl, strconv.Itoa(o.ByPlatform[pl])))
+		}
+		rows = append(rows, append(append([]string(nil), base...), "total", strconv.Itoa(o.Votes)))
+	}
+	return rows
 }
 
 // csvSafe defuses a cell a spreadsheet would run as a formula. Poll text is the
