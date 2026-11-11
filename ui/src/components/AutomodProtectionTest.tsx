@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
 import { ACTION_KEYS, CATEGORY_KEYS } from "@/lib/automodConfig";
 import { detectorLabelKey, TIER_KEYS } from "@/lib/automodProtection";
-import { useT } from "@/lib/i18n";
+import { useT, type Translator } from "@/lib/i18n";
 import type { AutomodAction, AutomodExplanation } from "@/lib/types";
 
 /* THE TEST BOX.
@@ -108,11 +108,7 @@ export function AutomodProtectionTest({ platforms }: Readonly<{ platforms: reado
             <p className="text-xs text-warn">{t("automod.protTestPackOff")}</p>
           )}
           <p className="text-sm font-medium">
-            {result.held
-              ? t("automod.protTestHeld")
-              : result.wouldHoldIfOn
-                ? t("automod.protTestHeldIfOn")
-                : t("automod.protTestNotHeld")}
+            {heldHeadline(result, t)}
           </p>
           {result.detections.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("automod.protTestNothing")}</p>
@@ -159,4 +155,11 @@ export function AutomodProtectionTest({ platforms }: Readonly<{ platforms: reado
       )}
     </section>
   );
+}
+
+// Which headline the protection test shows: held, held if the pack were on, or not held.
+function heldHeadline(result: { held: boolean; wouldHoldIfOn: boolean }, t: Translator): string {
+  if (result.held) return t("automod.protTestHeld");
+  if (result.wouldHoldIfOn) return t("automod.protTestHeldIfOn");
+  return t("automod.protTestNotHeld");
 }

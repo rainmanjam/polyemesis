@@ -1,6 +1,6 @@
 import { useViewerTags } from "@/hooks/useViewerTags";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useT, useTN, type TranslationKey } from "@/lib/i18n";
+import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { toast } from "sonner";
 import {
   Check,
@@ -908,19 +908,7 @@ export function ChatComposer({
           }}
           rows={compact ? 1 : 2}
           placeholder={
-            replyTo
-              ? t("chatpage.replyPlaceholder", { name: replyTo.author.name })
-              : // The field says the state in two words. The reason is text under
-            // it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
-            allSenders.length === 0
-              ? t("chatpage.notConnected")
-              : senders.length === 0
-                ? t("chatpage.targetsPick")
-                : !replyTo && !live
-                  ? t("chatpage.sendLiveDefault")
-                  : t("chatpage.sendTo", {
-                  platforms: senders.map((s) => accentFor(s.platform).label).join(", "),
-                })
+            composerPlaceholder(t, replyTo, allSenders, senders, live)
           }
           className="min-h-0 resize-none text-[12px]"
           aria-label={
@@ -1449,4 +1437,20 @@ export function ChatEmpty({
       <EmptyState icon={MessagesSquare} title={t(title)} body={body} action={action} />
     </div>
   );
+}
+
+// The field says the state in two words. The reason is text under
+// it, where it can wrap; inside a placeholder it was clipped mid-sentence (A88).
+function composerPlaceholder(
+  t: Translator,
+  replyTo: { author: { name: string } } | null | undefined,
+  allSenders: readonly unknown[],
+  senders: ReadonlyArray<{ platform: Parameters<typeof accentFor>[0] }>,
+  live: unknown,
+): string {
+  if (replyTo) return t("chatpage.replyPlaceholder", { name: replyTo.author.name });
+  if (allSenders.length === 0) return t("chatpage.notConnected");
+  if (senders.length === 0) return t("chatpage.targetsPick");
+  if (!live) return t("chatpage.sendLiveDefault");
+  return t("chatpage.sendTo", { platforms: senders.map((s) => accentFor(s.platform).label).join(", ") });
 }

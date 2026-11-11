@@ -618,7 +618,8 @@ function withYouTubeControl(
 }
 
 function triState(v: boolean | undefined): "" | "on" | "off" {
-  return v === undefined ? "" : v ? "on" : "off";
+  if (v === undefined) return "";
+  return v ? "on" : "off";
 }
 
 function madeForKidsValue(v: boolean | null | undefined): "unset" | "yes" | "no" {
