@@ -282,15 +282,7 @@ func mcpStripCredentialFields(v any) any {
 	case map[string]any:
 		for k, val := range x {
 			if mcpCredentialFields[k] {
-				switch vv := val.(type) {
-				case nil, bool:
-				case string:
-					if vv != "" {
-						x[k] = "[redacted]"
-					}
-				default:
-					x[k] = "[redacted]"
-				}
+				x[k] = redactedCredential(val)
 				continue
 			}
 			x[k] = mcpStripCredentialFields(val)
@@ -301,6 +293,22 @@ func mcpStripCredentialFields(v any) any {
 		}
 	}
 	return v
+}
+
+// redactedCredential returns the value a credential field is shown as: empty
+// values (nil, false, "") stay as they are, anything else becomes "[redacted]".
+func redactedCredential(val any) any {
+	switch vv := val.(type) {
+	case nil, bool:
+		return val
+	case string:
+		if vv != "" {
+			return "[redacted]"
+		}
+		return val
+	default:
+		return "[redacted]"
+	}
 }
 
 // refusal is a tool answer that says nothing was done, with what an agent
