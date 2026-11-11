@@ -1657,21 +1657,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                     yet, so "signing in gets you ." would list nothing. With the
                     gate open the link does fetch the key; with it closed the
                     key note under the key field says why it is still pasted. */}
-                {platform === "x" && !xMintsKey
-                  ? null
-                  : manualKey && !xMintsKey
-                  ? t("addDest.signInGets", {
-                      features: [
-                        supportOf(caps, "chatRead") === "yes" && t("addDest.featureChat"),
-                        supportOf(caps, "moderation") === "yes" && t("addDest.featureModeration"),
-                        supportOf(caps, "metadata") === "yes" && t("addDest.featureMetadata"),
-                        supportOf(caps, "viewerStats") === "yes" && t("addDest.featureViewerStats"),
-                      ]
-                        .filter(Boolean)
-                        .join(t("addDest.featureListSeparator")),
-                      platform: caps.name,
-                    })
-                  : t("addDest.linkFetchesKey")}{" "}
+                {keyNoteLead(platform, caps, manualKey, xMintsKey, t)}{" "}
                 {t("addDest.needsDevCreds")}
               </span>
             </div>
@@ -3057,3 +3043,28 @@ export function AccountChip({ account, onUnlink }: Readonly<{ account: PlatformA
   );
 }
 
+// The lead sentence of the key note under the key field: nothing for X without a
+// verified chat, a sign-in promise for a pasted key, otherwise the fetch note.
+function keyNoteLead(
+  platform: string,
+  caps: Parameters<typeof supportOf>[0],
+  manualKey: boolean,
+  xMintsKey: boolean,
+  t: Translator,
+): string | null {
+  if (platform === "x" && !xMintsKey) return null;
+  if (manualKey && !xMintsKey) {
+    return t("addDest.signInGets", {
+      features: [
+        supportOf(caps, "chatRead") === "yes" && t("addDest.featureChat"),
+        supportOf(caps, "moderation") === "yes" && t("addDest.featureModeration"),
+        supportOf(caps, "metadata") === "yes" && t("addDest.featureMetadata"),
+        supportOf(caps, "viewerStats") === "yes" && t("addDest.featureViewerStats"),
+      ]
+        .filter(Boolean)
+        .join(t("addDest.featureListSeparator")),
+      platform: caps.name,
+    });
+  }
+  return t("addDest.linkFetchesKey");
+}
