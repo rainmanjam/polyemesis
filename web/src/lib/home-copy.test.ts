@@ -493,8 +493,10 @@ describe("homepage claims match the code (T12)", () => {
   it("does not claim chat replies", () => expect(recovery).not.toMatch(/\breply\b/i));
   // docs/PLATFORMS.md:42-48: chat on several platforms is unverified.
   it("does not claim chat for every platform", () => expect(recovery).not.toMatch(/chat (for|from) every platform/i));
-  // docs/QUICKSTART.md:3-4 starts from installing, not from renting a server.
+  // docs/QUICKSTART.md:1-7 is "the impatient path" from installing; it covers no VPS renting
+  // and sends readers to INSTALL.md for "the careful version".
   it("does not claim the quickstart covers renting a VPS", () => expect(run).not.toMatch(/renting/));
+  it("sends server newcomers to the install guide", () => expect(run).toMatch(/Never run a server before\?[^<]*<a href="\/docs\/install">/));
   // docs/INSTALL.md:327: script installs find the setup code in the closing summary.
   it("points script users at the setup code", () => expect(run).toMatch(/closing summary/));
 });
