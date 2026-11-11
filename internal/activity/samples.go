@@ -102,6 +102,14 @@ func Sample(kind Kind, platform string, o Overrides, now time.Time) Event {
 func kindID(k Kind) string { return string(k) }
 
 func applyOverrides(e Event, o Overrides) Event {
+	e = applyOverrideText(e, o)
+	e = applyOverrideAmount(e, o)
+	return applyOverrideCounts(e, o)
+}
+
+// applyOverrideText replaces the display name, message, title and tier when the
+// caller supplies them.
+func applyOverrideText(e Event, o Overrides) Event {
 	if o.Name != "" {
 		switch {
 		case e.Kind == KindRaid || e.Kind == KindShoutout:
@@ -116,15 +124,30 @@ func applyOverrides(e Event, o Overrides) Event {
 	if o.Title != "" {
 		e.Title = o.Title
 	}
-	if o.Amount != nil && e.Kind == KindTip {
-		a := *o.Amount
-		// A caller who names a listed currency and no exponent means that
-		// currency's own; the wire omits a zero exponent, so it cannot tell.
-		if std, ok := ExponentFor(a.Currency); ok && a.Exponent == 0 {
-			a.Exponent = std
-		}
-		e.Amount = &a
+	if o.Tier != "" {
+		e.Tier = o.Tier
 	}
+	return e
+}
+
+// applyOverrideAmount replaces a tip's amount.
+func applyOverrideAmount(e Event, o Overrides) Event {
+	if o.Amount == nil || e.Kind != KindTip {
+		return e
+	}
+	a := *o.Amount
+	// A caller who names a listed currency and no exponent means that
+	// currency's own; the wire omits a zero exponent, so it cannot tell.
+	if std, ok := ExponentFor(a.Currency); ok && a.Exponent == 0 {
+		a.Exponent = std
+	}
+	e.Amount = &a
+	return e
+}
+
+// applyOverrideCounts replaces the count, viewer and month figures that each
+// kind carries.
+func applyOverrideCounts(e Event, o Overrides) Event {
 	if o.Count > 0 && (e.Kind == KindGift || e.Kind == KindReaction) {
 		e.Count = o.Count
 		if e.Kind == KindGift && len(e.Recipients) > o.Count {
@@ -136,9 +159,6 @@ func applyOverrides(e Event, o Overrides) Event {
 	}
 	if o.Months > 0 && e.Kind == KindResub {
 		e.Months = o.Months
-	}
-	if o.Tier != "" {
-		e.Tier = o.Tier
 	}
 	return e
 }
