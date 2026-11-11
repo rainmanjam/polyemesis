@@ -558,31 +558,40 @@ func (m nativePollMirror) Read(ctx context.Context, mm polls.Mirrored, end bool)
 		return m.readTwitch(ctx, ref, end)
 	case youTubePollRef:
 		if !end {
-			// No API reads one running chat message by id, but the chat
-			// poll's list pages carry the poll with its tally (owner token
-			// only). Report that when one has arrived, else nothing yet.
-			if r, ok := ref.poller.(chat.PollTallyReader); ok {
-				if votes, live, seen := r.PollTally(ref.pollID); seen {
-					return votes, live, nil
-				}
-			}
-			return nil, true, nil
+			return readYouTubeRunning(ref)
 		}
 		votes, err := ref.poller.ClosePoll(ctx, ref.pollID)
 		return votes, false, err
 	case facebookPollRef:
 		if !end {
-			// Facebook reports a running poll's count, unlike YouTube.
-			if r, ok := ref.poller.(chat.PollReader); ok {
-				votes, open, err := r.PollVotes(ctx, ref.pollID)
-				return votes, err == nil && open, err
-			}
-			return nil, true, nil
+			return readFacebookRunning(ctx, ref)
 		}
 		votes, err := ref.poller.ClosePoll(ctx, ref.pollID)
 		return votes, false, err
 	}
 	return nil, false, errors.New("not a native poll this server created")
+}
+
+// readYouTubeRunning reads a running YouTube poll. No API reads one running
+// chat message by id, but the chat poll's list pages carry the poll with its
+// tally (owner token only). Report that when one has arrived, else nothing yet.
+func readYouTubeRunning(ref youTubePollRef) ([]int, bool, error) {
+	if r, ok := ref.poller.(chat.PollTallyReader); ok {
+		if votes, live, seen := r.PollTally(ref.pollID); seen {
+			return votes, live, nil
+		}
+	}
+	return nil, true, nil
+}
+
+// readFacebookRunning reads a running Facebook poll. Facebook reports a running
+// poll's count, unlike YouTube.
+func readFacebookRunning(ctx context.Context, ref facebookPollRef) ([]int, bool, error) {
+	if r, ok := ref.poller.(chat.PollReader); ok {
+		votes, open, err := r.PollVotes(ctx, ref.pollID)
+		return votes, err == nil && open, err
+	}
+	return nil, true, nil
 }
 
 // readTwitch reads, or ends and reads, a Twitch poll. Live is Twitch's own
