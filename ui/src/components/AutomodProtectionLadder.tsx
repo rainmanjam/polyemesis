@@ -92,7 +92,7 @@ export function AutomodProtectionLadder({
             <li key={platform} className="grid gap-1 rounded-md border p-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="w-20 shrink-0 font-medium">{name}</span>
-                <div role="group" aria-label={t("automod.protLadderRow", { platform: name })} className="flex flex-wrap gap-1.5">
+                <fieldset aria-label={t("automod.protLadderRow", { platform: name })} className="flex min-w-0 flex-wrap gap-1.5">
                   {LADDER_RUNGS.map((rung, i) => {
                     const cell = byKey.get(rungKey(platform, rung));
                     const available = cell?.available ?? false;
@@ -141,7 +141,7 @@ export function AutomodProtectionLadder({
                       </span>
                     );
                   })}
-                </div>
+                </fieldset>
               </div>
               <p className="text-sm text-muted-foreground">
                 {armed.length === 0

@@ -154,7 +154,7 @@ export function AlertsStyleEditor({
         </label>
       </div>
 
-      <div role="group" aria-label={t("overlay.alertsKinds")} className="flex flex-col gap-1">
+      <fieldset aria-label={t("overlay.alertsKinds")} className="flex min-w-0 flex-col gap-1">
         <span className="text-tiny font-medium">{t("overlay.alertsKinds")}</span>
         <div className="grid grid-cols-2 gap-1">
           {OVERLAY_ALERT_KINDS.map((k) => (
@@ -164,7 +164,7 @@ export function AlertsStyleEditor({
             </label>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       <div className="flex flex-col gap-1">
         <span className="text-tiny font-medium">{t("overlay.alertsPreview")}</span>

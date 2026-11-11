@@ -393,7 +393,7 @@ export function GoLiveSheet({
         )}
 
         {sourceNames.length > 1 && (
-          <div role="group" aria-label={t("golive.colSource")} className="flex flex-wrap gap-1.5">
+          <fieldset aria-label={t("golive.colSource")} className="flex min-w-0 flex-wrap gap-1.5">
             {[null, ...sourceNames].map((name) => {
               const n = name === null ? rows.length : rows.filter((r) => r.sourceName === name).length;
               return (
@@ -410,7 +410,7 @@ export function GoLiveSheet({
                 </Button>
               );
             })}
-          </div>
+          </fieldset>
         )}
 
         <div className="flex flex-col divide-y divide-border rounded-md border border-border">
