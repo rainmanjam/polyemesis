@@ -540,11 +540,14 @@ func hasIPv6(s string, pol ReservedPolicy) bool {
 			continue
 		}
 		tok := v6Token(s[a:b])
-		if !v6Shape(tok) {
+		if strings.Count(tok, ":") < 2 {
 			continue
 		}
 		addr, err := netip.ParseAddr(tok)
 		if err != nil || !addr.Is6() || addr.Is4In6() {
+			continue
+		}
+		if !v6Shape(tok) {
 			continue
 		}
 		if pol.reserved(addr) {
@@ -555,13 +558,10 @@ func hasIPv6(s string, pol ReservedPolicy) bool {
 	return false
 }
 
-// v6Shape reports whether tok has the shape of an IPv6 address: two or more
-// colons, enough groups (five, or three around a "::" compression), and at
-// least one group that is strong (a hex letter, or longer than two digits).
+// v6Shape reports whether tok has the shape of an IPv6 address: enough groups
+// (five, or three around a "::" compression), and at least one group that is
+// strong (a hex letter, or longer than two digits).
 func v6Shape(tok string) bool {
-	if strings.Count(tok, ":") < 2 {
-		return false
-	}
 	groups, strong := v6Groups(tok)
 	compressed := strings.Contains(tok, "::")
 	return (groups >= 5 || compressed && groups >= 3) && strong
