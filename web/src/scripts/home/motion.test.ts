@@ -6,7 +6,7 @@ import { createMotionGate, whileVisible } from "./motion";
 type MQL = { matches: boolean; listeners: Array<(e: { matches: boolean }) => void> };
 let mql: MQL;
 let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null;
-let ioDisconnect: ReturnType<typeof vi.fn>;
+let ioDisconnect: () => void;
 
 function setReduced(matches: boolean) {
   mql.matches = matches;
@@ -23,7 +23,7 @@ function setVisibility(state: "visible" | "hidden") {
 beforeEach(() => {
   mql = { matches: false, listeners: [] };
   ioCallback = null;
-  ioDisconnect = vi.fn();
+  ioDisconnect = vi.fn() as unknown as () => void;
   window.matchMedia = ((query: string) => ({
     media: query,
     get matches() {
