@@ -319,23 +319,34 @@ func (y *YouTube) adoptEvent(ctx context.Context, accessToken string, req LiveNo
 		return nil, &ErrActiveBroadcastOnStream{BroadcastID: activeOnStream}
 	}
 	if bound := b.ContentDetails.BoundStreamID; bound != stream.ID {
-		if bound != "" {
-			for i := range streams {
-				if streams[i].ID == bound && strings.EqualFold(streams[i].Status.StreamStatus, "active") {
-					return nil, fmt.Errorf("the picked event is bound to a stream that is receiving video right now, "+
-						"so polyemesis will not move it (stream %s): %w", bound, ErrEventStreamActive)
-				}
-			}
-			if !req.RebindEvent {
-				return nil, fmt.Errorf("the picked event is bound to another stream (%s); confirm moving it to this "+
-					"destination's stream in the destination dialog, or pick another event: %w", bound, ErrEventRebindNeeded)
-			}
-		}
-		if err := y.bindBroadcast(ctx, accessToken, id, stream.ID); err != nil {
-			return nil, fmt.Errorf("YouTube would not bind the picked event %s to this destination's stream: %w", id, err)
+		if err := y.moveEventToStream(ctx, accessToken, req, id, stream, streams, bound); err != nil {
+			return nil, err
 		}
 	}
 	return &LiveNowResult{Existing: true, BroadcastID: id, LiveChatID: b.Snippet.LiveChatID, StreamID: stream.ID}, nil
+}
+
+// moveEventToStream binds the picked event to this destination's stream. The
+// event is moved off another stream only when that stream is idle and the
+// operator confirmed the move.
+func (y *YouTube) moveEventToStream(ctx context.Context, accessToken string, req LiveNowRequest, id string,
+	stream *ytLiveStream, streams []ytLiveStream, bound string) error {
+	if bound != "" {
+		for i := range streams {
+			if streams[i].ID == bound && strings.EqualFold(streams[i].Status.StreamStatus, "active") {
+				return fmt.Errorf("the picked event is bound to a stream that is receiving video right now, "+
+					"so polyemesis will not move it (stream %s): %w", bound, ErrEventStreamActive)
+			}
+		}
+		if !req.RebindEvent {
+			return fmt.Errorf("the picked event is bound to another stream (%s); confirm moving it to this "+
+				"destination's stream in the destination dialog, or pick another event: %w", bound, ErrEventRebindNeeded)
+		}
+	}
+	if err := y.bindBroadcast(ctx, accessToken, id, stream.ID); err != nil {
+		return fmt.Errorf("YouTube would not bind the picked event %s to this destination's stream: %w", id, err)
+	}
+	return nil
 }
 
 // chooseLiveNowStream picks the destination's stream and never creates one.
