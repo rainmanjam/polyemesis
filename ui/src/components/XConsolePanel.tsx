@@ -97,7 +97,7 @@ export function XConsolePanel({
   const locale = controls?.locale ?? "";
   const locales = locale && !X_LOCALES.includes(locale) ? [...X_LOCALES, locale] : X_LOCALES;
   const patchControls = (patch: Partial<XBroadcastControls>) => {
-    const next = { ...(controls ?? {}), ...patch };
+    const next = { ...controls, ...patch };
     onControlsChange(next.chatOption === undefined && !next.locale ? null : next);
   };
   // "prepublished" locks the title too: the publish already carried it to X.

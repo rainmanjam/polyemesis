@@ -77,7 +77,7 @@ export function VerticalExportPanel({
     blur: t("clipedit.vertical.blurBody"),
   };
 
-  const style = { ...(options?.defaultStyle ?? {}), ...spec.captions.style };
+  const style = { ...options?.defaultStyle, ...spec.captions.style };
   const setStyle = (patch: Partial<CaptionStyle>) =>
     onChange({ ...spec, captions: { ...spec.captions, style: { ...spec.captions.style, ...patch } } });
 

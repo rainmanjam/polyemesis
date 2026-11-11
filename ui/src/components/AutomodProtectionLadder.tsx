@@ -59,7 +59,7 @@ export function AutomodProtectionLadder({
       : t(RUNG_KEYS[r]);
 
   function setRung(platform: string, rung: LadderRung, armed: boolean) {
-    const on = { ...(automod.on ?? {}) };
+    const on = { ...automod.on };
     if (armed) on[rungKey(platform, rung)] = true;
     else delete on[rungKey(platform, rung)];
     onChange({ ...settings, automod: { ...automod, on } });

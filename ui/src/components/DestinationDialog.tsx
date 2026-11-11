@@ -612,7 +612,7 @@ function withYouTubeControl(
   c: Compliance,
   patch: Partial<YouTubeBroadcastControls>,
 ): Compliance {
-  const next: YouTubeBroadcastControls = { ...(c.youtube ?? {}), ...patch };
+  const next: YouTubeBroadcastControls = { ...c.youtube, ...patch };
   const empty = Object.values(next).every((v) => v === undefined);
   return { ...c, youtube: empty ? null : next };
 }

@@ -164,21 +164,21 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
    *  false, so the persisted form stays sparse and "absent means off" remains
    *  the only rule a reader needs. */
   function setCell(key: string, auto: boolean) {
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     if (auto) on[key] = true;
     else delete on[key];
     onChange({ ...settings, automod: { ...automod!, on } });
   }
 
   function setPlatformEnabled(platform: string, enabled: boolean) {
-    const pe = { ...(automod!.platformEnabled ?? {}) };
+    const pe = { ...automod!.platformEnabled };
     pe[platform] = enabled;
     onChange({ ...settings, automod: { ...automod!, platformEnabled: pe } });
   }
 
   /** Bulk: every checker for one action on one platform. */
   function setRow(platform: string, action: AutomodAction, auto: boolean) {
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     for (const checker of columns) {
       const key = `${platform}/${action}/${checker}`;
       if (auto && armable(key)) on[key] = true;
@@ -189,7 +189,7 @@ export function AutomodMatrix({ settings, onChange }: Readonly<AutomodMatrixProp
 
   /** Bulk: every action for one checker on one platform. */
   function setColumn(platform: string, checker: AutomodChecker, auto: boolean) {
-    const on = { ...(automod!.on ?? {}) };
+    const on = { ...automod!.on };
     for (const action of view!.actions) {
       const key = `${platform}/${action}/${checker}`;
       if (auto && armable(key)) on[key] = true;
