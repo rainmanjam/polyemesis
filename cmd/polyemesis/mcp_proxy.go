@@ -265,10 +265,7 @@ func relayMCP(parent context.Context, endpoint string, client *http.Client, stdi
 			break
 		}
 		if err := remote.Write(ctx, msg); err != nil {
-			if req, ok := msg.(*jsonrpc.Request); ok && req.IsCall() {
-				resp := &jsonrpc.Response{ID: req.ID, Error: &jsonrpc.Error{
-					Code: jsonrpc.CodeInternalError, Message: "polyemesis: " + oneLine(err.Error()),
-				}}
+			if resp, refuse := refusalFor(msg, err); refuse {
 				// Written on parent, not ctx. A refusal the SDK treats as fatal
 				// (a 401, say) fails the remote connection inside the Write
 				// above, which wakes the server -> stdout goroutine's Read and
@@ -300,4 +297,17 @@ func oneLine(s string) string {
 		s = s[:500]
 	}
 	return s
+}
+
+// refusalFor answers a request the server could not be reached for with a
+// JSON-RPC error, so the client is told rather than left waiting. Only a call
+// has an answer to give; a notification gets none, and so reports false.
+func refusalFor(msg jsonrpc.Message, err error) (*jsonrpc.Response, bool) {
+	req, ok := msg.(*jsonrpc.Request)
+	if !ok || !req.IsCall() {
+		return nil, false
+	}
+	return &jsonrpc.Response{ID: req.ID, Error: &jsonrpc.Error{
+		Code: jsonrpc.CodeInternalError, Message: "polyemesis: " + oneLine(err.Error()),
+	}}, true
 }
