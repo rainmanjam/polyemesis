@@ -325,25 +325,51 @@ func (s *Server) clipTimeline(id int64) (clipTimeline, error) {
 	}
 	out := clipTimeline{anchor: *anchor}
 
-	recs := []db.Recording{*anchor}
-	if sess, err := s.store.SessionForRecording(id); err == nil && sess != nil {
-		if members, err := s.store.SessionRecordings(sess.ID); err == nil && len(members) > 0 {
-			recs = members
-			out.session = sess
-		}
-	}
-	sort.SliceStable(recs, func(i, j int) bool {
-		if recs[i].StartedAt.Equal(recs[j].StartedAt) {
-			return recs[i].ID < recs[j].ID
-		}
-		return recs[i].StartedAt.Before(recs[j].StartedAt)
-	})
+	recs, sess := s.clipSessionRecords(id, *anchor)
+	out.session = sess
+	sortClipRecords(recs)
 
 	// Wall-clock offsets are the honest layout, because they preserve the gap a
 	// recorder restart left. They are only usable when every segment has a
 	// start and they run forwards; otherwise the files go end to end, which is
 	// what clipper.NewTimeline does with an all-zero set.
 	offsets, ok := clipOffsets(recs)
+	out.parts = s.clipParts(recs, offsets, ok)
+	if !ok {
+		layEndToEnd(out.parts)
+	}
+	if len(out.parts) == 0 {
+		return clipTimeline{}, errClipNotMeasured
+	}
+	return out, nil
+}
+
+// clipSessionRecords returns the segments a clip of recording id is cut from:
+// the session's members when the recording belongs to a session that has any,
+// otherwise the anchor alone. The session is returned only with those members.
+func (s *Server) clipSessionRecords(id int64, anchor db.Recording) ([]db.Recording, *db.Session) {
+	if sess, err := s.store.SessionForRecording(id); err == nil && sess != nil {
+		if members, err := s.store.SessionRecordings(sess.ID); err == nil && len(members) > 0 {
+			return members, sess
+		}
+	}
+	return []db.Recording{anchor}, nil
+}
+
+// sortClipRecords orders segments by start time, then ID, so ties are stable.
+func sortClipRecords(recs []db.Recording) {
+	sort.SliceStable(recs, func(i, j int) bool {
+		if recs[i].StartedAt.Equal(recs[j].StartedAt) {
+			return recs[i].ID < recs[j].ID
+		}
+		return recs[i].StartedAt.Before(recs[j].StartedAt)
+	})
+}
+
+// clipParts turns the segments into timeline parts, skipping any not yet
+// measured and placing each at its offset when the offsets are usable.
+func (s *Server) clipParts(recs []db.Recording, offsets []int64, ok bool) []clipPart {
+	var parts []clipPart
 	for i, rec := range recs {
 		if rec.DurationMS <= 0 {
 			// Not measured yet. A zero-length segment contributes no frames and
@@ -357,19 +383,19 @@ func (s *Server) clipTimeline(id int64) (clipTimeline, error) {
 		if path, err := s.recordings().Resolve(rec.Filename); err == nil && fileExists(path) {
 			p.path = path
 		}
-		out.parts = append(out.parts, p)
+		parts = append(parts, p)
 	}
-	if !ok {
-		var at int64
-		for i := range out.parts {
-			out.parts[i].startMS = at
-			at += out.parts[i].rec.DurationMS
-		}
+	return parts
+}
+
+// layEndToEnd places the parts one after another, for when the wall-clock
+// offsets cannot be used.
+func layEndToEnd(parts []clipPart) {
+	var at int64
+	for i := range parts {
+		parts[i].startMS = at
+		at += parts[i].rec.DurationMS
 	}
-	if len(out.parts) == 0 {
-		return clipTimeline{}, errClipNotMeasured
-	}
-	return out, nil
 }
 
 // clipOffsets converts segment start times into timeline offsets, reporting
