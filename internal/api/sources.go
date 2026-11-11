@@ -196,12 +196,7 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 		rtmpLink = rtmpLinkForCard(s.mgr.RTMPLinks(), src.ID)
 		legacyKey = s.mgr.LegacyRTMPKey(src.ID)
 	}
-	degraded := ""
-	if s.mgr != nil {
-		if fo := s.mgr.Engine(src.ID).Failover(); fo != nil {
-			degraded = fo.Degraded
-		}
-	}
+	degraded := s.sourceDegraded(src.ID)
 	view := sourceView{
 		Bonded:         bonded,
 		Degraded:       degraded,
@@ -236,20 +231,7 @@ func (s *Server) viewSource(r *http.Request, src *db.Source, defaultID int64) so
 	// place, so the error is logged and the field left at its zero value only
 	// after saying so -- a reader of the log can tell "no destinations" from
 	// "could not ask", which the number alone cannot express.
-	if s.store != nil {
-		if dests, err := s.store.ListDestinationsBySource(src.ID); err != nil {
-			s.log.Warn("counting a source's destinations for the delete warning",
-				"source", src.ID, "err", err)
-		} else {
-			view.Destinations = len(dests)
-		}
-		if rends, err := s.store.ListRenditionsBySource(src.ID); err != nil {
-			s.log.Warn("counting a source's renditions for the delete warning",
-				"source", src.ID, "err", err)
-		} else {
-			view.Renditions = len(rends)
-		}
-	}
+	s.countSourceDependents(&view, src.ID)
 	if readScopeCannotSeePublishTokens(r) {
 		view = readSafeSourceView(view)
 	}
@@ -753,4 +735,33 @@ func sourceStatus(err error) int {
 		return http.StatusNotFound
 	}
 	return http.StatusBadRequest
+}
+
+// sourceDegraded is the engine's failover degraded reason for a source, or "".
+func (s *Server) sourceDegraded(id int64) string {
+	if s.mgr != nil {
+		if fo := s.mgr.Engine(id).Failover(); fo != nil {
+			return fo.Degraded
+		}
+	}
+	return ""
+}
+
+// countSourceDependents fills in what a delete would take with the source.
+// It is called from viewSource, so the counts are present on every view.
+func (s *Server) countSourceDependents(view *sourceView, srcID int64) {
+	if s.store != nil {
+		if dests, err := s.store.ListDestinationsBySource(srcID); err != nil {
+			s.log.Warn("counting a source's destinations for the delete warning",
+				"source", srcID, "err", err)
+		} else {
+			view.Destinations = len(dests)
+		}
+		if rends, err := s.store.ListRenditionsBySource(srcID); err != nil {
+			s.log.Warn("counting a source's renditions for the delete warning",
+				"source", srcID, "err", err)
+		} else {
+			view.Renditions = len(rends)
+		}
+	}
 }
