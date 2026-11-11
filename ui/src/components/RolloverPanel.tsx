@@ -181,9 +181,7 @@ export function RolloverPanel({ dest }: Readonly<{ dest: DestStatus }>) {
       <p className="text-xs text-muted-foreground">{t(actionKey)}</p>
 
       {notice ? (
-        <p role="status" className={NOTICE_CLASS[notice.tone]}>
-          {notice.text}
-        </p>
+        <output className={`block ${NOTICE_CLASS[notice.tone]}`}>{notice.text}</output>
       ) : null}
 
       <div className="flex flex-wrap gap-2">
