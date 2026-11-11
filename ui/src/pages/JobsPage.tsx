@@ -47,6 +47,7 @@ import { Stat } from "@/components/signature/Stat";
 import { StatusDot } from "@/components/signature/StatusDot";
 import { api, ApiError } from "@/lib/api";
 import { duration, timestamp } from "@/lib/format";
+import { createRowKeys } from "@/lib/row-keys";
 import { purgeTone } from "@/features/jobs/purgeOutcome";
 import { useSaveOutcome, type SaveState } from "@/lib/saveModel";
 import {
@@ -1401,6 +1402,10 @@ function NumberField({
 
 // ---------------------------------------------------------- window editor
 
+/** Keys for the window rows, which are editable and carry no id. Module level,
+ *  so the keys outlive renders; row-keys.ts says why they stay off the rows. */
+const windowRowKeys = createRowKeys<JobWindow>("job-window");
+
 function WindowEditor({
   idBase,
   windows,
@@ -1418,7 +1423,7 @@ function WindowEditor({
   const zoneListId = `jobs-window-tz-${idBase}`;
 
   const set = (i: number, p: Partial<JobWindow>) =>
-    onChange(windows.map((w, n) => (n === i ? { ...w, ...p } : w)));
+    onChange(windows.map((w, n) => (n === i ? windowRowKeys.replace(w, { ...w, ...p }) : w)));
 
   const toggleDay = (i: number, day: number) => {
     const days = windows[i].days ?? [];
@@ -1442,7 +1447,7 @@ function WindowEditor({
         </p>
       )}
       {windows.map((w, i) => (
-        <div key={i} className="flex flex-wrap items-center gap-2">
+        <div key={windowRowKeys.keyOf(w)} className="flex flex-wrap items-center gap-2">
           <Input
             type="time"
             className="tnum h-7 w-24 font-mono text-sm"
