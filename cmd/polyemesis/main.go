@@ -182,24 +182,7 @@ func run(h *hooks) error {
 	if err != nil {
 		return err
 	}
-	// Flags win over the file, so a systemd unit or a container can override
-	// paths without rewriting config.yaml.
-	if *addr != "" {
-		cfg.Addr = *addr
-		// Recorded so the startup warnings name the flag, not the addr: line it
-		// just overrode. See config.Config.AddrFromFlag.
-		cfg.AddrFromFlag = true
-		cfg.AddrDefaulted = false
-	}
-	if *dataDir != "" {
-		cfg.DataDir = *dataDir
-	}
-	if *ffmpegPath != "" {
-		cfg.FFmpeg.Binary = *ffmpegPath
-	}
-	if *ffprobePath != "" {
-		cfg.FFmpeg.Probe = *ffprobePath
-	}
+	applyPathFlags(&cfg, *addr, *dataDir, *ffmpegPath, *ffprobePath)
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -1407,4 +1390,26 @@ func configLoaderFor(visit func(func(*flag.Flag))) func(string) (config.Config, 
 		return config.LoadRequired
 	}
 	return config.Load
+}
+
+// applyPathFlags lays the command-line path and address flags over the file's
+// settings. Flags win over the file, so a systemd unit or a container can
+// override paths without rewriting config.yaml.
+func applyPathFlags(cfg *config.Config, addr, dataDir, ffmpegPath, ffprobePath string) {
+	if addr != "" {
+		cfg.Addr = addr
+		// Recorded so the startup warnings name the flag, not the addr: line it
+		// just overrode. See config.Config.AddrFromFlag.
+		cfg.AddrFromFlag = true
+		cfg.AddrDefaulted = false
+	}
+	if dataDir != "" {
+		cfg.DataDir = dataDir
+	}
+	if ffmpegPath != "" {
+		cfg.FFmpeg.Binary = ffmpegPath
+	}
+	if ffprobePath != "" {
+		cfg.FFmpeg.Probe = ffprobePath
+	}
 }
