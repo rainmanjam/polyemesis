@@ -1327,18 +1327,7 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	cur, active, lastAt := sel.feed, sel.active, sel.feedAt
 	e.mu.Unlock()
 
-	switch {
-	case cur != nil && cur.kind == want && cur.upstream == upstream:
-		if feedRunning(cur) {
-			return
-		}
-		if now.Sub(lastAt) < feedRespawn {
-			return
-		}
-	case cur == nil && !lastAt.IsZero() && now.Sub(lastAt) < feedRespawn:
-		// A start that failed backs off rather than being retried on every
-		// sweep, which is what keeps a slate with an unopenable encoder from
-		// spawning twice a second forever.
+	if feedHeldAsIs(cur, want, upstream, lastAt, now) {
 		return
 	}
 	respawn := active == want
@@ -1385,19 +1374,7 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	}
 
 	e.mu.Lock()
-	if e.sel != nil {
-		e.sel.feed = feed
-		e.sel.active = want
-		e.sel.feedAt = startedAt
-		if feed != nil {
-			e.sel.err = ""
-		}
-		if !respawn {
-			e.sel.reason = reason
-			e.sel.switchedAt = now
-			e.sel.switches++
-		}
-	}
+	e.commitFeedLocked(feed, want, reason, now, startedAt, respawn)
 	e.mu.Unlock()
 
 	// A new feed, switched to or respawned, may decode at another rate or
@@ -1409,16 +1386,62 @@ func (e *Engine) ensureFeed(s db.Settings, silenceSig string, want sourceKind, r
 	}
 
 	if respawn {
-		// Not a switch, but never silent either: a feed that keeps dying is the
-		// difference between a broadcast that is on air and one that only looks
-		// like it.
-		e.log.Warn("source feed restarted", "source", string(want))
-		e.publishStatus()
+		e.announceRespawn(want)
 		return
 	}
 	if reason == "" {
 		return
 	}
+	e.announceSwitch(want, reason, now)
+}
+
+// announceRespawn reports a feed that was restarted without a switch.
+func (e *Engine) announceRespawn(want sourceKind) {
+	// Not a switch, but never silent either: a feed that keeps dying is the
+	// difference between a broadcast that is on air and one that only looks
+	// like it.
+	e.log.Warn("source feed restarted", "source", string(want))
+	e.publishStatus()
+}
+
+// commitFeedLocked records on the selector the feed that is now running. A
+// switch (not a respawn) also records why and when. The caller must hold e.mu.
+func (e *Engine) commitFeedLocked(feed *sourceFeed, want sourceKind, reason string, now, startedAt time.Time, respawn bool) {
+	if e.sel == nil {
+		return
+	}
+	e.sel.feed = feed
+	e.sel.active = want
+	e.sel.feedAt = startedAt
+	if feed != nil {
+		e.sel.err = ""
+	}
+	if !respawn {
+		e.sel.reason = reason
+		e.sel.switchedAt = now
+		e.sel.switches++
+	}
+}
+
+// feedHeldAsIs reports whether ensureFeed should leave the feed alone on this
+// sweep: the running feed already serves want, or a start that just failed is
+// still backing off.
+func feedHeldAsIs(cur *sourceFeed, want sourceKind, upstream string, lastAt, now time.Time) bool {
+	switch {
+	case cur != nil && cur.kind == want && cur.upstream == upstream:
+		return feedRunning(cur) || now.Sub(lastAt) < feedRespawn
+	case cur == nil && !lastAt.IsZero() && now.Sub(lastAt) < feedRespawn:
+		// A start that failed backs off rather than being retried on every
+		// sweep, which is what keeps a slate with an unopenable encoder from
+		// spawning twice a second forever.
+		return true
+	}
+	return false
+}
+
+// announceSwitch reports a feed switch that has a reason: the log, the status
+// snapshot, the event stream and the lifecycle webhook.
+func (e *Engine) announceSwitch(want sourceKind, reason string, now time.Time) {
 	// Three ways to notice, because a silent failover is the failure this
 	// feature is judged on: a log line, the status snapshot, and an event.
 	if want == sourcePrimary {
@@ -1730,6 +1753,44 @@ func (e *Engine) detachFeedForSilence(silenceSig string) {
 // caller's goroutine, so replacing it never races a running supervisor.
 var hubWake = (*relay.Hub).Wake
 
+// feedTimelineOffset is the seconds from startedAt to now, never negative.
+func feedTimelineOffset(now, startedAt time.Time) float64 {
+	offset := now.Sub(startedAt).Seconds()
+	if offset < 0 {
+		offset = 0
+	}
+	return offset
+}
+
+// slateFeedArgs builds the FFmpeg arguments for the slate, and says so when the
+// configured encoder is unusable and software is used instead.
+func (e *Engine) slateFeedArgs(s db.Settings, out string, offset float64) []string {
+	spec, encFallback := e.slateSpec(s, out, offset)
+	if encFallback != "" {
+		e.log.Warn("slate encoder unusable; falling back to software",
+			"encoder", string(s.Failover.Slate.Encoder), "reason", encFallback)
+	}
+	return ffmpeg.SlateArgs(spec)
+}
+
+// subscribeFeedPort reserves a relay port and subscribes the feed to in under
+// selectorSubName. A refused subscription gives the port back.
+func (e *Engine) subscribeFeedPort(in *relay.Hub) (string, int, error) {
+	port, err := e.allocPort()
+	if err != nil {
+		return "", 0, err
+	}
+	url, err := in.Subscribe(selectorSubName, port)
+	if err != nil {
+		// #711. BEFORE feed.subName is recorded, so the teardown below does
+		// not unsubscribe a name this feed never took -- which would cut off
+		// whoever actually holds it.
+		e.releasePort(port)
+		return "", 0, err
+	}
+	return url, port, nil
+}
+
 // startFeed spawns the process that publishes one source into the selector's
 // hub. The caller must hold selMu.
 func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig string, now time.Time) *sourceFeed {
@@ -1753,10 +1814,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 	// The tier's own elapsed time. See the PTS note at the top of this section:
 	// this single number is what keeps the published timeline monotonic across
 	// every switch and every respawn.
-	offset := now.Sub(sel.startedAt).Seconds()
-	if offset < 0 {
-		offset = 0
-	}
+	offset := feedTimelineOffset(now, sel.startedAt)
 
 	feed := &sourceFeed{kind: kind, gen: e.feedGen.Add(1), upstream: upstream, offset: offset, startedAt: now}
 	var args []string
@@ -1770,12 +1828,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 	// as a panic.
 	switch kind {
 	case sourceSlate:
-		spec, encFallback := e.slateSpec(s, out, offset)
-		if encFallback != "" {
-			e.log.Warn("slate encoder unusable; falling back to software",
-				"encoder", string(s.Failover.Slate.Encoder), "reason", encFallback)
-		}
-		args = ffmpeg.SlateArgs(spec)
+		args = e.slateFeedArgs(s, out, offset)
 	case sourcePrimary, sourceBackup, sourcePlaylist:
 		// The playlist joins the two ingests here rather than getting a branch
 		// of its own, and that is the whole shape of the tier: it already runs
@@ -1789,17 +1842,9 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		if in == nil {
 			return fail(fmt.Errorf("the %s source has no relay to read", kind))
 		}
-		port, err := e.allocPort()
+		url, port, err := e.subscribeFeedPort(in)
 		if err != nil {
 			return fail(err)
-		}
-		url, serr := in.Subscribe(selectorSubName, port)
-		if serr != nil {
-			// #711. BEFORE feed.subName is recorded, so the teardown below does
-			// not unsubscribe a name this feed never took -- which would cut off
-			// whoever actually holds it.
-			e.releasePort(port)
-			return fail(serr)
 		}
 		feed.in, feed.port, feed.subName = in, port, selectorSubName
 		if kind == sourcePrimary {
@@ -2028,12 +2073,7 @@ func (e *Engine) retireFeed(f *sourceFeed) (stopErr error, detached bool, done <
 
 	// finish gives back what the process was holding once it has exited.
 	finish := func() {
-		if f.subName != "" {
-			f.in.Unsubscribe(f.subName)
-		}
-		if f.port != 0 {
-			e.releasePort(f.port)
-		}
+		e.releaseFeedHold(f)
 	}
 
 	// stopped has the last word on every path out of the wait: completion wins a
@@ -2101,20 +2141,36 @@ wait:
 		defer close(fin)
 		err := <-stopped
 		finish()
-		// Nobody is waiting for the answer any more, and the tier's status
-		// belongs to the feed that replaced this one, so this is a log line
-		// and not sel.err. It was cut off from its input before the kill, so
-		// the "may still be writing" warning does not apply.
-		if err != nil {
-			e.log.Warn("outgoing feed was killed after the switch; it had been cut off "+
-				"from its input, so it published nothing beside its replacement",
-				"source", string(f.kind), "err", err)
-		}
+		e.logKilledAfterSwitch(f, err)
 		if f.prev != nil {
 			<-f.prev
 		}
 	}()
 	return nil, true, fin
+}
+
+// releaseFeedHold gives back what a feed's process was holding once it has
+// exited: its subscription on the input hop, and its relay port.
+func (e *Engine) releaseFeedHold(f *sourceFeed) {
+	if f.subName != "" {
+		f.in.Unsubscribe(f.subName)
+	}
+	if f.port != 0 {
+		e.releasePort(f.port)
+	}
+}
+
+// logKilledAfterSwitch records an outgoing feed that had to be killed after the
+// switch. Nobody is waiting for the answer any more, and the tier's status
+// belongs to the feed that replaced this one, so this is a log line and not
+// sel.err. It was cut off from its input before the kill, so the "may still be
+// writing" warning does not apply.
+func (e *Engine) logKilledAfterSwitch(f *sourceFeed, err error) {
+	if err != nil {
+		e.log.Warn("outgoing feed was killed after the switch; it had been cut off "+
+			"from its input, so it published nothing beside its replacement",
+			"source", string(f.kind), "err", err)
+	}
 }
 
 // reportStop reports a stop that ran out its deadline, for teardownFeed and for
@@ -2562,13 +2618,7 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		// is now a live hazard rather than a precaution: startFeed builds a
 		// playlist copy hop out of exactly the hub being closed two lines below.
 		e.mu.Lock()
-		var feed *sourceFeed
-		if e.sel != nil && e.sel.feed != nil && e.sel.feed.kind == sourcePlaylist {
-			feed, e.sel.feed = e.sel.feed, nil
-			// See detachFeedForSilence: a deliberate teardown must not be
-			// mistaken for a start that failed.
-			e.sel.feedAt = time.Time{}
-		}
+		feed := e.detachPlaylistFeed()
 		// A TIER THAT HAS BEEN TORN DOWN MUST NOT READ AS DELIVERING, and this
 		// is the line that makes that true at the instant it stops being a
 		// place to send viewers rather than up to a sweep later.
@@ -2597,26 +2647,14 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		// all four, and it keeps chooseSource's inputs describing DELIVERY
 		// rather than mixing in a process fact -- which is what the comment on
 		// sourceChoice.playlistRunning promises a reader.
-		if e.sel != nil {
-			if pl := e.sel.live[sourcePlaylist]; pl != nil {
-				*pl = liveness{}
-			}
-		}
+		e.zeroPlaylistLiveness()
 		e.playlist = nil
 		e.mu.Unlock()
 		e.teardownFeed(feed)
 		e.teardownPlaylist(cur)
 	}
 	if want == "" {
-		if s.Failover.Enabled && s.Failover.Playlist.Enabled {
-			// Only reachable through settings that never passed validation --
-			// db.Settings.Validate rejects an item that fails PlaylistFileProblem
-			// -- so it is said out loud rather than left as a tier that quietly
-			// never starts.
-			e.log.Warn("playlist not started; its items are unusable",
-				"items", s.Failover.Playlist.Items,
-				"err", s.Failover.Playlist.PlaylistFileProblem())
-		}
+		e.warnUnusablePlaylist(s)
 		return
 	}
 
@@ -2640,54 +2678,9 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		return
 	}
 
-	// EVERY ITEM, IN ORDER, AND IT PLAYS THE DERIVATIVES. The gate above has
-	// already required a derivative for every item; these are the very files it
-	// stat'd, and the operator's originals are not opened at all. That is what
-	// makes the fixed normalised profile load bearing rather than bookkeeping:
-	// the concat demuxer requires every file in the list to share codecs,
-	// timebase, resolution and channel layout, and `-c copy` across a seam is
-	// only a copy because B1 guaranteed it.
-	//
-	// Built through playlistmedia.DerivativePath, never a join of our own, so
-	// the profile version in the filename cannot drift from the one the
-	// normaliser writes -- and so the name is reduced to its base on the way,
-	// which is the confinement standing behind `-safe 0`.
-	//
-	// No per-entry `duration` directives: DurationMS is left zero deliberately.
-	// Three real derivatives, looped past two full wraps, 1068 packets probed
-	// with and without them -- identical ONLY when the directive is exact, and
-	// ConcatList renders milliseconds. See the fuller note above ffmpeg.PlaylistFeedArgs
-	// and internal/playlistmedia/concat_behaviour_test.go.
-	// ABSOLUTE, and that is a bug fix rather than tidiness.
-	//
-	// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
-	// DIRECTORY -- and the list lives in <dataDir>/playlist-media, which is
-	// exactly the prefix a relative DerivativePath already carries. So
-	// `--data data` produced entries like `data/playlist-media/x.ts.v2.ts` in a
-	// list at `data/playlist-media/`, the demuxer looked for
-	// `data/playlist-media/data/playlist-media/x.ts.v2.ts`, and the tier
-	// respawn-looped on a file that was sitting right there. Readiness had
-	// already stat'd it and passed, because readiness resolves paths from the
-	// process's working directory the way every other caller does.
-	//
-	// Nothing shipped hits it -- deployments pass an absolute --data and the
-	// engine's own tests build one with t.TempDir() -- which is precisely why it
-	// survived: every existing caller happened to be absolute, so the one that
-	// is not had nothing watching it. Found by the acceptance suite.
-	items := s.Failover.Playlist.Items
-	entries := make([]ffmpeg.ConcatEntry, 0, len(items))
-	for i := range items {
-		p := playlistmedia.DerivativePath(e.cfg.DataDir, playlistItemUpload(items, i))
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			// Only when the working directory cannot be read, which is a great
-			// deal more wrong than one playlist. Said out loud rather than
-			// silently feeding the demuxer a path it will double.
-			e.log.Error("playlist: cannot make a derivative path absolute",
-				"path", p, "err", err)
-			return
-		}
-		entries = append(entries, ffmpeg.ConcatEntry{Path: abs})
+	entries, ok := e.playlistEntries(s.Failover.Playlist.Items)
+	if !ok {
+		return
 	}
 
 	// THE FILENAME CARRIES THE SIGNATURE AND THIS ENGINE'S SOURCE ID, and it
@@ -2700,18 +2693,8 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 	// other's FFmpeg is still re-reading at its next wrap, and the second source
 	// would drop off air for a reason nothing in its own configuration changed.
 	// A tier deletes only the path it holds, and only once its process is gone.
-	listPath := filepath.Join(playlistmedia.DerivativeDir(e.cfg.DataDir),
-		fmt.Sprintf("playlist-%d-%s.txt", e.sourceID, want))
-	if err := os.MkdirAll(filepath.Dir(listPath), 0o755); err != nil {
-		e.log.Error("playlist: no derivative directory for the list", "err", err)
-		_ = hub.Close()
-		return
-	}
-	if err := os.WriteFile(listPath, []byte(ffmpeg.ConcatList(entries)), 0o600); err != nil {
-		// Written BEFORE the process is spawned, so a list that cannot be
-		// written is a tier that never starts rather than one that respawn-loops
-		// on a file it will never find.
-		e.log.Error("playlist: cannot write the concat list", "path", listPath, "err", err)
+	listPath := e.playlistListPath(want)
+	if !e.writeConcatList(listPath, entries) {
 		_ = hub.Close()
 		return
 	}
@@ -2747,6 +2730,123 @@ func (e *Engine) reconcilePlaylist(s db.Settings) {
 		"relayPort", hub.Port(),
 		"reason", "a playlist publishes into a hub of its own, so a file on air "+
 			"never makes the primary ingest read live")
+}
+
+// detachPlaylistFeed takes the playlist feed off the selector, if one is
+// running, and returns it so the caller can tear it down. The caller must hold
+// e.mu.
+func (e *Engine) detachPlaylistFeed() *sourceFeed {
+	var feed *sourceFeed
+	if e.sel != nil && e.sel.feed != nil && e.sel.feed.kind == sourcePlaylist {
+		feed, e.sel.feed = e.sel.feed, nil
+		// See detachFeedForSilence: a deliberate teardown must not be
+		// mistaken for a start that failed.
+		e.sel.feedAt = time.Time{}
+	}
+	return feed
+}
+
+// zeroPlaylistLiveness clears the liveness counter of the playlist tier, if the
+// selector has one. The caller must hold e.mu.
+func (e *Engine) zeroPlaylistLiveness() {
+	if e.sel != nil {
+		if pl := e.sel.live[sourcePlaylist]; pl != nil {
+			*pl = liveness{}
+		}
+	}
+}
+
+// warnUnusablePlaylist says so when the playlist is enabled but its items cannot
+// be used, so the tier that never starts is not a silent one.
+func (e *Engine) warnUnusablePlaylist(s db.Settings) {
+	if s.Failover.Enabled && s.Failover.Playlist.Enabled {
+		// Only reachable through settings that never passed validation --
+		// db.Settings.Validate rejects an item that fails PlaylistFileProblem
+		// -- so it is said out loud rather than left as a tier that quietly
+		// never starts.
+		e.log.Warn("playlist not started; its items are unusable",
+			"items", s.Failover.Playlist.Items,
+			"err", s.Failover.Playlist.PlaylistFileProblem())
+	}
+}
+
+// playlistEntries resolves every item to its derivative's absolute path, in
+// order. ok is false, after logging, when a path cannot be made absolute.
+func (e *Engine) playlistEntries(items []db.PlaylistItem) (entries []ffmpeg.ConcatEntry, ok bool) {
+	// EVERY ITEM, IN ORDER, AND IT PLAYS THE DERIVATIVES. The gate above has
+	// already required a derivative for every item; these are the very files it
+	// stat'd, and the operator's originals are not opened at all. That is what
+	// makes the fixed normalised profile load bearing rather than bookkeeping:
+	// the concat demuxer requires every file in the list to share codecs,
+	// timebase, resolution and channel layout, and `-c copy` across a seam is
+	// only a copy because B1 guaranteed it.
+	//
+	// Built through playlistmedia.DerivativePath, never a join of our own, so
+	// the profile version in the filename cannot drift from the one the
+	// normaliser writes -- and so the name is reduced to its base on the way,
+	// which is the confinement standing behind `-safe 0`.
+	//
+	// No per-entry `duration` directives: DurationMS is left zero deliberately.
+	// Three real derivatives, looped past two full wraps, 1068 packets probed
+	// with and without them -- identical ONLY when the directive is exact, and
+	// ConcatList renders milliseconds. See the fuller note above ffmpeg.PlaylistFeedArgs
+	// and internal/playlistmedia/concat_behaviour_test.go.
+	// ABSOLUTE, and that is a bug fix rather than tidiness.
+	//
+	// The concat demuxer resolves a relative entry against THE LIST FILE'S OWN
+	// DIRECTORY -- and the list lives in <dataDir>/playlist-media, which is
+	// exactly the prefix a relative DerivativePath already carries. So
+	// `--data data` produced entries like `data/playlist-media/x.ts.v2.ts` in a
+	// list at `data/playlist-media/`, the demuxer looked for
+	// `data/playlist-media/data/playlist-media/x.ts.v2.ts`, and the tier
+	// respawn-looped on a file that was sitting right there. Readiness had
+	// already stat'd it and passed, because readiness resolves paths from the
+	// process's working directory the way every other caller does.
+	//
+	// Nothing shipped hits it -- deployments pass an absolute --data and the
+	// engine's own tests build one with t.TempDir() -- which is precisely why it
+	// survived: every existing caller happened to be absolute, so the one that
+	// is not had nothing watching it. Found by the acceptance suite.
+	entries = make([]ffmpeg.ConcatEntry, 0, len(items))
+	for i := range items {
+		p := playlistmedia.DerivativePath(e.cfg.DataDir, playlistItemUpload(items, i))
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			// Only when the working directory cannot be read, which is a great
+			// deal more wrong than one playlist. Said out loud rather than
+			// silently feeding the demuxer a path it will double.
+			e.log.Error("playlist: cannot make a derivative path absolute",
+				"path", p, "err", err)
+			return nil, false
+		}
+		entries = append(entries, ffmpeg.ConcatEntry{Path: abs})
+	}
+	return entries, true
+}
+
+// playlistListPath is the concat list for a playlist signature, named for this
+// engine's source (see the filename note in reconcilePlaylist).
+func (e *Engine) playlistListPath(sig string) string {
+	return filepath.Join(playlistmedia.DerivativeDir(e.cfg.DataDir),
+		fmt.Sprintf("playlist-%d-%s.txt", e.sourceID, sig))
+}
+
+// writeConcatList writes the concat list before the process is spawned, and
+// reports whether it did. A list that cannot be written is a tier that never
+// starts rather than one that respawn-loops on a file it will never find.
+func (e *Engine) writeConcatList(listPath string, entries []ffmpeg.ConcatEntry) bool {
+	if err := os.MkdirAll(filepath.Dir(listPath), 0o755); err != nil {
+		e.log.Error("playlist: no derivative directory for the list", "err", err)
+		return false
+	}
+	if err := os.WriteFile(listPath, []byte(ffmpeg.ConcatList(entries)), 0o600); err != nil {
+		// Written BEFORE the process is spawned, so a list that cannot be
+		// written is a tier that never starts rather than one that respawn-loops
+		// on a file it will never find.
+		e.log.Error("playlist: cannot write the concat list", "path", listPath, "err", err)
+		return false
+	}
+	return true
 }
 
 func (e *Engine) teardownPlaylist(p *playlistTier) {
