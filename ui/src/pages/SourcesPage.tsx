@@ -767,9 +767,7 @@ export function SourceCard({
         {phase === "waiting" && <WaitingForEncoder />}
 
         {phase === "receiving" && (
-          <div
-            // NOSONAR typescript:S6819: <output> may hold only phrasing content, and this
-            // live region holds a preview, block text and a button.
+          <div // NOSONAR typescript:S6819: <output> holds only phrasing content; this live region holds a preview, block text and a button
             role="status"
             className="flex items-start gap-3 rounded-md border border-ok/30 bg-ok-dim/20 px-3 py-2"
           >

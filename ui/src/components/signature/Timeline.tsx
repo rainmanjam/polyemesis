@@ -426,7 +426,7 @@ function Handle({
 }>) {
   if (leftPx < -20 || leftPx > width + 20) return null;
   return (
-    <div
+    <div // NOSONAR typescript:S6819: dragging belongs to the timeline wrapper's pointer capture (onPointerDown on the wrapRef div), not to this handle; a native input type=range would bring its own thumb drag and arrow-key stepping and has no Shift coarse step (this handle uses Shift for 1 s and plain arrows for 33 ms), so the handle stays a positioned div with role=slider
       role="slider"
       tabIndex={0}
       aria-label={label}

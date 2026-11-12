@@ -1098,6 +1098,16 @@ function captionTrackUrl(id: number, hasTranscript: boolean): string {
   return api.captionExportUrl(id, "vtt", hasTranscript ? "recording" : "live");
 }
 
+/** The transcribe button's tooltip: the per-track action while whisper is
+ *  available, otherwise why it is not. */
+function transcribeTitle(available: boolean, note: string | undefined, t: Translator): string {
+  return available
+    ? t("lib.transcribeEachTrackOnIts")
+    : t("lib.transcriptionUnavailableReason", {
+      note: note ?? t("lib.whisperNotFound"),
+    });
+}
+
 export function PlayerDialog({
   target,
   onClose,
@@ -1347,13 +1357,7 @@ export function PlayerDialog({
                       size="sm"
                       disabled={busy || !transcribeAvailable}
                       onClick={retranscribe}
-                      title={
-                        transcribeAvailable
-                          ? t("lib.transcribeEachTrackOnIts")
-                          : t("lib.transcriptionUnavailableReason", {
-                            note: transcribeNote ?? t("lib.whisperNotFound"),
-                          })
-                      }
+                      title={transcribeTitle(transcribeAvailable, transcribeNote, t)}
                     >
                       <Captions />
                       {t("lib.transcribe")}

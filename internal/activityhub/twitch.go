@@ -348,7 +348,7 @@ func (t *Twitch) kindsSnapshot() map[activity.Kind]activity.KindStatus {
 	return out
 }
 
-func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
+func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error { // NOSONAR go:S3776: the EventSub run loop is one select state machine (keepalive timer, reconnect grace, old-socket drain window, socket swap); pure parsing and decision pieces are already extracted, and the remaining branches must share the socket and timer variables
 	tier, err := t.api.BroadcasterType(ctx, t.cfg.AccountRef)
 	if err != nil {
 		return t.parkOrFail(ctx, err)
