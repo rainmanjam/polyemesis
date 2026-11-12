@@ -205,7 +205,7 @@ func retract(sink Receiver, messageID string) {
 // message. Collapsing that into a list of message ids would mean guessing which
 // messages the platform meant, and guessing wrong deletes something a viewer
 // can still see.
-type RetractorAll interface {
+type UserRetractor interface {
 	// RetractUser removes every message from one author. An empty author means
 	// the platform cleared the entire chat.
 	RetractUser(authorID string)
@@ -214,7 +214,7 @@ type RetractorAll interface {
 // retractUser tells the sink every message from one author is gone, or -- with
 // an empty authorID -- that the whole room was cleared.
 func retractUser(sink Receiver, authorID string) {
-	if r, ok := sink.(RetractorAll); ok {
+	if r, ok := sink.(UserRetractor); ok {
 		r.RetractUser(authorID)
 	}
 }
@@ -548,6 +548,6 @@ var (
 
 	// The sink the Hub hands every adapter must be able to hear both kinds of
 	// retraction, or the CLEARMSG/CLEARCHAT path silently does nothing.
-	_ Retractor    = runnerSink{}
-	_ RetractorAll = runnerSink{}
+	_ Retractor     = runnerSink{}
+	_ UserRetractor = runnerSink{}
 )

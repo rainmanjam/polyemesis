@@ -17,7 +17,7 @@ package main
 //	               the poll counter. user is the author id (default "e2e-"+name).
 //	POST /platform {"platform","action":"delete"|"ban"|"clear","id"?,"user"?}
 //	               moderation done ON THE PLATFORM's side, reported the way a
-//	               platform reports it (Retractor / RetractorAll).
+//	               platform reports it (Retractor / UserRetractor).
 //	GET  /sent     every text polyemesis sent into a fake chat, per platform.
 //	POST /youtube-poll {"tally"?:[n,…],"fail"?:bool,"quota"?:[units,reserve]}
 //	               sets what the fake YouTube API answers a live poll with.
@@ -261,7 +261,7 @@ func e2eControl(action, id, user string) (func(chat.Receiver), bool) {
 			user = ""
 		}
 		f = func(s chat.Receiver) {
-			if rt, ok := s.(chat.RetractorAll); ok {
+			if rt, ok := s.(chat.UserRetractor); ok {
 				rt.RetractUser(user)
 			}
 		}
