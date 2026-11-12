@@ -246,7 +246,7 @@ export function ChatUserCard({
     let failed = 0;
     for (let i = 0; i < messages.length; i += HIDE_CONCURRENCY) {
       const batch = messages.slice(i, i + HIDE_CONCURRENCY);
-      const settled = await Promise.allSettled(
+      const settled = await Promise.allSettled( // NOSONAR typescript:S9382: batches of HIDE_CONCURRENCY (5) are the throttle under the platforms' rate limits; the await is the batch boundary, and allSettled keeps one batch's failure from hiding the others
         batch.map((m) => api.hideChatMessage({ platform, account, id: m.id, scope, hidden })),
       );
       count += settled.filter((r) => r.status === "fulfilled").length;

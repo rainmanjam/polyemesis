@@ -107,7 +107,7 @@ export function MediaUploads() {
         const entry: InFlight = { name: file.name, fraction: 0, controller };
         setInFlight((cur) => [...cur, entry]);
         try {
-          await api.uploadMedia(
+          await api.uploadMedia( // NOSONAR typescript:S9382: each file's in-flight row, progress and cancel button appear when its turn starts, and a cancel aborts only that file before the walk continues; parallel would show every row at once and split progress across them
             file,
             (fraction) =>
               setInFlight((cur) =>
