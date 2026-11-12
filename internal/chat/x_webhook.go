@@ -635,7 +635,7 @@ func (x *XAdapter) run(ctx context.Context, sink Receiver) error {
 	}
 }
 
-// xDrainLimit bounds the exit drain. Sink.Deliver is meant not to block, but a sink that does must not hang Run, and
+// xDrainLimit bounds the exit drain. Receiver.Deliver is meant not to block, but a sink that does must not hang Run, and
 // with it the Hub's shutdown. A variable so a test can shorten it.
 var xDrainLimit = 2 * time.Second
 
