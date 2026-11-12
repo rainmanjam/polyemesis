@@ -3210,13 +3210,7 @@ func (e *Engine) reconcileOutputs() error {
 	// Published from the decision itself, not recomputed anywhere else, so
 	// /status cannot disagree with the reconcile about why nothing is running.
 	// Cleared on every pass that does not hold, so a stale reason cannot outlive
-	// the condition that produced it.
-	// Worded for an operator watching a dashboard, not for the person who wrote
-	// the hold. "A routing graph compiled against the placeholder would map tracks
-	// that may not exist" is the true reason and belongs in reconcileOutputs'
-	// comment, where it already is; on a card it reads as a fault report about
-	// track mapping, which is not what is happening. What the operator needs is
-	// that this is a normal, transient, pre-stream state and nothing is wrong.
+	// the condition that produced it. The wording is holdStatusFor's.
 	e.destHold.Store(holdStatusFor(holdDests))
 	e.announceHold(holdDests, unmeasurable)
 
