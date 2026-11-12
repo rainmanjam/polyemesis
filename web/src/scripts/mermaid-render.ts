@@ -81,7 +81,7 @@ async function render(): Promise<void> {
   for (const [i, el] of Array.from(targets).entries()) {
     const source = el.textContent ?? "";
     try {
-      const { svg } = await mermaid.render(`mermaid-${i}`, source);
+      const { svg } = await mermaid.render(`mermaid-${i}`, source); // NOSONAR typescript:S9382: mermaid 12's render clears module-level layout state (clearLayoutRenderState) and awaits midway through it, so two renders in flight corrupt each other; one diagram at a time, in document order
       /* innerHTML, and the two things that make it the right call rather than a
          shortcut. The string is mermaid's OWN SVG output, not content from
          anywhere; and `securityLevel: "strict"` above runs mermaid's DOMPurify
