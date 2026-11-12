@@ -143,7 +143,7 @@ async function translateLanguage(lang) {
   let skipped = 0;
   for (let i = 0; i < todo.length; i += CHUNK) {
     const keys = todo.slice(i, i + CHUNK);
-    const got = parseNumbered(await generate(buildPrompt(lang, keys.map((k) => en[k]))), keys.length);
+    const got = parseNumbered(await generate(buildPrompt(lang, keys.map((k) => en[k]))), keys.length); // NOSONAR javascript:S9382: one local Ollama model serves every chunk, so chunks run one generation at a time and the per-key warnings print in key order
     keys.forEach((k, j) => {
       const why = reject(en[k], got[j]);
       if (why) {
@@ -183,7 +183,7 @@ if (targets.length === 0) {
 console.log(`${MODEL} via ${OLLAMA}\n${KEYS.length} keys, ${targets.length} language(s)\n`);
 for (const lang of targets) {
   try {
-    await translateLanguage(lang);
+    await translateLanguage(lang); // NOSONAR javascript:S9382: languages run one after another against the same local Ollama model, and each finished language writes its own catalogue file and logs its own failure in order
   } catch (e) {
     // One language failing must not cost the others their work.
     console.error(`  ${lang.code.padEnd(8)} FAILED: ${e.message}`);

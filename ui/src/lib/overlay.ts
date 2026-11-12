@@ -456,7 +456,7 @@ export async function runOverlayStream(
     // A stream that ends is normal (a key rotation ends it on purpose, and the
     // next attempt then gets its 401); back off gently, capped at 10 s.
     cursor.attempt++;
-    await wait(Math.min(10_000, 500 * 2 ** Math.min(cursor.attempt, 5)));
+    await wait(Math.min(10_000, 500 * 2 ** Math.min(cursor.attempt, 5))); // NOSONAR typescript:S9382: reconnect backoff; the next attempt depends on this one's outcome and cursor, so the wait is the loop's pacing, not parallelisable work
   }
 }
 
