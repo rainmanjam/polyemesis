@@ -324,6 +324,16 @@ func (y *YouTubeAdapter) liveChatID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// ytUserBanned is the userBannedEvent detail block.
+type ytUserBanned struct {
+	BannedUserDetails ytBannedUser `json:"bannedUserDetails"`
+}
+
+// ytBannedUser names the channel a ban was issued against.
+type ytBannedUser struct {
+	ChannelID string `json:"channelId"`
+}
+
 // ytChatItem is one message as the API returns it.
 type ytChatItem struct {
 	ID      string `json:"id"`
@@ -336,11 +346,7 @@ type ytChatItem struct {
 		// is recognised by this object rather than by the type string.
 		// UserBannedDetails is present on a userBannedEvent: a moderator (this
 		// app, another moderator or Studio) banned someone.
-		UserBannedDetails *struct {
-			BannedUserDetails struct {
-				ChannelID string `json:"channelId"`
-			} `json:"bannedUserDetails"`
-		} `json:"userBannedDetails"`
+		UserBannedDetails *ytUserBanned `json:"userBannedDetails"`
 		// The event detail blocks, one per type, named as the liveChatMessages
 		// resource names them. See youtube_activity.go.
 		SuperChatDetails              *ytPaidDetails `json:"superChatDetails"`
@@ -349,14 +355,7 @@ type ytChatItem struct {
 		MemberMilestoneChatDetails    *ytMilestone   `json:"memberMilestoneChatDetails"`
 		MembershipGiftingDetails      *ytGifting     `json:"membershipGiftingDetails"`
 		GiftMembershipReceivedDetails *ytGiftRecv    `json:"giftMembershipReceivedDetails"`
-		PollDetails                   *struct {
-			Metadata struct {
-				Status  string `json:"status"`
-				Options []struct {
-					Tally string `json:"tally"`
-				} `json:"options"`
-			} `json:"metadata"`
-		} `json:"pollDetails"`
+		PollDetails                   *ytPollDetails `json:"pollDetails"`
 	} `json:"snippet"`
 	AuthorDetails struct {
 		ChannelID       string `json:"channelId"`
