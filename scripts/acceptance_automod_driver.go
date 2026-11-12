@@ -530,7 +530,7 @@ type recordingAdapter struct {
 func (a *recordingAdapter) Platform() db.Platform { return db.PlatformTwitch }
 func (a *recordingAdapter) Account() string       { return "acceptance" }
 
-func (a *recordingAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *recordingAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	sink.Deliver(chat.Message{
 		ID:       a.msgID,
 		Platform: db.PlatformTwitch,
@@ -769,7 +769,7 @@ type protAdapter struct {
 func (a *protAdapter) Platform() db.Platform { return db.PlatformTwitch }
 func (a *protAdapter) Account() string       { return "acceptance" }
 
-func (a *protAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *protAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	now := time.Now()
 	n := 0
 	deliver := func(author, name, text string) {

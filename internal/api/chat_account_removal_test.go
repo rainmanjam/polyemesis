@@ -37,7 +37,7 @@ type idleChat struct {
 
 func (a idleChat) Platform() db.Platform { return a.platform }
 func (a idleChat) Account() string       { return a.account }
-func (a idleChat) Run(ctx context.Context, _ chat.Sink) error {
+func (a idleChat) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }

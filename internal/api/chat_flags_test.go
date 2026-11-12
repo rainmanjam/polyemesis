@@ -22,7 +22,7 @@ type speakingAdapter struct {
 	say []chat.Message
 }
 
-func (a *speakingAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *speakingAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	for _, m := range a.say {
 		sink.Deliver(m)
 	}

@@ -21,7 +21,7 @@ type appealAdapter struct {
 // Both embedded types declare these, so the ambiguity is settled by hand.
 func (a *appealAdapter) Platform() db.Platform { return a.moderatableAdapter.Platform() }
 func (a *appealAdapter) Account() string       { return a.moderatableAdapter.Account() }
-func (a *appealAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *appealAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	return a.moderatableAdapter.Run(ctx, sink)
 }
 

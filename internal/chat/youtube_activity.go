@@ -139,7 +139,7 @@ func ytActivityType(t string) bool {
 }
 
 // activityFrom turns one list item into an activity, when it is one.
-func (y *YouTubeAdapter) activityFrom(it ytChatItem, sink Sink) {
+func (y *YouTubeAdapter) activityFrom(it ytChatItem, sink Receiver) {
 	if !ytActivityType(it.Snippet.Type) {
 		return
 	}

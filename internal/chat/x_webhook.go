@@ -508,7 +508,7 @@ func (x *XAdapter) registered() bool {
 //
 // The inbox opens BEFORE the subscriptions exist: X starts delivering the moment one does, and an event that found no
 // inbox would have nowhere to go.
-func (x *XAdapter) Run(ctx context.Context, sink Sink) error {
+func (x *XAdapter) Run(ctx context.Context, sink Receiver) error {
 	// A starting attempt reads as "coming up", however long the outage before it: the terminal flag clears and the
 	// not-live clock restarts, so Unavailable does not drop events a successful retry would take.
 	x.liveMu.Lock()
@@ -554,7 +554,7 @@ func (x *XAdapter) wait(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func (x *XAdapter) run(ctx context.Context, sink Sink) error {
+func (x *XAdapter) run(ctx context.Context, sink Receiver) error {
 	if strings.TrimSpace(x.cfg.AppBearer) == "" {
 		return Fatal(errors.New("X live chat needs an app-only bearer token to register its webhook with X, " +
 			"which polyemesis does not have. Set POLYEMESIS_X_APP_BEARER to the app's bearer token " +
@@ -641,7 +641,7 @@ var xDrainLimit = 2 * time.Second
 
 // drainInbox delivers what is still queued, for at most xDrainLimit. What is left after that was already answered 200
 // to X, so it cannot be redelivered; the loss is logged with its size.
-func (x *XAdapter) drainInbox(inbox chan xWebhookEvent, sink Sink) {
+func (x *XAdapter) drainInbox(inbox chan xWebhookEvent, sink Receiver) {
 	var abandoned atomic.Bool
 	done := make(chan struct{})
 	go func() {
@@ -910,7 +910,7 @@ type xChatPayload struct {
 
 // deliver turns one queued event into a Message or a retraction. The event_uuid is recorded only once the event has
 // been acted on, so a delivery that never got that far is not swallowed when X replays it.
-func (x *XAdapter) deliver(sink Sink, ev xWebhookEvent) {
+func (x *XAdapter) deliver(sink Receiver, ev xWebhookEvent) {
 	if x.seen.has(ev.UUID) {
 		return
 	}

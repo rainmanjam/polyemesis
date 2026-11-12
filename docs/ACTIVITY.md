@@ -385,7 +385,7 @@ A platform adds its events in its own files and does not edit the core.
 
 1. **Say it with `emitActivity`.** A chat adapter calls
    `emitActivity(sink, activity.Event{...})` (`internal/chat/activity.go`) on
-   the `chat.Sink` it was handed; the runner stamps `Platform` and `Account`.
+   the `chat.Receiver` it was handed; the runner stamps `Platform` and `Account`.
    Fill `Kind`, the actor or other channel, the `Amount` (money or a unit, never
    converted), `Source.Type` and a `Source.ID` that is stable across redelivery
    (the platform's message id, or a hash of the fields that identify the event).

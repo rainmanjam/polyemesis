@@ -150,7 +150,7 @@ type KickAdapter struct {
 	cfg KickConfig
 
 	mu           sync.Mutex
-	sink         Sink
+	sink         Receiver
 	health       Health
 	lastEventAt  time.Time
 	startedAt    time.Time
@@ -294,7 +294,7 @@ func (k *KickAdapter) setHealth(state State, detail string) {
 // delivers while polyemesis restarts, and the next Run would only have to
 // create it again. A subscription for a channel that has been disconnected is
 // harmless: the delivery is verified, matches no adapter, and is acknowledged.
-func (k *KickAdapter) Run(ctx context.Context, sink Sink) error {
+func (k *KickAdapter) Run(ctx context.Context, sink Receiver) error {
 	k.mu.Lock()
 	k.sink = sink
 	k.startedAt = k.cfg.Now()

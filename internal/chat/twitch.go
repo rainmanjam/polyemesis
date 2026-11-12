@@ -181,7 +181,7 @@ func (t *TwitchAdapter) setHealth(state State, detail string) {
 }
 
 // Run connects, joins and reads until ctx ends or the connection breaks.
-func (t *TwitchAdapter) Run(ctx context.Context, sink Sink) error {
+func (t *TwitchAdapter) Run(ctx context.Context, sink Receiver) error {
 	// The token first, so a refresh that fails costs no connection and sends
 	// no stale credential; see passToken.
 	pass, err := t.passToken(ctx)
@@ -302,7 +302,7 @@ func (t *TwitchAdapter) passToken(ctx context.Context) (string, error) {
 // handle processes one parsed line. It returns done=true when the connection
 // should end, with the error that ends it (nil for a clean end the Hub should
 // simply reconnect after).
-func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Sink) (bool, error) {
+func (t *TwitchAdapter) handle(conn net.Conn, l ircLine, sink Receiver) (bool, error) {
 	switch l.Command {
 	case "PING":
 		// Answering this is the whole reason the connection survives past five

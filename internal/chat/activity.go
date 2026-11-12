@@ -18,7 +18,7 @@ import (
 // leaves through its own door: ActivitySink, below, into internal/activityhub.
 
 // ActivitySink is the optional capability a chat adapter reaches through
-// emitActivity. Optional on the SINK rather than a method on Sink, exactly as
+// emitActivity. Optional on the SINK rather than a method on Receiver, exactly as
 // Retractor is, so SinkFunc and every test double stay valid.
 type ActivitySink interface {
 	// Activity reports one viewer or platform activity. The runner stamps
@@ -32,7 +32,7 @@ type ActivitySink interface {
 //
 // THE ONE FUNCTION an adapter calls to say "a viewer did something". A platform
 // source never reaches into the hub, the catalogue or the overlay.
-func emitActivity(sink Sink, ev activity.Event) {
+func emitActivity(sink Receiver, ev activity.Event) {
 	if a, ok := sink.(ActivitySink); ok {
 		a.Activity(ev)
 	}

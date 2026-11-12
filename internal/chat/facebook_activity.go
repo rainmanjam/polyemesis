@@ -100,7 +100,7 @@ func (f *FacebookAdapter) ActivityKinds() []activity.KindStatus {
 
 // pollReactions samples the tally when it is due. Its errors never reach the
 // comment loop: reactions are additive and must not degrade chat.
-func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sink Sink) {
+func (f *FacebookAdapter) pollReactions(ctx context.Context, videoID string, sink Receiver) {
 	if !f.reactionsOn() {
 		// Forget the baseline so switching back on re-seeds silently instead of
 		// reporting everything that came in while off. The App Review state and

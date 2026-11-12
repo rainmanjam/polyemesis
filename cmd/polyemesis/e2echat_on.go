@@ -59,7 +59,7 @@ const (
 type e2eAdapter struct {
 	platform db.Platform
 	in       chan chat.Message
-	ctl      chan func(chat.Sink)
+	ctl      chan func(chat.Receiver)
 
 	mu   sync.Mutex
 	sent []string
@@ -122,7 +122,7 @@ func (f *fakeYouTube) serve(w http.ResponseWriter, r *http.Request) {
 
 func (a *e2eAdapter) Platform() db.Platform { return a.platform }
 func (a *e2eAdapter) Account() string       { return "e2e" }
-func (a *e2eAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *e2eAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -163,7 +163,7 @@ func startE2EChat(ctx context.Context, hub *chat.Hub, log *slog.Logger) {
 
 	adapters := map[db.Platform]*e2eAdapter{}
 	for _, p := range []db.Platform{db.PlatformTwitch, db.PlatformYouTube, db.PlatformKick} {
-		a := &e2eAdapter{platform: p, in: make(chan chat.Message, 64), ctl: make(chan func(chat.Sink), 16)}
+		a := &e2eAdapter{platform: p, in: make(chan chat.Message, 64), ctl: make(chan func(chat.Receiver), 16)}
 		if p == db.PlatformYouTube {
 			a.poller = poller
 		}
@@ -247,11 +247,11 @@ func e2ePlatform(adapters map[db.Platform]*e2eAdapter) http.HandlerFunc {
 
 // e2eControl is the sink callback for a /platform action, false for an
 // action it does not know.
-func e2eControl(action, id, user string) (func(chat.Sink), bool) {
-	var f func(chat.Sink)
+func e2eControl(action, id, user string) (func(chat.Receiver), bool) {
+	var f func(chat.Receiver)
 	switch action {
 	case "delete":
-		f = func(s chat.Sink) {
+		f = func(s chat.Receiver) {
 			if rt, ok := s.(chat.Retractor); ok {
 				rt.Retract(id)
 			}
@@ -260,7 +260,7 @@ func e2eControl(action, id, user string) (func(chat.Sink), bool) {
 		if action == "clear" {
 			user = ""
 		}
-		f = func(s chat.Sink) {
+		f = func(s chat.Receiver) {
 			if rt, ok := s.(chat.RetractorAll); ok {
 				rt.RetractUser(user)
 			}

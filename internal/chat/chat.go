@@ -51,23 +51,23 @@ type Adapter interface {
 	// Returning nil means the platform ended the conversation cleanly (the
 	// broadcast finished); returning an error means the Hub reconnects after a
 	// backoff, unless the error is Fatal.
-	Run(ctx context.Context, sink Sink) error
+	Run(ctx context.Context, sink Receiver) error
 }
 
-// Sink receives messages from an adapter.
+// Receiver receives messages from an adapter.
 //
 // Deliver must not block for long. It is called from the adapter's read loop,
 // and an IRC socket that stops being read is an IRC socket Twitch closes: the
 // Hub's implementation therefore does its persistence off the calling
 // goroutine and drops rather than waits when a consumer is saturated.
-type Sink interface {
+type Receiver interface {
 	Deliver(Message)
 }
 
 // SinkFunc adapts a function to a Sink.
 type SinkFunc func(Message)
 
-// Deliver implements Sink.
+// Deliver implements Receiver.
 func (f SinkFunc) Deliver(m Message) { f(m) }
 
 // Sender is the optional capability for a platform polyemesis can talk back
@@ -164,7 +164,7 @@ type Hider interface {
 	Hide(ctx context.Context, messageID string, hidden bool) error
 }
 
-// Retractor is the optional half of Sink, for a platform that reports its OWN
+// Retractor is the optional half of Receiver, for a platform that reports its OWN
 // deletions back to us.
 //
 // This exists because the instruction polyemesis gives an operator -- "use the
@@ -173,7 +173,7 @@ type Hider interface {
 // Twitch said so, and polyemesis kept showing it to the operator (and to any
 // overlay fed from the pane) until retention aged it out up to two hours later.
 //
-// Optional on the SINK rather than a method on Sink, so SinkFunc and every test
+// Optional on the SINK rather than a method on Receiver, so SinkFunc and every test
 // double stay valid. Adapters reach it through retract below rather than
 // asserting inline, so there is one place that knows the sink might not care.
 type Retractor interface {
@@ -188,7 +188,7 @@ type Retractor interface {
 // A sink that is not a Retractor is a legitimate answer -- a test double
 // collecting messages does not need to model deletion -- so this is a silent
 // no-op rather than a failure.
-func retract(sink Sink, messageID string) {
+func retract(sink Receiver, messageID string) {
 	if messageID == "" {
 		return
 	}
@@ -213,7 +213,7 @@ type RetractorAll interface {
 
 // retractUser tells the sink every message from one author is gone, or -- with
 // an empty authorID -- that the whole room was cleared.
-func retractUser(sink Sink, authorID string) {
+func retractUser(sink Receiver, authorID string) {
 	if r, ok := sink.(RetractorAll); ok {
 		r.RetractUser(authorID)
 	}

@@ -51,8 +51,8 @@ func (r *tapRecorder) waitFor(t *testing.T, l string) {
 }
 
 // scriptedRun is a runFn that hands the sink each step in turn, then blocks.
-func scriptedRun(steps ...func(Sink)) func(context.Context, Sink) error {
-	return func(ctx context.Context, sink Sink) error {
+func scriptedRun(steps ...func(Receiver)) func(context.Context, Receiver) error {
+	return func(ctx context.Context, sink Receiver) error {
 		for _, s := range steps {
 			s(sink)
 		}
@@ -73,10 +73,10 @@ func TestTheTapIsToldWhyAMessageWentNotOnlyThatItWent(t *testing.T) {
 	tap := &tapRecorder{}
 	h.SetTap(tap)
 	a := &fakeAdapter{platform: db.PlatformTwitch, account: "acct", runFn: scriptedRun(
-		func(s Sink) { s.Deliver(msg("m1", "u1", "1")) },
-		func(s Sink) { retract(s, "m1") },
-		func(s Sink) { retractUser(s, "u2") },
-		func(s Sink) { retractUser(s, "") },
+		func(s Receiver) { s.Deliver(msg("m1", "u1", "1")) },
+		func(s Receiver) { retract(s, "m1") },
+		func(s Receiver) { retractUser(s, "u2") },
+		func(s Receiver) { retractUser(s, "") },
 	)}
 	attach(t, h, a)
 
@@ -100,10 +100,10 @@ func TestABanReachesTheTapEvenWhenNothingOfTheirsIsStillHeld(t *testing.T) {
 	tap := &tapRecorder{}
 	h.SetTap(tap)
 	a := &fakeAdapter{platform: db.PlatformTwitch, account: "acct", runFn: scriptedRun(
-		func(s Sink) { s.Deliver(msg("m1", "voter", "2")) },
+		func(s Receiver) { s.Deliver(msg("m1", "voter", "2")) },
 		// Evicts the voter's message from a one-line ring.
-		func(s Sink) { s.Deliver(msg("m2", "other", "hello")) },
-		func(s Sink) { retractUser(s, "voter") },
+		func(s Receiver) { s.Deliver(msg("m2", "other", "hello")) },
+		func(s Receiver) { retractUser(s, "voter") },
 	)}
 	attach(t, h, a)
 	tap.waitFor(t, "author twitch/acct voter")

@@ -26,7 +26,7 @@ type recAdapter struct {
 
 func (a *recAdapter) Platform() db.Platform { return a.platform }
 func (a *recAdapter) Account() string       { return a.account }
-func (a *recAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a *recAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }
