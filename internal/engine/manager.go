@@ -165,7 +165,7 @@ type Manager struct {
 	// reports no recorder, because a stop a concurrent reconcile began is not
 	// one Engine.Stop waits for. Under mu.
 	stopping map[*Engine]bool
-	ctx      context.Context
+	ctx      context.Context // NOSONAR godre:S8242: the ctx main passes to Start, cancelled at process shutdown; Reconcile starts engines under it later, so they outlive the call that starts them
 	started  bool
 	// stopped is set by StopWithin and cleared by Start, under mu. It is not
 	// !started: a Manager that was never started still binds on Reconcile, as
@@ -941,7 +941,7 @@ func (m *Manager) lookupTokenE(token string) (srtserver.Target, bool, error) {
 	targets := make([]srtserver.Target, 0, len(rows))
 	tokens := make(map[key][]string, len(rows))
 	for _, s := range rows {
-		var sink srtserver.Sink
+		var sink srtserver.Receiver
 		// A nil *relay.Hub in an interface is not a nil interface, so the engine
 		// lookup has to be spelled out rather than assigned straight through --
 		// otherwise a source with no engine would present a non-nil Sink and the

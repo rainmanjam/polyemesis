@@ -23,7 +23,7 @@ type fakeAdapter struct {
 	account  string
 
 	// runFn replaces the default "deliver everything in messages, then block".
-	runFn    func(ctx context.Context, sink Sink) error
+	runFn    func(ctx context.Context, sink Receiver) error
 	messages []Message
 
 	panicOnRun  bool
@@ -43,7 +43,7 @@ type fakeAdapter struct {
 func (f *fakeAdapter) Platform() db.Platform { return f.platform }
 func (f *fakeAdapter) Account() string       { return f.account }
 
-func (f *fakeAdapter) Run(ctx context.Context, sink Sink) error {
+func (f *fakeAdapter) Run(ctx context.Context, sink Receiver) error {
 	f.mu.Lock()
 	f.runs++
 	f.mu.Unlock()
@@ -175,7 +175,7 @@ func TestOneAdapterFailingDoesNotStopAnother(t *testing.T) {
 
 	delivered := make(chan Message, 8)
 	healthy := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
-		runFn: func(ctx context.Context, sink Sink) error {
+		runFn: func(ctx context.Context, sink Receiver) error {
 			for i := 0; ctx.Err() == nil; i++ {
 				sink.Deliver(Message{ID: fmt.Sprintf("m%d", i), Text: "still here"})
 				time.Sleep(time.Millisecond)
@@ -300,7 +300,7 @@ func TestARetractedMessageLeavesTheHistory(t *testing.T) {
 	defer cancel()
 
 	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
-		runFn: func(ctx context.Context, sink Sink) error {
+		runFn: func(ctx context.Context, sink Receiver) error {
 			sink.Deliver(Message{ID: "keep-1", Text: "fine", Author: Author{ID: "7"}})
 			sink.Deliver(Message{ID: "gone", Text: "deleted later", Author: Author{ID: "9"}})
 			sink.Deliver(Message{ID: "keep-2", Text: "also fine", Author: Author{ID: "7"}})
@@ -350,7 +350,7 @@ func TestRetractingAUserClearsOnlyThatAuthor(t *testing.T) {
 	defer cancel()
 
 	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
-		runFn: func(ctx context.Context, sink Sink) error {
+		runFn: func(ctx context.Context, sink Receiver) error {
 			sink.Deliver(Message{ID: "a1", Text: "hello", Author: Author{ID: "7"}})
 			sink.Deliver(Message{ID: "b1", Text: "spam", Author: Author{ID: "99"}})
 			sink.Deliver(Message{ID: "a2", Text: "how are you", Author: Author{ID: "7"}})
@@ -391,7 +391,7 @@ func TestRetractingAnEmptyUserClearsTheRoom(t *testing.T) {
 	defer cancel()
 
 	a := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
-		runFn: func(ctx context.Context, sink Sink) error {
+		runFn: func(ctx context.Context, sink Receiver) error {
 			sink.Deliver(Message{ID: "a1", Text: "one", Author: Author{ID: "7"}})
 			sink.Deliver(Message{ID: "b1", Text: "two", Author: Author{ID: "99"}})
 			retractUser(sink, "")
@@ -431,7 +431,7 @@ func TestARetractionIsScopedToItsOwnPlatform(t *testing.T) {
 	waitFor(t, "the kick message", func() bool { return len(h.History(0)) == 1 })
 
 	tw := &fakeAdapter{platform: db.PlatformTwitch, account: "tw",
-		runFn: func(ctx context.Context, sink Sink) error {
+		runFn: func(ctx context.Context, sink Receiver) error {
 			sink.Deliver(Message{ID: "tw-1", Text: "twitch message"})
 			retract(sink, "shared-id") // same id, different platform
 			<-ctx.Done()
@@ -692,7 +692,7 @@ func TestDetachWithinDoesNotHangOnAnAdapterThatIgnoresCancellation(t *testing.T)
 	h := testHub(t)
 	release := make(chan struct{})
 	stuck := &fakeAdapter{platform: db.PlatformYouTube, account: "yt",
-		runFn: func(context.Context, Sink) error { <-release; return nil }}
+		runFn: func(context.Context, Receiver) error { <-release; return nil }}
 	if err := h.Attach(context.Background(), stuck); err != nil {
 		t.Fatal(err)
 	}

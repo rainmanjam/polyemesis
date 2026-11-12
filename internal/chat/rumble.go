@@ -525,7 +525,7 @@ func (r *RumbleAdapter) nextRumblePoll(wait time.Duration, saturated bool, deliv
 
 // emitRumbleActivity reports one poll's activity. Activity leaves through the
 // activity door, never as chat. A poll with no live stream drops the rant list.
-func (r *RumbleAdapter) emitRumbleActivity(sink Sink, acts *rumbleActivityState, l rumbleActivityLists, live bool, stream *rumbleLivestream) {
+func (r *RumbleAdapter) emitRumbleActivity(sink Receiver, acts *rumbleActivityState, l rumbleActivityLists, live bool, stream *rumbleLivestream) {
 	var liveForActivity *rumbleLivestream
 	if live {
 		liveForActivity = stream
@@ -563,7 +563,7 @@ func (r *RumbleAdapter) fetchFailed(ctx context.Context, err error, failures *in
 	return false, nil
 }
 
-func (r *RumbleAdapter) Run(ctx context.Context, sink Sink) error {
+func (r *RumbleAdapter) Run(ctx context.Context, sink Receiver) error {
 	var (
 		first = true
 		wait  = r.pollInterval()
@@ -688,7 +688,7 @@ func liveStream(resp rumbleResponse) (rumbleLivestream, bool) {
 // all: the index of a given message shifts on every poll as newer ones arrive,
 // so every message would get a fresh id each time and the pane would repeat the
 // entire chat every ten seconds.
-func (r *RumbleAdapter) deliver(ls rumbleLivestream, cutoff time.Time, sink Sink) int {
+func (r *RumbleAdapter) deliver(ls rumbleLivestream, cutoff time.Time, sink Receiver) int {
 	delivered := 0
 	// Rants first is deliberate: they arrive in a separate list, and a paid
 	// message is the one an operator most wants to see. The Hub sorts by At.

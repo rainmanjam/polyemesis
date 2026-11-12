@@ -422,7 +422,7 @@ func TestTwitchHandshakeAndPingPong(t *testing.T) {
 	}
 }
 
-// recordingSink is a Sink that also hears retractions, which is the whole point
+// recordingSink is a Receiver that also hears retractions, which is the whole point
 // of the type: a plain SinkFunc silently ignores them, and a test written
 // against one would pass whether or not the adapter said anything.
 type recordingSink struct {

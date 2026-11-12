@@ -434,7 +434,7 @@ type pollerAdapter struct {
 
 func (a *pollerAdapter) Platform() db.Platform { return db.PlatformYouTube }
 func (a *pollerAdapter) Account() string       { return a.account }
-func (a *pollerAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a *pollerAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }
@@ -528,7 +528,7 @@ type fbPollerAdapter struct {
 
 func (a *fbPollerAdapter) Platform() db.Platform { return db.PlatformFacebook }
 func (a *fbPollerAdapter) Account() string       { return a.account }
-func (a *fbPollerAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a *fbPollerAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }

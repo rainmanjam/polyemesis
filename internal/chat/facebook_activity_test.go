@@ -94,7 +94,7 @@ func (g *fbReactGraph) server(t *testing.T) *httptest.Server {
 // runFb runs the adapter for ticks comment polls, 10 s apart on a fake clock
 // (so a reaction sample is due every third poll), calling step(tick) before
 // each poll after the first.
-func runFb(t *testing.T, a *FacebookAdapter, sink Sink, clk *time.Time, ticks int, step func(tick int)) {
+func runFb(t *testing.T, a *FacebookAdapter, sink Receiver, clk *time.Time, ticks int, step func(tick int)) {
 	t.Helper()
 	tick := 0
 	a.cfg.Sleep = func(context.Context, time.Duration) bool {

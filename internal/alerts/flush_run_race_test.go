@@ -159,10 +159,10 @@ func TestFlushFromRunsOwnGoroutineCannotDeadlock(t *testing.T) {
 	waitOrDeadlock(t, ran, "Run after a re-entrant Flush")
 }
 
-// TestFlushFromTheRuleSourceBeforeRunCannotDeadlock: before Run starts Flush
+// TestFlushFromTheRuleProviderBeforeRunCannotDeadlock: before Run starts Flush
 // does the pass inline under runMu and reads the rule source there, so a rule
 // source that calls Flush must not wait on the lock its own caller holds.
-func TestFlushFromTheRuleSourceBeforeRunCannotDeadlock(t *testing.T) {
+func TestFlushFromTheRuleProviderBeforeRunCannotDeadlock(t *testing.T) {
 	rule := testRule(func(r *Rule) { r.DebounceSeconds = 1 })
 	var n *Notifier
 	var armed atomic.Bool

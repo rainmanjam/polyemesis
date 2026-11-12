@@ -188,13 +188,7 @@ func captionFor(m Meta) string {
 // skipped. The whole text must fit X's 280-character limit, counted in UTF-16
 // units by Normalize; a longer post is refused with ErrInvalid, never truncated.
 func xTextFor(m Meta) string {
-	var parts []string
-	for _, p := range []string{m.Title, m.Description, hashtags(m.Tags)} {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	return strings.Join(parts, "\n")
+	return captionFor(m)
 }
 
 // ---------------------------------------------------------------- failures

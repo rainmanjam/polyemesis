@@ -14,6 +14,6 @@ var Info = jobs.KindInfo{
 const Limit = 1
 
 // Register wires the processor into a queue under KindTranscribe.
-func (p *Processor) Register(r jobs.Registrar) error {
+func (p *Processor) Register(r jobs.Registerer) error {
 	return r.Register(KindTranscribe, Limit, p)
 }

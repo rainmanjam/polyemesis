@@ -75,14 +75,14 @@ export async function runPacedStarts(
   const errors = new Map<number, string>();
   for (let i = 0; i < ids.length; i++) {
     try {
-      await start(ids[i]);
+      await start(ids[i]); // NOSONAR typescript:S9382: starts go out one at a time in the order the operator's list gives, paced by the server's bulk pacing; each start is the next one's cue
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errors.set(ids[i], message);
       onError?.(ids[i], message);
     }
     if (paceMs > 0 && i < ids.length - 1) {
-      await new Promise((r) => setTimeout(r, paceMs));
+      await new Promise((r) => setTimeout(r, paceMs)); // NOSONAR typescript:S9382: this pause is the pacing between starts; it must run after each start, so it cannot be parallelised
     }
   }
   return errors;

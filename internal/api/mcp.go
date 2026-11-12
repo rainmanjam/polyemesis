@@ -313,7 +313,7 @@ func (s *Server) mcpDispatch(ctx context.Context, root http.Handler, tool, metho
 
 // valuelessContext keeps a parent's deadline and cancellation and none of its
 // values.
-type valuelessContext struct{ context.Context }
+type valuelessContext struct{ context.Context } // NOSONAR godre:S8242: not stored state; it embeds the parent only for its deadline and cancellation, and lives for the one dispatched /mcp request
 
 func (valuelessContext) Value(any) any { return nil }
 

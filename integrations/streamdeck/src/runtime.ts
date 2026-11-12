@@ -486,13 +486,16 @@ export class Runtime {
     }
     const scopes = new Set<string>();
     for (const s of this.surfaces.values()) if (LEVEL_KINDS.includes(s.kind)) scopes.add(scopeKey(s.settings.sourceId));
-    for (const key of scopes) {
-      try {
-        this.trackNames.set(key, await this.client!.trackNames(key === ALL_SCOPE ? undefined : Number(key)));
-      } catch {
-        // A name is a label, not a state. Without one the key names the track by number.
-      }
-    }
+    // Each scope is its own read with its own map key; none depends on another's answer.
+    await Promise.all(
+      [...scopes].map(async (key) => {
+        try {
+          this.trackNames.set(key, await this.client!.trackNames(key === ALL_SCOPE ? undefined : Number(key)));
+        } catch {
+          // A name is a label, not a state. Without one the key names the track by number.
+        }
+      }),
+    );
   }
 
   private storeLevels(list: DestinationLevels[], at: number): void {
@@ -531,7 +534,8 @@ export class Runtime {
       if (s.kind === "meter" || s.kind === "record" || s.kind === "preset" || s.kind === "poll" || s.kind === "viewers" || LEVEL_KINDS.includes(s.kind)) continue;
       scopes.add(scopeKey(s.settings.sourceId));
     }
-    for (const key of scopes) await this.readScope(key);
+    // Ticket order is fixed synchronously as each read starts, and readScope judges staleness per key.
+    await Promise.all([...scopes].map((key) => this.readScope(key)));
   }
 
   /**
@@ -587,7 +591,7 @@ export class Runtime {
       for (const key of scopes) {
         try {
           const sourceId = key === ALL_SCOPE ? undefined : Number(key);
-          this.levels.set(key, await this.client.levels(sourceId));
+          this.levels.set(key, await this.client.levels(sourceId)); // NOSONAR typescript:S9382: the meter poll runs several times a second and must not stack requests (meterBusy); reads go one programme at a time so a poll never has more than one in flight
         } catch (err) {
           // No answer is NO FEED, not the last reading held on screen. A refused token
           // here matters as much as on /status, and a dial-only deck never polls /status,
@@ -614,11 +618,11 @@ export class Runtime {
       if (this.flashes.has(s.id)) continue;
       if (this.dumpsInFlight.has(s.id)) continue;
       if (s.kind === "trackGain") {
-        await this.paintGainDial(s);
+        await this.paintGainDial(s); // NOSONAR typescript:S9382: key writes go one at a time to the one device, in surface order
         continue;
       }
-      if (s.kind === "viewers") await this.paintViewersDial(s);
-      await this.paintFace(s, this.faceFor(s));
+      if (s.kind === "viewers") await this.paintViewersDial(s); // NOSONAR typescript:S9382: key writes go one at a time to the one device, in surface order
+      await this.paintFace(s, this.faceFor(s)); // NOSONAR typescript:S9382: key writes go one at a time to the one device, in surface order
     }
   }
 
@@ -973,7 +977,7 @@ export class Runtime {
       const signature = JSON.stringify(payload);
       if (this.lastMeterPaint.get(s.id) === signature) continue;
       this.lastMeterPaint.set(s.id, signature);
-      await s.setFeedback(payload);
+      await s.setFeedback(payload); // NOSONAR typescript:S9382: one dial write at a time to the one device, so the frames reach it in surface order
     }
   }
 

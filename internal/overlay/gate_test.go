@@ -187,7 +187,7 @@ type scriptAdapter struct {
 
 func (a *scriptAdapter) Platform() db.Platform { return a.platform }
 func (a *scriptAdapter) Account() string       { return "acct-" + string(a.platform) }
-func (a *scriptAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *scriptAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	for _, m := range a.msgs {
 		sink.Deliver(m)
 	}

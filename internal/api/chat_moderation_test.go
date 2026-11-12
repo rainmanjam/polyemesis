@@ -47,7 +47,7 @@ type banCall struct {
 func (a *moderatableAdapter) Platform() db.Platform { return a.platform }
 func (a *moderatableAdapter) Account() string       { return a.account }
 
-func (a *moderatableAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *moderatableAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }

@@ -15,25 +15,25 @@ import (
 // NOT THE CHAT PIPELINE. deliver() drops a message with no text, persists,
 // keeps history, feeds analytics and runs automod on everything, and a runner
 // is keyed by (platform, account). An activity is none of those things, so it
-// leaves through its own door: ActivitySink, below, into internal/activityhub.
+// leaves through its own door: ActivityReceiver, below, into internal/activityhub.
 
-// ActivitySink is the optional capability a chat adapter reaches through
-// emitActivity. Optional on the SINK rather than a method on Sink, exactly as
+// ActivityReceiver is the optional capability a chat adapter reaches through
+// emitActivity. Optional on the SINK rather than a method on Receiver, exactly as
 // Retractor is, so SinkFunc and every test double stay valid.
-type ActivitySink interface {
+type ActivityReceiver interface {
 	// Activity reports one viewer or platform activity. The runner stamps
 	// Platform and Account when the adapter left them empty.
 	Activity(ev activity.Event)
 }
 
 // emitActivity reports an activity when the sink can take one. A sink that is
-// not an ActivitySink is a legitimate answer -- a test double collecting chat
+// not an ActivityReceiver is a legitimate answer -- a test double collecting chat
 // does not model activity -- so this is a silent no-op rather than a failure.
 //
 // THE ONE FUNCTION an adapter calls to say "a viewer did something". A platform
 // source never reaches into the hub, the catalogue or the overlay.
-func emitActivity(sink Sink, ev activity.Event) {
-	if a, ok := sink.(ActivitySink); ok {
+func emitActivity(sink Receiver, ev activity.Event) {
+	if a, ok := sink.(ActivityReceiver); ok {
 		a.Activity(ev)
 	}
 }
@@ -59,7 +59,7 @@ func (h *Hub) activityIngester() ActivityIngester {
 	return h.activity
 }
 
-// Activity implements ActivitySink for a runner: it stamps the platform and
+// Activity implements ActivityReceiver for a runner: it stamps the platform and
 // account exactly as deliver does, then hands the event on.
 func (s runnerSink) Activity(ev activity.Event) {
 	if ev.Platform == "" {

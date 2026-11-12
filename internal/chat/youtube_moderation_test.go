@@ -45,20 +45,11 @@ func pollPage(id, status string, tallies ...string) ytChatItem {
 	var it ytChatItem
 	it.ID = id
 	it.Snippet.Type = "pollDetails"
-	it.Snippet.PollDetails = &struct {
-		Metadata struct {
-			Status  string `json:"status"`
-			Options []struct {
-				Tally string `json:"tally"`
-			} `json:"options"`
-		} `json:"metadata"`
-	}{}
+	it.Snippet.PollDetails = &ytPollDetails{}
 	md := &it.Snippet.PollDetails.Metadata
 	md.Status = status
 	for _, tl := range tallies {
-		md.Options = append(md.Options, struct {
-			Tally string `json:"tally"`
-		}{Tally: tl})
+		md.Options = append(md.Options, ytPollOption{Tally: tl})
 	}
 	return it
 }
@@ -342,11 +333,7 @@ func TestAYouTubeBanByAnotherModeratorRetractsTheBannedUsersMessages(t *testing.
 	var ban, empty ytChatItem
 	ban.ID, empty.ID = "ev-1", "ev-2"
 	ban.Snippet.Type, empty.Snippet.Type = "userBannedEvent", "userBannedEvent"
-	ban.Snippet.UserBannedDetails = &struct {
-		BannedUserDetails struct {
-			ChannelID string `json:"channelId"`
-		} `json:"bannedUserDetails"`
-	}{}
+	ban.Snippet.UserBannedDetails = &ytUserBanned{}
 	ban.Snippet.UserBannedDetails.BannedUserDetails.ChannelID = "UC-banned"
 	ban.Snippet.DisplayMessage = "Someone was banned"
 	n := a.deliverPage([]ytChatItem{ban, empty}, time.Time{}, sink)

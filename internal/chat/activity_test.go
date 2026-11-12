@@ -35,7 +35,7 @@ func TestAnAdapterEmitsActivityThroughItsSinkAndTheRunnerStampsIt(t *testing.T) 
 	h := testHub(t)
 	rec := &ingestRecorder{}
 	h.SetActivity(rec)
-	a := &fakeAdapter{platform: db.PlatformYouTube, account: "UC1", runFn: func(ctx context.Context, sink Sink) error {
+	a := &fakeAdapter{platform: db.PlatformYouTube, account: "UC1", runFn: func(ctx context.Context, sink Receiver) error {
 		emitActivity(sink, activity.Event{Kind: activity.KindTip, Source: activity.Source{Type: "superChatEvent", ID: "1"}})
 		emitActivity(sink, activity.Event{Kind: activity.KindFollow, Platform: "kick", Account: "own", Source: activity.Source{Type: "x", ID: "2"}})
 		<-ctx.Done()
@@ -55,7 +55,7 @@ func TestAnAdapterEmitsActivityThroughItsSinkAndTheRunnerStampsIt(t *testing.T) 
 func TestActivityWithNoIngesterIsDroppedAndASinkWithoutTheCapabilityIsFine(t *testing.T) {
 	h := testHub(t)
 	done := make(chan struct{})
-	a := &fakeAdapter{platform: db.PlatformTwitch, account: "a", runFn: func(ctx context.Context, sink Sink) error {
+	a := &fakeAdapter{platform: db.PlatformTwitch, account: "a", runFn: func(ctx context.Context, sink Receiver) error {
 		emitActivity(sink, activity.Event{Kind: activity.KindFollow})
 		close(done)
 		<-ctx.Done()
@@ -63,7 +63,7 @@ func TestActivityWithNoIngesterIsDroppedAndASinkWithoutTheCapabilityIsFine(t *te
 	}}
 	attach(t, h, a)
 	<-done
-	// SinkFunc is not an ActivitySink: emitting to it is a silent no-op.
+	// SinkFunc is not an ActivityReceiver: emitting to it is a silent no-op.
 	emitActivity(SinkFunc(func(Message) {}), activity.Event{Kind: activity.KindFollow})
 
 	rec := &ingestRecorder{}

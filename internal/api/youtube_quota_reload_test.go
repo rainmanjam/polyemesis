@@ -24,7 +24,7 @@ type pacingSpy struct {
 func (p *pacingSpy) Platform() db.Platform { return db.PlatformYouTube }
 func (p *pacingSpy) Account() string       { return "spy" }
 
-func (p *pacingSpy) Run(ctx context.Context, _ chat.Sink) error {
+func (p *pacingSpy) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return ctx.Err()
 }

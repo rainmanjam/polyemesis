@@ -103,12 +103,12 @@ const ProbeTimeout = 10 * time.Minute
 // they cannot collide, because Unique folds on Kind AND Target.
 func Target(upload string) string { return jobs.UploadTarget(upload) }
 
-// Registry is the part of *jobs.Queue this package needs.
-type Registry interface {
+// Registerer is the part of *jobs.Queue this package needs.
+type Registerer interface {
 	Register(kind jobs.Kind, limit int, w jobs.Worker) error
 }
 
-var _ Registry = (*jobs.Queue)(nil)
+var _ Registerer = (*jobs.Queue)(nil)
 
 // Store is the part of *uploads.Store this package needs.
 //
@@ -175,7 +175,7 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 }
 
 // Register wires the worker into a queue.
-func (p *Processor) Register(r Registry) error {
+func (p *Processor) Register(r Registerer) error {
 	return r.Register(Kind, Limit, jobs.WorkerFunc(p.RunVerify))
 }
 

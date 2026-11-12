@@ -23,7 +23,7 @@ type repliableAdapter struct {
 
 func (a *repliableAdapter) Platform() db.Platform { return a.platform }
 func (a *repliableAdapter) Account() string       { return "acct" }
-func (a *repliableAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a *repliableAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }
