@@ -502,7 +502,7 @@ type chanAdapter struct {
 
 func (a *chanAdapter) Platform() db.Platform { return a.platform }
 func (a *chanAdapter) Account() string       { return "acct" }
-func (a *chanAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *chanAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	for {
 		select {
 		case <-ctx.Done():

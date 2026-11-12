@@ -121,7 +121,7 @@ type Hub struct {
 	display DisplaySink
 	// tap is the poll counter's view of the same verdicts (display.go), or nil.
 	tap Tap
-	// activity receives what adapters report through ActivitySink (activity.go),
+	// activity receives what adapters report through ActivityReceiver (activity.go),
 	// or nil.
 	activity ActivityIngester
 

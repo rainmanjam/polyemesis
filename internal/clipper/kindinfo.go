@@ -10,6 +10,6 @@ var Info = jobs.KindInfo{
 }
 
 // Register wires a clip export worker into a queue, one at a time.
-func Register(r jobs.Registrar, w jobs.Worker) error {
+func Register(r jobs.Registerer, w jobs.Worker) error {
 	return r.Register(JobKind, 1, w)
 }

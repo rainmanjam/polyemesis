@@ -58,8 +58,8 @@ const (
 	StaleAfter = 3 * time.Second
 )
 
-// Sink receives whole MPEG-TS datagrams for one source. relay.Hub satisfies it.
-type Sink interface{ Deliver(pkt []byte) }
+// Receiver receives whole MPEG-TS datagrams for one source. relay.Hub satisfies it.
+type Receiver interface{ Deliver(pkt []byte) }
 
 // Target is what a valid token resolves to.
 type Target struct {
@@ -72,7 +72,7 @@ type Target struct {
 	// Sink is where this source's bytes go. Nil means the source exists but no
 	// engine is running for it, which must be refused rather than accepted into
 	// a void.
-	Sink Sink
+	Sink Receiver
 	// Backup marks the failover standby for a source rather than its primary.
 	// Both are reached on this listener and told apart by token, so one source
 	// can present two targets -- and a publisher must not be able to take over
@@ -290,7 +290,7 @@ type session struct {
 	// sink is where this session delivers, fixed at publish. Revalidate
 	// closes the session when the token now resolves to a different sink: the
 	// engine was replaced, and these bytes go to a hub nothing reads.
-	sink    Sink
+	sink    Receiver
 	started time.Time
 	// lastData is the unix-nano timestamp of the most recent read. Atomic
 	// because the takeover check runs on an accepting goroutine while the read
@@ -923,7 +923,7 @@ func (s *Server) resolveForRevalidate(token string) (Target, bool, error) {
 
 // sameSink compares two sinks without panicking on a dynamic type that is not
 // comparable; such a pair is treated as the same, so it never closes anything.
-func sameSink(a, b Sink) (same bool) {
+func sameSink(a, b Receiver) (same bool) {
 	defer func() {
 		if recover() != nil {
 			same = true

@@ -7,12 +7,12 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/transcribe"
 )
 
-// CueSink receives one caption cue for one destination, at the moment that
+// CueReceiver receives one caption cue for one destination, at the moment that
 // destination's broadcast delay says the viewers there see it. A sink is the
 // per-output consumer (the SEI injector, the YouTube POST transport); none is
 // built in this package, so the engine's production sink is inert until one of
 // those lands.
-type CueSink interface {
+type CueReceiver interface {
 	Deliver(destination int64, cue transcribe.LiveCaption)
 }
 
@@ -49,7 +49,7 @@ func ReleaseAt(c transcribe.LiveCaption, delay time.Duration) time.Time {
 // generation under mu, so a cancelled or replaced delivery never reaches the sink.
 type CueRouter struct {
 	mu      sync.Mutex
-	sink    CueSink
+	sink    CueReceiver
 	after   AfterFunc
 	now     func() time.Time
 	targets map[int64]*routeTarget
@@ -72,7 +72,7 @@ type pendingCue struct{ seq uint64 }
 
 // NewCueRouter returns a router with no targets. A nil after or now uses the
 // real clock; a nil sink drops everything, which is the safe default.
-func NewCueRouter(sink CueSink, after AfterFunc, now func() time.Time) *CueRouter {
+func NewCueRouter(sink CueReceiver, after AfterFunc, now func() time.Time) *CueRouter {
 	if after == nil {
 		after = func(d time.Duration, f func()) func() bool {
 			return time.AfterFunc(d, f).Stop

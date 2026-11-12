@@ -166,7 +166,7 @@ func (y *YouTubeAdapter) setHealth(state State, detail string) {
 // returning an error and letting the Hub reconnect, because the Hub's backoff
 // tops out at thirty seconds and every rediscovery costs a quota unit. Waiting
 // for a broadcast is a normal state, not a failure.
-func (y *YouTubeAdapter) Run(ctx context.Context, sink Sink) error {
+func (y *YouTubeAdapter) Run(ctx context.Context, sink Receiver) error {
 	idleFor := ytBroadcastPoll
 	// The chat that last finished (y.endedID) is remembered for ytEndedHold. A broadcast can stay listed as active
 	// after its chat has ended or been disabled, so rediscovering the same id soon after means "nothing new", not
@@ -324,6 +324,16 @@ func (y *YouTubeAdapter) liveChatID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// ytUserBanned is the userBannedEvent detail block.
+type ytUserBanned struct {
+	BannedUserDetails ytBannedUser `json:"bannedUserDetails"`
+}
+
+// ytBannedUser names the channel a ban was issued against.
+type ytBannedUser struct {
+	ChannelID string `json:"channelId"`
+}
+
 // ytChatItem is one message as the API returns it.
 type ytChatItem struct {
 	ID      string `json:"id"`
@@ -336,11 +346,7 @@ type ytChatItem struct {
 		// is recognised by this object rather than by the type string.
 		// UserBannedDetails is present on a userBannedEvent: a moderator (this
 		// app, another moderator or Studio) banned someone.
-		UserBannedDetails *struct {
-			BannedUserDetails struct {
-				ChannelID string `json:"channelId"`
-			} `json:"bannedUserDetails"`
-		} `json:"userBannedDetails"`
+		UserBannedDetails *ytUserBanned `json:"userBannedDetails"`
 		// The event detail blocks, one per type, named as the liveChatMessages
 		// resource names them. See youtube_activity.go.
 		SuperChatDetails              *ytPaidDetails `json:"superChatDetails"`
@@ -349,14 +355,7 @@ type ytChatItem struct {
 		MemberMilestoneChatDetails    *ytMilestone   `json:"memberMilestoneChatDetails"`
 		MembershipGiftingDetails      *ytGifting     `json:"membershipGiftingDetails"`
 		GiftMembershipReceivedDetails *ytGiftRecv    `json:"giftMembershipReceivedDetails"`
-		PollDetails                   *struct {
-			Metadata struct {
-				Status  string `json:"status"`
-				Options []struct {
-					Tally string `json:"tally"`
-				} `json:"options"`
-			} `json:"metadata"`
-		} `json:"pollDetails"`
+		PollDetails                   *ytPollDetails `json:"pollDetails"`
 	} `json:"snippet"`
 	AuthorDetails struct {
 		ChannelID       string `json:"channelId"`
@@ -378,7 +377,7 @@ type ytListResponse struct {
 
 // pump polls one live chat until it ends or ctx does. A nil return means the
 // chat finished normally.
-func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) error {
+func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Receiver) error {
 	// The no-replay baseline is the moment watching begins, before the first
 	// list call, so an empty first page cannot move it past a later event.
 	y.beginActivity()
@@ -443,7 +442,7 @@ func (y *YouTubeAdapter) pump(ctx context.Context, chatID string, sink Sink) err
 
 // deliverPage hands one page to the sink and reports how many were new enough
 // to show. cutoff is zero for every page after the first.
-func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink Sink) int {
+func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink Receiver) int {
 	delivered := 0
 	for _, it := range items {
 		// Activity first, and before messageFrom drops an item with no text: a
@@ -464,7 +463,7 @@ func (y *YouTubeAdapter) deliverPage(items []ytChatItem, cutoff time.Time, sink 
 
 // applyYouTubeRemoval acts on a deleted message or a ban. It reports true when
 // the item is a tombstone, which is not delivered as a chat line.
-func applyYouTubeRemoval(it ytChatItem, sink Sink) bool {
+func applyYouTubeRemoval(it ytChatItem, sink Receiver) bool {
 	// A tombstone marks where a deleted message used to be: its id and
 	// publish time with nothing else. The reference says it is NOT sent at
 	// the moment of deletion, only shown in place of the message, so this
@@ -493,7 +492,7 @@ func applyYouTubeRemoval(it ytChatItem, sink Sink) bool {
 
 // deliverMessage delivers the item's chat line when it has one at or after the
 // cutoff. It reports whether a line was delivered.
-func (y *YouTubeAdapter) deliverMessage(it ytChatItem, cutoff time.Time, sink Sink) bool {
+func (y *YouTubeAdapter) deliverMessage(it ytChatItem, cutoff time.Time, sink Receiver) bool {
 	m, ok := y.messageFrom(it)
 	if !ok {
 		return false

@@ -15,14 +15,14 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/jobs"
 )
 
-// Registry is the part of *jobs.Queue this package needs. An interface so the
+// Registerer is the part of *jobs.Queue this package needs. An interface so the
 // processor can be registered against a fake in tests, and so this package does
 // not depend on the queue's construction.
-type Registry interface {
+type Registerer interface {
 	Register(kind jobs.Kind, limit int, w jobs.Worker) error
 }
 
-var _ Registry = (*jobs.Queue)(nil)
+var _ Registerer = (*jobs.Queue)(nil)
 
 // Per-kind concurrency limits.
 //
@@ -133,7 +133,7 @@ func (p *Processor) Config() Config { return p.cfg }
 func (p *Processor) SetConfig(cfg Config) { p.cfg = cfg.Normalized() }
 
 // Register wires the three workers into a queue.
-func (p *Processor) Register(r Registry) error {
+func (p *Processor) Register(r Registerer) error {
 	if err := r.Register(KindProxy, ProxyLimit, jobs.WorkerFunc(p.RunProxy)); err != nil {
 		return err
 	}

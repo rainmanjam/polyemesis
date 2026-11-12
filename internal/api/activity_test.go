@@ -241,7 +241,7 @@ type reportingAdapter struct {
 
 func (a *reportingAdapter) Platform() db.Platform { return a.platform }
 func (a *reportingAdapter) Account() string       { return a.account }
-func (a *reportingAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a *reportingAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }

@@ -18,7 +18,7 @@ import (
 // A platform's activity takes one of two shapes:
 //
 //  1. IT RIDES ITS CHAT CONNECTION (YouTube, Rumble, Kick, X, Facebook). The
-//     adapter calls emitActivity on the chat.Sink it was handed
+//     adapter calls emitActivity on the chat.Receiver it was handed
 //     (internal/chat/activity.go), so nothing in this file is involved in the
 //     events. It reports its kinds by implementing
 //     `ActivityKinds() []activity.KindStatus` on the adapter; chatActivityStatuses

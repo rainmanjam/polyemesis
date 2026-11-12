@@ -105,7 +105,7 @@ type idleAdapter struct {
 
 func (a idleAdapter) Platform() db.Platform { return a.platform }
 func (a idleAdapter) Account() string       { return a.ref }
-func (a idleAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a idleAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }

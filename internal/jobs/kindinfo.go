@@ -9,7 +9,7 @@ type KindInfo struct {
 	Description string
 }
 
-// Registrar is the part of a Queue a processor needs in order to register.
-type Registrar interface {
+// Registerer is the part of a Queue a processor needs in order to register.
+type Registerer interface {
 	Register(kind Kind, limit int, w Worker) error
 }

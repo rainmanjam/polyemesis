@@ -25,7 +25,7 @@ type liveAdapter struct {
 
 func (a *liveAdapter) Platform() db.Platform { return a.platform }
 func (a *liveAdapter) Account() string       { return "acct" }
-func (a *liveAdapter) Run(ctx context.Context, sink chat.Sink) error {
+func (a *liveAdapter) Run(ctx context.Context, sink chat.Receiver) error {
 	for {
 		select {
 		case <-ctx.Done():

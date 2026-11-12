@@ -210,7 +210,7 @@ type noticeAdapter struct {
 
 func (a *noticeAdapter) Platform() db.Platform { return a.platform }
 func (a *noticeAdapter) Account() string       { return a.account }
-func (a *noticeAdapter) Run(ctx context.Context, _ chat.Sink) error {
+func (a *noticeAdapter) Run(ctx context.Context, _ chat.Receiver) error {
 	<-ctx.Done()
 	return nil
 }

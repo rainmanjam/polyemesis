@@ -18,7 +18,7 @@ import (
 
 // xRun starts a.Run against sink and returns when the adapter is live (registered and subscribed), plus a stop that
 // ends the run and returns its error. Live is read from the adapter, not guessed from a sleep.
-func xRun(t *testing.T, a *XAdapter, sink Sink) (stop func() error) {
+func xRun(t *testing.T, a *XAdapter, sink Receiver) (stop func() error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

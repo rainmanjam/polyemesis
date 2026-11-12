@@ -12,7 +12,7 @@ import (
 // "auto-delete on Kick", nothing ever happens, and they believe that channel is
 // protected. An unavailable cell must therefore be inert and explained, never
 // an unticked box that looks like a choice.
-type Capabilities interface {
+type Capabilities interface { // NOSONAR godre:S8196: the type is the platform capability table the matrix is built on; its method Can has no -er noun, and "Checker" would not say what is checked
 	// Can reports whether the platform supports the action, and why not when it
 	// does not. The reason is shown to the operator, so it is written for them
 	// rather than for a log.

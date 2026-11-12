@@ -234,7 +234,7 @@ func (f *FacebookAdapter) liveVideoID() string {
 // Run polls the comment thread until ctx ends.
 // pollStep runs one comment poll and says how long to wait before the next. stop
 // says Run must return ret: a fatal error, or a poll that is finished for good.
-func (f *FacebookAdapter) pollStep(ctx context.Context, id string, sink Sink, interval *time.Duration) (pause time.Duration, stop bool, ret error) {
+func (f *FacebookAdapter) pollStep(ctx context.Context, id string, sink Receiver, interval *time.Duration) (pause time.Duration, stop bool, ret error) {
 	_, err := f.poll(ctx, id, sink)
 	if err != nil {
 		done, fatal := f.classify(err)
@@ -275,7 +275,7 @@ func (f *FacebookAdapter) backoffAfterError(err error, interval *time.Duration) 
 	return pause
 }
 
-func (f *FacebookAdapter) Run(ctx context.Context, sink Sink) error {
+func (f *FacebookAdapter) Run(ctx context.Context, sink Receiver) error {
 	f.mu.Lock()
 	f.lastSeen = f.cfg.Now().Add(-fbDefaultBackfill)
 	f.mu.Unlock()
@@ -321,7 +321,7 @@ type fbComment struct {
 }
 
 // poll fetches the newest page and delivers what has not been seen.
-func (f *FacebookAdapter) poll(ctx context.Context, videoID string, sink Sink) (int, error) {
+func (f *FacebookAdapter) poll(ctx context.Context, videoID string, sink Receiver) (int, error) {
 	// reverse_chronological gives the newest comments first, which is what a
 	// live thread needs: paging forward through an hours-old conversation to
 	// reach the present would spend the whole broadcast catching up.

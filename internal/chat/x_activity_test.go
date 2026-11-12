@@ -43,7 +43,7 @@ func broadcastEnvelope(uuid, createdAt, typ, state, userID string) []byte {
 		uuid, createdAt, xActMe, typ, userID, state))
 }
 
-// xActSink is a Sink that also takes activity, as the runner's sink does.
+// xActSink is a Receiver that also takes activity, as the runner's sink does.
 type xActSink struct {
 	recordingSink
 	amu    sync.Mutex

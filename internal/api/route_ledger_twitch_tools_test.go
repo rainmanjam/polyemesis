@@ -24,7 +24,7 @@ const twitchToolsPlanted = "planted_banned_viewer_4093"
 // replaced by a wait so the Hub can supervise it without an IRC server.
 type toolsAdapter struct{ *chat.TwitchAdapter }
 
-func (a toolsAdapter) Run(ctx context.Context, _ chat.Sink) error { <-ctx.Done(); return nil }
+func (a toolsAdapter) Run(ctx context.Context, _ chat.Receiver) error { <-ctx.Done(); return nil }
 
 type helixCall struct {
 	Method, Path string
