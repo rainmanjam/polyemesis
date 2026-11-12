@@ -56,14 +56,14 @@ type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// RuleSource supplies the rules. It is an interface rather than *db.DB so the
+// RuleProvider supplies the rules. It is an interface rather than *db.DB so the
 // whole package is testable without a database, and so the notifier picks up an
 // edited rule without being restarted.
-type RuleSource interface {
+type RuleProvider interface {
 	AlertRules() ([]Rule, error)
 }
 
-// RuleFunc adapts a function to a RuleSource.
+// RuleFunc adapts a function to a RuleProvider.
 type RuleFunc func() ([]Rule, error)
 
 func (f RuleFunc) AlertRules() ([]Rule, error) { return f() }
@@ -155,7 +155,7 @@ type Notifier struct {
 	tap atomic.Pointer[func(Event)]
 
 	log      *slog.Logger
-	rules    RuleSource
+	rules    RuleProvider
 	doer     Doer
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) bool
@@ -204,7 +204,7 @@ type Notifier struct {
 
 // New creates a Notifier. It does nothing until Run is called, which is what
 // lets the engine build one before it has a context.
-func New(log *slog.Logger, rules RuleSource, opts ...Option) *Notifier {
+func New(log *slog.Logger, rules RuleProvider, opts ...Option) *Notifier {
 	n := &Notifier{
 		log:        log,
 		rules:      rules,

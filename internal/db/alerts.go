@@ -93,7 +93,7 @@ func (d *DB) ListAlertRules() ([]alerts.Rule, error) {
 }
 
 // AlertRules returns the enabled rules. It is what satisfies
-// alerts.RuleSource, so the notifier never sees a rule that is switched off.
+// alerts.RuleProvider, so the notifier never sees a rule that is switched off.
 func (d *DB) AlertRules() ([]alerts.Rule, error) {
 	rows, err := d.sql.Query(alertRulesEnabledQuery)
 	if err != nil {
