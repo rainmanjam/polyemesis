@@ -57,23 +57,6 @@ func Handler() (http.Handler, error) {
 	return HandlerFor(sub), nil
 }
 
-// HandlerFor is Handler over an ARBITRARY asset filesystem, and it exists so
-// that the branches below can be driven in both of the configurations this
-// binary ships in.
-//
-// #167: CI's Go job does not run `npm run build`, so `dist` holds only
-// .gitkeep and every request that reaches this handler takes the
-// "UI not built" branch. The route ledger's NotFound probes were reported as
-// covering this surface while, in every configuration they are actually run in,
-// eight of nine took one dead branch and the asset branch was entered by
-// nothing. Splitting the filesystem out of the closure costs nothing at run
-// time -- Handler passes the embedded one, exactly as before -- and lets a test
-// hand in a populated one.
-//
-// The split itself changed no behaviour -- the body is the one that was inside
-// Handler. What the seam then made visible, and what IS a behaviour change, is
-// the directory case below: it could not be driven at all while the only
-// filesystem this handler would accept was an empty one.
 // isRegularFile reports whether p names something in sub that is a file rather
 // than a directory. A path that does not exist is neither.
 func isRegularFile(sub fs.FS, p string) bool {
@@ -115,6 +98,23 @@ func isStaticAssetPath(p string) bool {
 	return staticAssetExts[strings.ToLower(path.Ext(p))]
 }
 
+// HandlerFor is Handler over an ARBITRARY asset filesystem, and it exists so
+// that the branches below can be driven in both of the configurations this
+// binary ships in.
+//
+// #167: CI's Go job does not run `npm run build`, so `dist` holds only
+// .gitkeep and every request that reaches this handler takes the
+// "UI not built" branch. The route ledger's NotFound probes were reported as
+// covering this surface while, in every configuration they are actually run in,
+// eight of nine took one dead branch and the asset branch was entered by
+// nothing. Splitting the filesystem out of the closure costs nothing at run
+// time -- Handler passes the embedded one, exactly as before -- and lets a test
+// hand in a populated one.
+//
+// The split itself changed no behaviour -- the body is the one that was inside
+// Handler. What the seam then made visible, and what IS a behaviour change, is
+// the directory case below: it could not be driven at all while the only
+// filesystem this handler would accept was an empty one.
 func HandlerFor(sub fs.FS) http.Handler {
 	files := http.FileServer(http.FS(sub))
 
