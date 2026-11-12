@@ -1027,11 +1027,11 @@ function rangeTone(ok: boolean): string {
   return ok ? "text-muted-foreground" : "text-down";
 }
 
-function titleText(t: Translator, editing: boolean): string {
+function titleText(t: Translator, { editing }: { editing: boolean }): string {
   return editing ? t("rend.editRendition") : t("rend.newRendition");
 }
 
-function submitText(t: Translator, editing: boolean): string {
+function submitText(t: Translator, { editing }: { editing: boolean }): string {
   return editing ? t("common.save") : t("hooks.create");
 }
 
@@ -1330,7 +1330,7 @@ export function RenditionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{titleText(t, editing)}</DialogTitle>
+          <DialogTitle>{titleText(t, { editing })}</DialogTitle>
           <DialogDescription>{t("rend.dialogDescription")}</DialogDescription>
         </DialogHeader>
 
@@ -2053,7 +2053,7 @@ export function RenditionDialog({
           </Button>
           <Button onClick={save} disabled={busy || !nameOk || !bitrateOk || !maxrateOk}>
             {busy && <Loader2 className="animate-spin" />}
-            {submitText(t, editing)}
+            {submitText(t, { editing })}
           </Button>
         </DialogFooter>
       </DialogContent>

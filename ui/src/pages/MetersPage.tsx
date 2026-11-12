@@ -484,12 +484,15 @@ function verdictLabelOf(t: ReturnType<typeof useT>, report: LoudnessReport, notS
 }
 
 /** The integrated loudness, or the dash until it is measured. */
-function integratedText(report: LoudnessReport, measured: boolean): string {
+function integratedText(report: LoudnessReport, { measured }: { measured: boolean }): string {
   return measured && report.integrated ? lufs(report.integratedLufs) : "—";
 }
 
 /** The deviation from target, or the dash until it is measured against one. */
-function deviationText(report: LoudnessReport, measured: boolean, targeted: boolean): string {
+function deviationText(
+  report: LoudnessReport,
+  { measured, targeted }: { measured: boolean; targeted: boolean },
+): string {
   return measured && targeted && report.integrated ? signed(report.deviationLu) : "—";
 }
 
@@ -579,13 +582,13 @@ export function ComplianceRow({
                 verdict's colour and the others stay neutral. */}
             <Stat
               labelKey="meters.integrated"
-              value={integratedText(report, measured)}
+              value={integratedText(report, { measured })}
               unit="LUFS"
               tone={VERDICT_STAT[report.verdict] ?? "muted"}
             />
             <Stat
               labelKey="meters.deviation"
-              value={deviationText(report, measured, targeted)}
+              value={deviationText(report, { measured, targeted })}
               unit="LU"
               tone="muted"
             />

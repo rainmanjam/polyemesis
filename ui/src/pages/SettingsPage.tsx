@@ -103,6 +103,7 @@ import {
 import { useT, useTN, type TranslationKey, type Translator } from "@/lib/i18n";
 import { mqttPlainScheme } from "@/features/settings/mqtt";
 import { dateOnly, timestamp } from "@/lib/format";
+import { createRowKeys } from "@/lib/row-keys";
 import { toneBadge, toneText, type SignalTone } from "@/lib/signal";
 import {
   platformConnectControls,
@@ -2306,6 +2307,10 @@ const PCI_VENDORS = [
  *  tab's one Save commits it. Its own button called `onSave(draft)` like the
  *  other seven, which is how a GPU declaration came to be saved by a button
  *  that also dropped a typed MQTT password. */
+/** Keys for the GPU rows, which are editable and carry no id. Module level, so
+ *  the keys outlive renders; row-keys.ts says why they stay off the rows. */
+const gpuRowKeys = createRowKeys<MultitrackGpu>("gpu");
+
 function MultitrackHardware({
   draft,
   setDraft,
@@ -2322,7 +2327,7 @@ function MultitrackHardware({
     setDraft({ ...draft, multitrack: { gpus: next } });
 
   const patch = (i: number, p: Partial<MultitrackGpu>) =>
-    write(gpus.map((g, n) => (n === i ? { ...g, ...p } : g)));
+    write(gpus.map((g, n) => (n === i ? gpuRowKeys.replace(g, { ...g, ...p }) : g)));
 
   return (
     <Card>
@@ -2342,7 +2347,7 @@ function MultitrackHardware({
         <Experimental>{t("set.ebExperimental")}</Experimental>
         <MoreAbout lead={t("set.ebGpuLead")}>{t("set.ebGpuWhy")}</MoreAbout>
         {gpus.map((g, i) => (
-          <div key={i} className="flex flex-col gap-2 rounded-md border border-border p-2">
+          <div key={gpuRowKeys.keyOf(g)} className="flex flex-col gap-2 rounded-md border border-border p-2">
             <div className="flex flex-wrap items-end gap-2">
               <div className="flex min-w-56 flex-1 flex-col gap-1">
                 <Label htmlFor={`mt-model-${i}`}>{t("automod.modelName")}</Label>
@@ -2812,9 +2817,9 @@ function PlatformCapabilityMatrix() {
  *  up TLS status, system info and the API-token list to ask a question about
  *  one button. */
 /** Why the save button is off: a client id or secret is missing. Nothing is
- *  said while a save is already in flight. */
-function credsSaveReason(busy: boolean, clientId: string, clientSecret: string, t: Translator): string | null {
-  return !busy && (!clientId.trim() || !clientSecret.trim()) ? t("settingsUx.saveCredsNeedsBoth") : null;
+ *  said while a save is already in flight; the caller checks that. */
+function credsSaveReason(clientId: string, clientSecret: string, t: Translator): string | null {
+  return !clientId.trim() || !clientSecret.trim() ? t("settingsUx.saveCredsNeedsBoth") : null;
 }
 
 /** The standing note, when it is not the one card warning already shown. */
@@ -2870,7 +2875,7 @@ export function PlatformCredCard({
   // is in the setup guide below, not lost.
   const warning = guide.redirectWarnings?.[0] ?? guide.note ?? "";
   const saveReasonId = useId();
-  const saveReason = credsSaveReason(busy, clientId, clientSecret, t);
+  const saveReason = busy ? null : credsSaveReason(clientId, clientSecret, t);
   const otherWarnings = [
     ...(guide.redirectWarnings ?? []).filter((w) => w !== warning),
     ...otherNote(guide, warning),
@@ -3279,7 +3284,7 @@ export function PlatformCredCard({
             <AccordionContent>
               <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-sm text-muted-foreground">
                 {guide.steps.map((step, i) => (
-                  <li key={i}>{step}</li>
+                  <li key={`${step}-${i}`}>{step}</li>
                 ))}
               </ol>
               {otherWarnings.map((w) => (

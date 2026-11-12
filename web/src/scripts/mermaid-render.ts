@@ -104,7 +104,7 @@ async function render(): Promise<void> {
   }
 }
 
-void render();
+await render();
 
 /* A MODULE, NOT A SCRIPT, AND `astro check` IS WHAT INSISTS.
  *
