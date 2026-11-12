@@ -941,7 +941,7 @@ func (m *Manager) lookupTokenE(token string) (srtserver.Target, bool, error) {
 	targets := make([]srtserver.Target, 0, len(rows))
 	tokens := make(map[key][]string, len(rows))
 	for _, s := range rows {
-		var sink srtserver.Sink
+		var sink srtserver.Receiver
 		// A nil *relay.Hub in an interface is not a nil interface, so the engine
 		// lookup has to be spelled out rather than assigned straight through --
 		// otherwise a source with no engine would present a non-nil Sink and the
