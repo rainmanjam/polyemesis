@@ -711,7 +711,7 @@ type Engine struct {
 	// Nil in production, one nil check per preview start.
 	beforeHubRead func()
 
-	ctx    context.Context
+	ctx    context.Context // NOSONAR godre:S8242: the engine's lifetime ctx, WithCancel of Start's ctx; StopWithin cancels it and waits on wg for every background loop it started
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
