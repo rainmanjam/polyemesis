@@ -1219,7 +1219,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		c.forgetTarget(d.ID)
 		c.untrack(d.ID)
 		return true
-	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase):
+	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase): // NOSONAR go:S1871: FINISHED BUSINESS (disabled, broadcast already completed) is not the YouTube broadcast that never aired on a switched-off destination, read once since, which the quietUnairedYouTube case keeps
 		// FINISHED BUSINESS, AND WITHOUT THIS IT COSTS QUOTA FOREVER. A
 		// disabled row whose broadcast has already completed has nothing left
 		// that can be done to it -- complete and revoked are both terminal, and
@@ -1290,7 +1290,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// operator who gives up on going live and switches the destination off
 		// must still have their broadcast ended.
 		return true
-	case !d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter*2:
+	case !d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter*2: // NOSONAR go:S1871: a disabled row past twice the give-up budget (the disabled path's own bound) is not the unaired X broadcast on a switched-off destination, read once since, which the quietUnairedX case keeps
 		// THE DISABLED PATH NEEDS A BOUND TOO, JUST A LATER ONE. Exempting it
 		// from the hold above is right -- a pending end must still land -- but
 		// "not held" was implemented as "retried at fifteen seconds for ever",

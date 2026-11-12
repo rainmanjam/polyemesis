@@ -114,7 +114,7 @@ type Service struct {
 	partTries   int
 	partBackoff time.Duration
 	ctxMu       sync.Mutex
-	baseCtx     context.Context
+	baseCtx     context.Context // NOSONAR godre:S8242: Background until Run stores its ctx; Kick's fire-and-forget passes run on that service lifetime, so they outlive the request that kicked them
 	// kicks counts the passes Kick started, so a caller (a test) can wait
 	// for the pass a Retry now kicked off instead of racing it.
 	kicks sync.WaitGroup

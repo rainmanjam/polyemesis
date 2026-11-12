@@ -115,7 +115,7 @@ func (t mcpTool) descriptor() *mcp.Tool {
 
 // mcpCtx is one tool call in progress.
 type mcpCtx struct {
-	ctx  context.Context
+	ctx  context.Context // NOSONAR godre:S8242: one tool call's request ctx from mcpToolHandler, ending when that call returns; 36 c.call sites and about 40 run handlers reach it through c, so a parameter would change the run table
 	s    *Server
 	root http.Handler
 	tool *mcpTool

@@ -241,7 +241,7 @@ const (
 type job struct {
 	kind   jobKind
 	via    Via
-	ctx    context.Context
+	ctx    context.Context // NOSONAR godre:S8242: a job's ctx travels through b.jobs to the worker, so it outlives the enqueue; a start's is WithCancel(b.ctx) and a stop cancels it, others carry b.ctx, and runJob cancels it on finish
 	cancel context.CancelFunc
 	rule   SceneRule
 	scene  string
@@ -262,7 +262,7 @@ type Bridge struct {
 	// retryMin and retryMax bound the reconnect backoff; tests shorten them.
 	retryMin, retryMax time.Duration
 
-	ctx    context.Context
+	ctx    context.Context // NOSONAR godre:S8242: the bridge's run ctx from New; Close cancels it and waits on wg, and the worker and reconnect loop exit on its Done
 	cancel context.CancelFunc
 	jobs   chan job
 	kick   chan struct{}

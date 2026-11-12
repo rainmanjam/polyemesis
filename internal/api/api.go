@@ -615,7 +615,7 @@ type Server struct {
 	// attaches under it rather than under its request, whose context ends with
 	// the redirect and would take the new chat with it. Nil until StartChat
 	// runs; guarded by chatWire.
-	chatLife context.Context
+	chatLife context.Context // NOSONAR godre:S8242: the ctx cmd/polyemesis passes StartChat, cancelled at process shutdown; a connect attaches its chat under it, so the chat outlives the OAuth redirect's request
 	// twitchChatDial replaces the Twitch IRC dial. A test seam: nil in
 	// production, where the adapter dials irc.chat.twitch.tv itself.
 	twitchChatDial func(context.Context) (net.Conn, error)

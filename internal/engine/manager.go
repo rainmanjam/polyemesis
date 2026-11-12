@@ -165,7 +165,7 @@ type Manager struct {
 	// reports no recorder, because a stop a concurrent reconcile began is not
 	// one Engine.Stop waits for. Under mu.
 	stopping map[*Engine]bool
-	ctx      context.Context
+	ctx      context.Context // NOSONAR godre:S8242: the ctx main passes to Start, cancelled at process shutdown; Reconcile starts engines under it later, so they outlive the call that starts them
 	started  bool
 	// stopped is set by StopWithin and cleared by Start, under mu. It is not
 	// !started: a Manager that was never started still binds on Reconcile, as
