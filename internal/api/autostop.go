@@ -68,7 +68,7 @@ func (s *Server) StopIngestLossWithin(ctx context.Context) { s.ingestStops.shutd
 // built bare in tests.
 type ingestStopRunner struct {
 	mu     sync.Mutex
-	ctx    context.Context
+	ctx    context.Context // NOSONAR godre:S8242: the runner's own lifetime ctx, made lazily in start; shutdown cancels it and waits on wg for every stop it started
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	closed bool
