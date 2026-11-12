@@ -12,6 +12,6 @@ var Info = jobs.KindInfo{
 // Register wires a publish worker into a queue. Concurrency 1: uploads share
 // the machine's upstream bandwidth with the stream, and the governor already
 // holds them back while an ingest is live.
-func Register(r jobs.Registrar, w jobs.Worker) error {
+func Register(r jobs.Registerer, w jobs.Worker) error {
 	return r.Register(JobKind, 1, w)
 }
