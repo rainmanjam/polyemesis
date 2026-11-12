@@ -41,7 +41,7 @@ type Bus interface {
 
 // Display is the alerts overlay's gate: overlay.ActivityGate. Offer must not
 // block; the gate decides what of the event may go on air.
-type Display interface {
+type Display interface { // NOSONAR godre:S8196: the implementer is the alerts overlay gate that receives Offer; "Offerer" would name the hub that makes the offer, the reverse of the role
 	Offer(ev activity.Event)
 }
 

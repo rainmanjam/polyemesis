@@ -409,7 +409,7 @@ type Publisher interface {
 }
 
 // Store persists the bounded history. *db.DB satisfies it.
-type Store interface {
+type Store interface { // NOSONAR godre:S8196: callers hold the bounded history store and hand it messages to persist; "Appender" would name the one method, not what the value is for
 	AppendChatMessages(msgs []db.ChatMessage) (int, error)
 }
 
