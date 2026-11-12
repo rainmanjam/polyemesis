@@ -340,7 +340,7 @@ func (d *Dispatcher) Publish(ev Event) {
 }
 
 // Activity accepts a viewer or platform activity as an `activity` trigger. It
-// is what internal/activityhub calls (activityhub.Hooks), and like Publish it
+// is what internal/activityhub calls (activityhub.Dispatcher), and like Publish it
 // never blocks, and it has its own bounded queue so that a burst of follows
 // cannot displace a lifecycle delivery. Only hooks that name the trigger
 // receive it (Hook.Wants).

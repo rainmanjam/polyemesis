@@ -45,9 +45,9 @@ type Display interface { // NOSONAR godre:S8196: the implementer is the alerts o
 	Offer(ev activity.Event)
 }
 
-// Hooks is the webhook dispatcher: *hooks.Dispatcher. It sends the event to
+// Dispatcher is the webhook dispatcher: *hooks.Dispatcher. It sends the event to
 // hooks that name the `activity` trigger and to no one else.
-type Hooks interface {
+type Dispatcher interface {
 	Activity(ev activity.Event)
 }
 
@@ -103,7 +103,7 @@ func WithBus(b Publisher) Option { return func(h *Hub) { h.bus = b } }
 func WithDisplay(d Display) Option { return func(h *Hub) { h.display = d } }
 
 // WithHooks sets the webhook dispatcher.
-func WithHooks(k Hooks) Option { return func(h *Hub) { h.hooks = k } }
+func WithHooks(k Dispatcher) Option { return func(h *Hub) { h.hooks = k } }
 
 // WithSettings sets where the activity settings come from. Read at most once
 // every couple of seconds. A read that fails keeps the LAST GOOD settings rather
@@ -133,7 +133,7 @@ func WithBackoff(fn func(attempt int) time.Duration) Option { return func(h *Hub
 type Hub struct {
 	bus      Publisher
 	display  Display
-	hooks    Hooks
+	hooks    Dispatcher
 	settings func() (db.ActivitySettings, error)
 	log      *slog.Logger
 	now      func() time.Time
