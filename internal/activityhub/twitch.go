@@ -351,10 +351,7 @@ func (t *Twitch) kindsSnapshot() map[activity.Kind]activity.KindStatus {
 func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 	tier, err := t.api.BroadcasterType(ctx, t.cfg.AccountRef)
 	if err != nil {
-		if deadGrant(err) {
-			return t.parkUntilReconnected(ctx)
-		}
-		return err
+		return t.parkOrFail(ctx, err)
 	}
 
 	wsURL := t.wsEndpoint()
@@ -379,10 +376,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 
 	ok, err := t.subscribeAll(ctx, welcome.ID, tier)
 	if err != nil {
-		if deadGrant(err) {
-			return t.parkUntilReconnected(ctx)
-		}
-		return err
+		return t.parkOrFail(ctx, err)
 	}
 	if !ok {
 		return t.noAlertsError(tier)
@@ -391,11 +385,7 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 
 	timer := time.NewTimer(keepalive)
 	defer timer.Stop()
-	recheck := t.cfg.TierRecheck
-	if recheck <= 0 {
-		recheck = 24 * time.Hour
-	}
-	tierTick := time.NewTicker(recheck)
+	tierTick := time.NewTicker(t.tierRecheckInterval())
 	defer tierTick.Stop()
 
 	var graceTimer *time.Timer // the 30 s Twitch gives for a reconnect
@@ -477,17 +467,15 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 				continue
 			}
 			rearm()
-			if f.Bad {
-				t.unparseable.Add(1)
+			if !t.frameUsable(f) {
 				continue
 			}
 			t.observe(f.Msg)
 			switch f.Msg.Type() {
 			case eventsub.TypeWelcome:
 				// Subscriptions carried over: nothing is created here.
-				sess, serr := f.Msg.Session()
-				if serr != nil {
-					t.unparseable.Add(1)
+				sess, ok := t.sessionOf(f.Msg)
+				if !ok {
 					continue
 				}
 				old, oldC := conn, curC
@@ -522,32 +510,78 @@ func (t *Twitch) run(ctx context.Context, emit func(activity.Event)) error {
 				return t.closeError(f.Err)
 			}
 			rearm()
-			if f.Bad {
-				t.unparseable.Add(1)
+			if !t.frameUsable(f) {
 				continue
 			}
 			t.observe(f.Msg)
-			switch f.Msg.Type() {
-			case eventsub.TypeKeepalive, eventsub.TypeWelcome:
-			case eventsub.TypeNotification:
-				t.notification(ctx, f.Msg, emit)
-			case eventsub.TypeRevocation:
-				t.revocation(f.Msg)
-			case eventsub.TypeReconnect:
-				if pending != nil {
-					continue
-				}
-				np, rerr := t.startReconnect(ctx, f.Msg)
-				if rerr != nil {
-					return rerr
-				}
-				pending, pendingC = np, np.Frames()
-				graceTimer = time.NewTimer(30 * time.Second)
-				graceC = graceTimer.C
-			default:
-				t.ignored.Add(1)
+			if f.Msg.Type() != eventsub.TypeReconnect {
+				t.steadyFrame(ctx, f.Msg, emit)
+				continue
 			}
+			if pending != nil {
+				continue
+			}
+			np, rerr := t.startReconnect(ctx, f.Msg)
+			if rerr != nil {
+				return rerr
+			}
+			pending, pendingC = np, np.Frames()
+			graceTimer = time.NewTimer(30 * time.Second)
+			graceC = graceTimer.C
 		}
+	}
+}
+
+// tierRecheckInterval is how often run reads the account type again: the
+// configured interval, or a day when none is set.
+func (t *Twitch) tierRecheckInterval() time.Duration {
+	if t.cfg.TierRecheck <= 0 {
+		return 24 * time.Hour
+	}
+	return t.cfg.TierRecheck
+}
+
+// parkOrFail is run's answer to a Twitch call that failed: a dead grant parks
+// the source until it is reconnected, anything else is the error itself.
+func (t *Twitch) parkOrFail(ctx context.Context, err error) error {
+	if deadGrant(err) {
+		return t.parkUntilReconnected(ctx)
+	}
+	return err
+}
+
+// frameUsable reports whether a frame parsed. A frame that did not is counted
+// and skipped by run.
+func (t *Twitch) frameUsable(f eventsub.Frame) bool {
+	if f.Bad {
+		t.unparseable.Add(1)
+		return false
+	}
+	return true
+}
+
+// sessionOf reads the session of a welcome message. One that does not parse
+// is counted as unparseable, and ok is false.
+func (t *Twitch) sessionOf(m eventsub.Message) (sess eventsub.SessionInfo, ok bool) {
+	sess, err := m.Session()
+	if err != nil {
+		t.unparseable.Add(1)
+		return eventsub.SessionInfo{}, false
+	}
+	return sess, true
+}
+
+// steadyFrame handles a frame from the live socket other than a reconnect
+// request, which run deals with itself.
+func (t *Twitch) steadyFrame(ctx context.Context, msg eventsub.Message, emit func(activity.Event)) {
+	switch msg.Type() {
+	case eventsub.TypeKeepalive, eventsub.TypeWelcome:
+	case eventsub.TypeNotification:
+		t.notification(ctx, msg, emit)
+	case eventsub.TypeRevocation:
+		t.revocation(msg)
+	default:
+		t.ignored.Add(1)
 	}
 }
 
