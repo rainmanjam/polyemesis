@@ -531,14 +531,14 @@ func NormaliseTarget(upload string) string { return jobs.UploadTarget(upload) }
 
 // --------------------------------------------------------------- the processor
 
-// Registry is the part of *jobs.Queue this package needs. An interface so the
+// Registerer is the part of *jobs.Queue this package needs. An interface so the
 // processor can be registered against a fake in tests, and so this package does
 // not depend on the queue's construction.
-type Registry interface {
+type Registerer interface {
 	Register(kind jobs.Kind, limit int, w jobs.Worker) error
 }
 
-var _ Registry = (*jobs.Queue)(nil)
+var _ Registerer = (*jobs.Queue)(nil)
 
 // Resolver turns a stored upload name into an absolute path, refusing anything
 // that escapes the uploads directory. An interface so the worker is testable
@@ -679,7 +679,7 @@ func New(log *slog.Logger, cfg Config, opts ...Option) *Processor {
 }
 
 // Register wires the worker into a queue.
-func (p *Processor) Register(r Registry) error {
+func (p *Processor) Register(r Registerer) error {
 	return r.Register(KindNormalise, NormaliseLimit, jobs.WorkerFunc(p.RunNormalise))
 }
 
