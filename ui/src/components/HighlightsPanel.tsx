@@ -154,7 +154,7 @@ export function HighlightsPanel({ recordingId, exportBody, onPreview, onAccepted
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {h.signals.map((s, i) => (
-                    <Badge key={i} variant="outline">{signalText(s)}</Badge>
+                    <Badge key={`${i}-${s.kind}`} variant="outline">{signalText(s)}</Badge>
                   ))}
                 </div>
                 {h.excerpt && <p className="text-tiny text-muted-foreground">{h.excerpt}</p>}

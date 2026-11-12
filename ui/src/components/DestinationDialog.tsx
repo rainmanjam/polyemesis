@@ -96,6 +96,7 @@ import type {
 import { MoreAbout } from "@/components/MoreAbout";
 import { useDismissGuard } from "@/hooks/useDismissGuard";
 import { timestamp } from "@/lib/format";
+import { useRowKeys } from "./useRowKeys";
 
 /** The transport a preset's ingest is reached over. Finer-grained than DestKind
  *  on purpose: rtmp and rtmps are one DestKind but two different things to tell
@@ -767,6 +768,8 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
   // from compliance -- neither is an obligation, both only apply at the moment
   // the broadcast is created. Empty means "send neither".
   const [facebook, setFacebook] = useState<FacebookSettings>({});
+  // Client-only keys for the cross-post rows; they never enter `facebook`.
+  const crosspostKeys = useRowKeys(facebook.crosspost?.length ?? 0);
   // "Publish a redundant feed for this destination." Top-level rather than part
   // of `facebook` because neither the endpoint it gates nor the engine that
   // reads it is platform-specific — see db.Destination.BackupIngestWanted. The
@@ -1341,6 +1344,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
 
   // Drops one Facebook cross-post row by its index.
   const removeCrosspostAt = (i: number) => () => {
+    crosspostKeys.remove(i);
     const next = (facebook.crosspost ?? []).filter((_, j) => j !== i);
     setFacebook({ ...facebook, crosspost: next });
   };
@@ -2601,7 +2605,7 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                 {/* `target`, not `t`: the translator is called inside this map
                     and a one-letter row variable shadowed it. */}
                 {(facebook.crosspost ?? []).map((target, i) => (
-                  <div key={i} className="flex items-center gap-2">
+                  <div key={crosspostKeys.at(i)} className="flex items-center gap-2">
                     <Input
                       value={target.pageId}
                       onChange={(e) => {
@@ -2641,12 +2645,13 @@ export function DestinationDialog({ open, onOpenChange, destination, onSaved, in
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() =>
+                  onClick={() => {
+                    crosspostKeys.add();
                     setFacebook({
                       ...facebook,
                       crosspost: [...(facebook.crosspost ?? []), { pageId: "" }],
-                    })
-                  }
+                    });
+                  }}
                 >
                   <Plus className="size-3.5" /> {t("dest.fbCrosspostAdd")}
                 </Button>

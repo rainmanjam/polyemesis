@@ -95,19 +95,15 @@ export function SetupChecklist({
       <CardHeader className="flex-row items-center justify-between gap-3">
         <CardTitle>{t("firstRun.title")}</CardTitle>
         <div className="flex items-center gap-2">
-          <span
-            className="h-1.5 w-28 overflow-hidden rounded-full bg-muted"
-            role="progressbar"
+          {/* A native progress element; the fill is drawn with the vendor
+              pseudo-elements, since <progress> cannot hold a child bar. */}
+          <progress
+            className="block h-1.5 w-28 appearance-none overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-ok [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-ok"
             aria-label={t(checklist.done === 1 ? "firstRun.progressOne" : "firstRun.progress", { done: checklist.done, total: 5 })}
-            aria-valuemin={0}
-            aria-valuemax={5}
+            value={checklist.done}
+            max={5}
             aria-valuenow={checklist.done}
-          >
-            <span
-              className="block h-full rounded-full bg-ok"
-              style={{ width: `${(checklist.done / 5) * 100}%` }}
-            />
-          </span>
+          />
           <span className="tnum font-mono text-xs text-muted-foreground">
             {t(checklist.done === 1 ? "firstRun.progressOne" : "firstRun.progress", { done: checklist.done, total: 5 })}
           </span>

@@ -39,11 +39,14 @@ const ThemeContext = createContext<ThemeState>(DETACHED);
  *  a viewer never navigates out of /watch and the console never navigates into
  *  it without a reload (the same assumption App.tsx makes). */
 export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
-  const [themed, _setThemed] = useState(() => isThemedPath(window.location.pathname, window.location.hash));
-  const [choice, setChoiceState] = useState<ThemeChoice>(readStoredChoice);
+  // Read once from the URL and never changed for this mount. A memo with empty
+  // deps stands in for a useState that has no setter, so no unused setter is
+  // declared.
+  const themed = useMemo(() => isThemedPath(window.location.pathname, window.location.hash), []);
+  const [pickedChoice, setPickedChoice] = useState<ThemeChoice>(readStoredChoice);
   const [prefersLight, setPrefersLight] = useState(systemPrefersLight);
 
-  const theme: Theme = themed ? resolveTheme(choice, prefersLight) : "dark";
+  const theme: Theme = themed ? resolveTheme(pickedChoice, prefersLight) : "dark";
 
   // Layout, not passive: a pick must reach the DOM before the browser paints,
   // or the old theme shows for a frame under the new control.
@@ -72,7 +75,7 @@ export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
   useEffect(() => {
     if (!themed) return;
     const onStorage = (e: StorageEvent) => {
-      if (e.key === THEME_STORAGE_KEY) setChoiceState(readStoredChoice());
+      if (e.key === THEME_STORAGE_KEY) setPickedChoice(readStoredChoice());
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -80,10 +83,10 @@ export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
 
   const setChoice = useCallback((next: ThemeChoice) => {
     storeChoice(next);
-    setChoiceState(next);
+    setPickedChoice(next);
   }, []);
 
-  const value = useMemo(() => ({ choice, theme, setChoice }), [choice, theme, setChoice]);
+  const value = useMemo(() => ({ choice: pickedChoice, theme, setChoice }), [pickedChoice, theme, setChoice]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

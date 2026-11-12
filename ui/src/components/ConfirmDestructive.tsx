@@ -258,7 +258,7 @@ export function ConfirmDestructive({
                 token. */}
             <Label htmlFor="confirm-subject">
               {typeToConfirm.map((part, i) => (
-                <Fragment key={i}>
+                <Fragment key={`${i}-${part}`}>
                   {i > 0 && (
                     <span className="font-mono font-semibold normal-case">
                       {named}
