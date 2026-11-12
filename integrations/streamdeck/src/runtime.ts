@@ -623,7 +623,6 @@ export class Runtime {
       }
       if (s.kind === "viewers") await this.paintViewersDial(s); // NOSONAR typescript:S9382: key writes go one at a time to the one device, in surface order
       await this.paintFace(s, this.faceFor(s)); // NOSONAR typescript:S9382: key writes go one at a time to the one device, in surface order
-
     }
   }
 
