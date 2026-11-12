@@ -192,7 +192,7 @@ func (s *Server) lookaheadFor(ctx context.Context, ed oauth.ScheduledEditor, tpl
 			s.log.Warn("recurring: cannot read an occurrence", "destination", d.Name, "err", redactErr(err))
 			return
 		}
-		d = s.lookaheadCreate(ctx, ed, tpl, sc, d, at, counted, now)
+		d = s.lookaheadCreate(ctx, lookaheadCreateArgs{ed: ed, tpl: tpl, sc: sc, d: d, at: at, counted: counted, now: now})
 	}
 }
 
@@ -211,11 +211,23 @@ func (s *Server) lookaheadExisting(d *db.Destination, sc scheduler.Schedule, at 
 	// cancel is being retried. It holds its slot and nothing is mirrored for it.
 }
 
+// lookaheadCreateArgs is the per-occurrence input to lookaheadCreate. It is
+// grouped so the call stays readable; the context stays a plain parameter.
+type lookaheadCreateArgs struct {
+	ed      oauth.ScheduledEditor
+	tpl     scheduler.BroadcastTemplate
+	sc      scheduler.Schedule
+	d       *db.Destination
+	at      time.Time
+	counted int
+	now     time.Time
+}
+
 // lookaheadCreate creates the event for a counted occurrence that has no record
 // yet, unless a recent refusal holds it. It returns the destination the walk
 // carries forward, which may hold a stream key the create just minted.
-func (s *Server) lookaheadCreate(ctx context.Context, ed oauth.ScheduledEditor, tpl scheduler.BroadcastTemplate,
-	sc scheduler.Schedule, d *db.Destination, at time.Time, counted int, now time.Time) *db.Destination {
+func (s *Server) lookaheadCreate(ctx context.Context, a lookaheadCreateArgs) *db.Destination {
+	ed, tpl, sc, d, at, counted, now := a.ed, a.tpl, a.sc, a.d, a.at, a.counted, a.now
 	if s.templateCreateHeld(d.ID, sc.ID, now) {
 		// A recent refusal for this destination and schedule. The slot is counted, so the walk does
 		// not reach further ahead to fill it, and nothing calls the platform until the hold ends.

@@ -160,7 +160,7 @@ func TestLiveMultipartCompleteAndAbort(t *testing.T) {
 	var parts []Part
 	for i, b := range [][]byte{part, tail} {
 		sh, mb := digests(b)
-		etag, err := c.UploadPart(ctx, key, id, i+1, bytes.NewReader(b), int64(len(b)), sh, mb)
+		etag, err := c.UploadPart(ctx, UploadPartInput{Key: key, UploadID: id, N: i + 1, Body: bytes.NewReader(b), Size: int64(len(b)), SHA256Hex: sh, MD5B64: mb})
 		if err != nil {
 			t.Fatalf("part %d: %v", i+1, err)
 		}

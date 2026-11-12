@@ -164,7 +164,8 @@ func (m *memStore) CreateMultipart(_ context.Context, key string, meta map[strin
 	return id, nil
 }
 
-func (m *memStore) UploadPart(_ context.Context, _ string, id string, n int, body io.ReadSeeker, size int64, _, _ string) (string, error) {
+func (m *memStore) UploadPart(_ context.Context, in objstore.UploadPartInput) (string, error) {
+	id, n, body, size := in.UploadID, in.N, in.Body, in.Size
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.partPuts++

@@ -114,7 +114,7 @@ function MessageBody({ m }: Readonly<{ m: ChatMessage }>) {
   return (
     <>
       {pieces.map((p, i) => (
-        <MessagePiece key={i} p={p} />
+        <MessagePiece key={`${i}-${p.kind}-${p.kind === "text" ? p.text : p.name}`} p={p} />
       ))}
     </>
   );

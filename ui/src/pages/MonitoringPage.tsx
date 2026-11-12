@@ -86,6 +86,20 @@ function logVerdictText(t: Translator, state: ReturnType<typeof verdict>): strin
 
 const lineKey = (l: LogLine) => `${l.time} ${l.process} ${l.text}`;
 
+/** Pairs each item with a key that follows its content, for a read-only log
+ *  list. The list is appended to and trimmed from the front, so an index key
+ *  would hand one line's DOM to a different line. A line that occurs more than
+ *  once gets an occurrence number, so every key in the list is unique. */
+function keyedRows<T>(items: readonly T[], contentOf: (item: T) => string): Array<{ key: string; item: T }> {
+  const seen = new Map<string, number>();
+  return items.map((item) => {
+    const base = contentOf(item);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    return { key: `${base}#${n}`, item };
+  });
+}
+
 /** Drops the historical lines the socket has already delivered.
  *
  *  The socket is open before the backfill request lands, so the tail of the
@@ -838,8 +852,8 @@ export function MonitoringPage() {
     if (groups.length === 0) {
       return <EmptyState title={t("monitor.noMatchingLines")} className="border-0 font-sans" />;
     }
-    return groups.map((g, i) => (
-      <div key={i} className="flex gap-2">
+    return keyedRows(groups, (g) => lineKey(g.line)).map(({ key, item: g }) => (
+      <div key={key} className="flex gap-2">
         <span className="tnum shrink-0 text-muted-foreground">{clockTime(g.line.time)}</span>
         <span className="shrink-0 text-muted-foreground">{g.line.process}</span>
         {g.count > 1 && (
@@ -1206,8 +1220,8 @@ export function MonitoringPage() {
               </Button>
               {showRaw && (
                 <div className="mt-2 h-48 overflow-y-auto rounded border border-border bg-background p-2 font-mono text-micro leading-relaxed">
-                  {filtered.map((l, i) => (
-                    <div key={i} className="flex gap-2">
+                  {keyedRows(filtered, lineKey).map(({ key, item: l }) => (
+                    <div key={key} className="flex gap-2">
                       <span className="tnum shrink-0 text-muted-foreground">
                         {clockTime(l.time)}
                       </span>

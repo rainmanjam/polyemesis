@@ -67,7 +67,7 @@ func TestTheNormaliseWorkerIsRegisteredWithTheQueue(t *testing.T) {
 	// being present, which is the fail-open rule registerProcessors states.
 	tools := &ffmpeg.Tools{FFmpeg: filepath.Join(dir, "no-ffmpeg"), FFprobe: filepath.Join(dir, "no-ffprobe")}
 
-	registerProcessors(log, config.Config{DataDir: dir}, store, nil, gov, q, tools, nil, db.PostProdSettings{})
+	registerProcessors(processorArgs{log: log, cfg: config.Config{DataDir: dir}, store: store, gov: gov, q: q, tools: tools, pp: db.PostProdSettings{}})
 
 	err := q.Register(playlistmedia.KindNormalise, 1,
 		jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil }))
@@ -196,10 +196,10 @@ func startStoppablePostProd(t *testing.T, store *db.DB, dir string) postProd {
 	// real listener. startPostProd only captures its method values.
 	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, events.NewBroker())
 	ctx, cancel := context.WithCancel(context.Background())
-	pp := startPostProd(ctx, log, cfg, settingsOf(t, store), startupenv.Env{}, store, nil, eng, &ffmpeg.Tools{
+	pp := startPostProd(ctx, postProdArgs{log: log, cfg: cfg, settings: settingsOf(t, store), env: startupenv.Env{}, store: store, eng: eng, tools: &ffmpeg.Tools{
 		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
 		FFprobe: filepath.Join(dir, "no-ffprobe"),
-	})
+	}})
 	t.Cleanup(func() {
 		cancel()
 		stopPostProd(t, pp)
@@ -234,10 +234,10 @@ func TestStartPostProdReleasesTheDatabaseWhenItStops(t *testing.T) {
 	cfg := config.Config{DataDir: dir}
 	eng := engine.NewManager(log, cfg, store, &ffmpeg.Tools{}, events.NewBroker())
 	ctx, cancel := context.WithCancel(context.Background())
-	pp := startPostProd(ctx, log, cfg, settingsOf(t, store), startupenv.Env{}, store, nil, eng, &ffmpeg.Tools{
+	pp := startPostProd(ctx, postProdArgs{log: log, cfg: cfg, settings: settingsOf(t, store), env: startupenv.Env{}, store: store, eng: eng, tools: &ffmpeg.Tools{
 		FFmpeg:  filepath.Join(dir, "no-ffmpeg"),
 		FFprobe: filepath.Join(dir, "no-ffprobe"),
-	})
+	}})
 
 	cancel()
 	stopPostProd(t, pp)

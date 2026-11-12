@@ -1336,49 +1336,43 @@ function TranscriptRow({
       data-line-start={line.startMs}
       data-line-end={line.endMs}
       className={cn(
-        "group flex cursor-pointer gap-2 rounded-sm px-1.5 py-1 text-sm transition-colors",
+        "group flex gap-2 rounded-sm text-sm transition-colors",
         selected ? "bg-primary-dim" : "hover:bg-card-raised",
       )}
-      onClick={onSeek}
-      // A KEYBOARD ROUTE TO THE SAME ACTION. This row seeks the player on
-      // click and had no keyboard equivalent at all, so the transcript --
-      // which is the fastest way to navigate a long recording -- was reachable
-      // by pointer only. The same pattern MediaUploads.tsx already uses for its
-      // drop zone: role, tab stop, and Enter/Space.
-      //
-      // The Scissors button inside stops propagation on its own click, so it
-      // keeps its own behaviour and its own tab stop rather than being
-      // swallowed by this one.
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSeek();
-        }
-      }}
-      role="button"
-      tabIndex={0}
-      // NO aria-label ON PURPOSE. The row already contains its timecode, its
-      // speaker and its text, so the accessible name computed from its content
-      // is the line itself -- which is what somebody navigating the transcript
-      // wants read out. A synthetic label would REPLACE that with something
-      // shorter and less useful, and would need translating into twelve
-      // locales to say less.
     >
-      <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
-        {timecode(line.startMs).slice(0, 8)}
-      </span>
-      <span className="min-w-0 flex-1">
-        {line.speaker && (
-          <span className="mr-1 font-semibold text-cat-cyan">{line.speaker}:</span>
-        )}
-        {line.text}
-      </span>
+      {/* THE SEEK IS A NATIVE BUTTON, NOT A ROLE ON THE ROW. This row seeks the
+          player on click, and the transcript -- the fastest way to navigate a
+          long recording -- must stay reachable by keyboard. A native button
+          gives the tab stop and Enter/Space activation without a hand-written
+          key handler. The Scissors button cannot live inside it (buttons do
+          not nest), so it is a sibling with its own behaviour and tab stop. */}
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 cursor-pointer gap-2 rounded-sm px-1.5 py-1 text-left"
+        onClick={onSeek}
+        // NO aria-label ON PURPOSE. The row already contains its timecode, its
+        // speaker and its text, so the accessible name computed from its content
+        // is the line itself -- which is what somebody navigating the transcript
+        // wants read out. A synthetic label would REPLACE that with something
+        // shorter and less useful, and would need translating into twelve
+        // locales to say less.
+      >
+        <span className="tnum shrink-0 font-mono text-micro text-muted-foreground">
+          {timecode(line.startMs).slice(0, 8)}
+        </span>
+        <span className="min-w-0 flex-1">
+          {line.speaker && (
+            <span className="mr-1 font-semibold text-cat-cyan">{line.speaker}:</span>
+          )}
+          {line.text}
+        </span>
+      </button>
       <Button
         variant="ghost"
         size="icon-sm"
         aria-label={t("clipedit.clipThisLine")}
         title={t("clipedit.clipThisLineTitle")}
-        className="opacity-0 transition-opacity group-hover:opacity-100"
+        className="mr-1.5 opacity-0 transition-opacity group-hover:opacity-100"
         onClick={(e) => {
           e.stopPropagation();
           onClip(e);

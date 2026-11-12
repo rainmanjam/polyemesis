@@ -80,7 +80,7 @@ func TestStoredSelfHarmTimeoutRowDoesNotDisarmTheOtherRules(t *testing.T) {
 	hub := newTestHub(t)
 	ps := automod.NewPersistent()
 	pb, sb := automod.NewBudget(), automod.NewBudget()
-	ApplyAutomod(hub, store, nil, log, a, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: a, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	mod := hub.Moderator()
 	if mod == nil {
 		t.Fatal("no moderator attached: the stored row disarmed automod")
@@ -96,14 +96,14 @@ func TestStoredSelfHarmTimeoutRowDoesNotDisarmTheOtherRules(t *testing.T) {
 	}
 	// Three more saves with the same rows: still one warning.
 	for i := 0; i < 3; i++ {
-		ApplyAutomod(hub, store, nil, log, a, pb, sb, ps)
+		ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: a, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	}
 	if n := strings.Count(buf.String(), "clamped to flag"); n != 1 {
 		t.Errorf("%d clamp warnings across 4 saves, want 1:\n%s", n, buf.String())
 	}
 	// A different clamped set is news again.
 	a.Rules = append(a.Rules, db.AutomodRule{ID: 3, Name: "sh2", Enabled: true, Pattern: "hurt", Action: "ban", Category: "self_harm"})
-	ApplyAutomod(hub, store, nil, log, a, pb, sb, ps)
+	ApplyAutomod(AutomodApply{Hub: hub, Store: store, Log: log, Settings: a, Budget: pb, SecondaryBudget: sb, Persist: ps})
 	if n := strings.Count(buf.String(), "clamped to flag"); n != 2 {
 		t.Errorf("%d clamp warnings after the set changed, want 2", n)
 	}

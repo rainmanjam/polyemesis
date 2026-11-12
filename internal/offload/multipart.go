@@ -147,7 +147,7 @@ func (s *Service) uploadPart(ctx context.Context, c Client, mp db.OffloadMultipa
 			wait *= 2
 		}
 		var etag string
-		if etag, err = c.UploadPart(ctx, mp.Key, mp.UploadID, n, body, size, sh, mb); err == nil {
+		if etag, err = c.UploadPart(ctx, objstore.UploadPartInput{Key: mp.Key, UploadID: mp.UploadID, N: n, Body: body, Size: size, SHA256Hex: sh, MD5B64: mb}); err == nil {
 			return etag, nil
 		}
 		if ctx.Err() != nil || !retryable(err) {

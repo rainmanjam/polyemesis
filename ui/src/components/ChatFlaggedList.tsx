@@ -118,7 +118,7 @@ export function ChatFlaggedList({
               </p>
               <ul className="flex flex-col gap-0.5">
                 {f.findings.map((fi, i) => (
-                  <li key={i} className="text-sm text-muted-foreground">
+                  <li key={`${i}-${fi.checker}-${fi.action}`} className="text-sm text-muted-foreground">
                     <span className="text-foreground">{findingLabel(fi, t)}</span>
                     {/* The category already says why, in the catalogue's words;
                         the server's reason is the same thing in English. Only a

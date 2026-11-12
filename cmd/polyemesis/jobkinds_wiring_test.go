@@ -22,7 +22,7 @@ func TestEveryCataloguedJobKindIsRegistered(t *testing.T) {
 	gov := jobs.NewGovernor(log, q)
 	tools := &ffmpeg.Tools{FFmpeg: filepath.Join(dir, "no-ffmpeg"), FFprobe: filepath.Join(dir, "no-ffprobe")}
 	cfg := config.Config{DataDir: dir}
-	registerProcessors(log, cfg, store, nil, gov, q, tools, nil, db.PostProdSettings{})
+	registerProcessors(processorArgs{log: log, cfg: cfg, store: store, gov: gov, q: q, tools: tools, pp: db.PostProdSettings{}})
 	registerPublish(log, cfg, store, nil, q, &publish.TokenGate{}, publish.Gates{})
 
 	noop := jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil })

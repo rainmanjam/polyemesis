@@ -58,7 +58,7 @@ type Client interface {
 	Get(ctx context.Context, key string) (io.ReadCloser, objstore.ObjectInfo, error)
 	Delete(ctx context.Context, key string) error
 	CreateMultipart(ctx context.Context, key string, meta map[string]string) (string, error)
-	UploadPart(ctx context.Context, key, uploadID string, n int, body io.ReadSeeker, size int64, sha256Hex, md5B64 string) (string, error)
+	UploadPart(ctx context.Context, in objstore.UploadPartInput) (string, error)
 	CompleteMultipart(ctx context.Context, key, uploadID string, parts []objstore.Part) (string, error)
 	AbortMultipart(ctx context.Context, key, uploadID string) error
 }
@@ -219,8 +219,8 @@ func (g guarded) Delete(ctx context.Context, key string) error { return g.c.Dele
 func (g guarded) CreateMultipart(ctx context.Context, key string, meta map[string]string) (string, error) {
 	return g.c.CreateMultipart(g.ctx(ctx), key, meta)
 }
-func (g guarded) UploadPart(ctx context.Context, key, id string, n int, body io.ReadSeeker, size int64, sh, mb string) (string, error) {
-	return g.c.UploadPart(g.ctx(ctx), key, id, n, body, size, sh, mb)
+func (g guarded) UploadPart(ctx context.Context, in objstore.UploadPartInput) (string, error) {
+	return g.c.UploadPart(g.ctx(ctx), in)
 }
 func (g guarded) CompleteMultipart(ctx context.Context, key, id string, parts []objstore.Part) (string, error) {
 	return g.c.CompleteMultipart(g.ctx(ctx), key, id, parts)

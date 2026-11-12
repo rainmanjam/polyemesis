@@ -543,6 +543,65 @@ func (m *Manager) Start(ctx context.Context) error {
 	return nil
 }
 
+// sourceSetOf returns the ids of rows as a set, and as a slice in table order.
+func sourceSetOf(rows []*db.Source) (map[int64]bool, []int64) {
+	want := make(map[int64]bool, len(rows))
+	order := make([]int64, 0, len(rows))
+	for _, s := range rows {
+		want[s.ID] = true
+		order = append(order, s.ID)
+	}
+	return want, order
+}
+
+// missingSourceIDs lists the ids in rows that have no engine yet. The caller
+// must hold m.mu.
+func missingSourceIDs(rows []*db.Source, engines map[int64]*Engine) []int64 {
+	var missing []int64
+	for _, s := range rows {
+		if _, ok := engines[s.ID]; !ok {
+			missing = append(missing, s.ID)
+		}
+	}
+	return missing
+}
+
+// noteRetiring records the alerts notifier of an engine that has just left the
+// map, so its totals stay counted until it is retired. The caller must hold
+// m.mu.
+func (m *Manager) noteRetiring(n *alerts.Notifier) {
+	if n == nil {
+		return
+	}
+	if m.retiring == nil {
+		m.retiring = map[*alerts.Notifier]struct{}{}
+	}
+	m.retiring[n] = struct{}{}
+}
+
+// newEngineFor builds the engine for one source and wires in the manager's
+// shared pieces. It does not start the engine.
+func (m *Manager) newEngineFor(id int64) (*Engine, error) {
+	eng, err := New(m.log, m.cfg, m.store, m.tools, m.bus, id, m.alloc, m.host)
+	if err != nil {
+		return nil, err
+	}
+	// The SRT link probe for degraded-link failover (#6). Before Start,
+	// because the selector sweep that reads it starts there; it reads the
+	// listener through the manager on every call, so a rebind on a port
+	// change is picked up without re-wiring any engine.
+	eng.linkProbe = m.srtLinkHealth
+	// Before Start, and through the ONE function every save also goes
+	// through: a setting this path forgot would work on every engine the
+	// operator already had and silently not on the one they just added.
+	// See engineSettings.
+	m.applyEngineSettings(eng, m.engineSettingsSnapshot())
+	// Before Start, so no destination this engine starts can miss a drain
+	// of the same id in another programme.
+	eng.drains = m.drains
+	return eng, nil
+}
+
 // Sync makes the set of running engines match the sources table, starting
 // engines for new sources and stopping those whose source has gone.
 func (m *Manager) Sync() error {
@@ -563,12 +622,7 @@ func (m *Manager) Sync() error {
 
 	m.mu.Lock()
 	ctx, started := m.ctx, m.started
-	want := make(map[int64]bool, len(rows))
-	order := make([]int64, 0, len(rows))
-	for _, s := range rows {
-		want[s.ID] = true
-		order = append(order, s.ID)
-	}
+	want, order := sourceSetOf(rows)
 	m.order = order
 
 	// Stop first, so a source that was deleted releases its ports and its
@@ -581,20 +635,10 @@ func (m *Manager) Sync() error {
 			m.markStopping(eng)
 			// In the same critical section as the delete, so no reader of
 			// the totals ever sees this engine in neither place.
-			if n := eng.Alerts(); n != nil {
-				if m.retiring == nil {
-					m.retiring = map[*alerts.Notifier]struct{}{}
-				}
-				m.retiring[n] = struct{}{}
-			}
+			m.noteRetiring(eng.Alerts())
 		}
 	}
-	var missing []int64
-	for _, s := range rows {
-		if _, ok := m.engines[s.ID]; !ok {
-			missing = append(missing, s.ID)
-		}
-	}
+	missing := missingSourceIDs(rows, m.engines)
 	m.mu.Unlock()
 
 	for _, eng := range stopping {
@@ -606,24 +650,11 @@ func (m *Manager) Sync() error {
 	}
 
 	for _, id := range missing {
-		eng, err := New(m.log, m.cfg, m.store, m.tools, m.bus, id, m.alloc, m.host)
+		eng, err := m.newEngineFor(id)
 		if err != nil {
 			m.log.Error("cannot build engine for source", "source", id, "err", err)
 			continue
 		}
-		// The SRT link probe for degraded-link failover (#6). Before Start,
-		// because the selector sweep that reads it starts there; it reads the
-		// listener through the manager on every call, so a rebind on a port
-		// change is picked up without re-wiring any engine.
-		eng.linkProbe = m.srtLinkHealth
-		// Before Start, and through the ONE function every save also goes
-		// through: a setting this path forgot would work on every engine the
-		// operator already had and silently not on the one they just added.
-		// See engineSettings.
-		m.applyEngineSettings(eng, m.engineSettingsSnapshot())
-		// Before Start, so no destination this engine starts can miss a drain
-		// of the same id in another programme.
-		eng.drains = m.drains
 		if !m.startTracked(ctx, eng, eng.Start) {
 			continue
 		}

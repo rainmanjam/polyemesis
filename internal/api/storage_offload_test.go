@@ -69,7 +69,7 @@ func (m *apiMemBucket) GetFrom(ctx context.Context, key string, _ int64) (io.Rea
 func (m *apiMemBucket) CreateMultipart(context.Context, string, map[string]string) (string, error) {
 	return "", errors.New("not used")
 }
-func (m *apiMemBucket) UploadPart(context.Context, string, string, int, io.ReadSeeker, int64, string, string) (string, error) {
+func (m *apiMemBucket) UploadPart(context.Context, objstore.UploadPartInput) (string, error) {
 	return "", errors.New("not used")
 }
 func (m *apiMemBucket) CompleteMultipart(context.Context, string, string, []objstore.Part) (string, error) {

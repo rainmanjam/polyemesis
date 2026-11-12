@@ -138,6 +138,12 @@ export function ChatOverlayView({
   );
 }
 
+/** A filled circle as an SVG data URI, so a role dot can be a native img. */
+function roleDotSource(color: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="${color}"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 /** The three roles every platform has, as coloured dots. Labelled for a
  *  screen reader in the dock; on stream they are decoration. */
 function RoleDots({ line }: Readonly<{ line: ShownLine }>) {
@@ -150,17 +156,17 @@ function RoleDots({ line }: Readonly<{ line: ShownLine }>) {
   return (
     <>
       {dots.map((d) => (
-        <span
+        // A native img whose source is the coloured circle itself, so the
+        // dot needs no ARIA role. The alt text is the label a reader hears.
+        <img
           key={d.key}
-          role="img"
-          aria-label={d.label}
+          src={roleDotSource(d.color)}
+          alt={d.label}
           title={d.label}
           style={{
             display: "inline-block",
             width: "0.5em",
             height: "0.5em",
-            borderRadius: "999px",
-            background: d.color,
             marginRight: "0.3em",
             verticalAlign: "0.12em",
           }}

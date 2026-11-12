@@ -224,7 +224,7 @@ func (s *Server) handlePutAutomodKey(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("automod key stored, but settings could not be re-read to "+
 			"rebuild the model checker; it will pick the key up on restart", "err", err)
 	} else {
-		ApplyAutomod(s.chat, s.store, s.box, s.log, set.Automod, s.automodBudget, s.automodSecondaryBudget, s.automodState)
+		ApplyAutomod(AutomodApply{Hub: s.chat, Store: s.store, Box: s.box, Log: s.log, Settings: set.Automod, Budget: s.automodBudget, SecondaryBudget: s.automodSecondaryBudget, Persist: s.automodState})
 	}
 
 	// A key set while debug recording is on is a literal the recording's
@@ -654,8 +654,21 @@ func newChecker(conn, shared db.AutomodModel, key, binding string, budget *autom
 	return automod.NewModel(cfg, budget)
 }
 
-func ApplyAutomod(hub *chat.Hub, store *db.DB, box *secrets.Box, log *slog.Logger, a db.AutomodSettings,
-	budget, secondaryBudget *automod.Budget, persist *automod.Persistent) {
+// AutomodApply is the input to ApplyAutomod: the settings to apply and the live
+// pieces they act on.
+type AutomodApply struct {
+	Hub             *chat.Hub
+	Store           *db.DB
+	Box             *secrets.Box
+	Log             *slog.Logger
+	Settings        db.AutomodSettings
+	Budget          *automod.Budget
+	SecondaryBudget *automod.Budget
+	Persist         *automod.Persistent
+}
+
+func ApplyAutomod(in AutomodApply) {
+	hub, store, box, log, a, budget, secondaryBudget, persist := in.Hub, in.Store, in.Box, in.Log, in.Settings, in.Budget, in.SecondaryBudget, in.Persist
 	if hub == nil {
 		return
 	}

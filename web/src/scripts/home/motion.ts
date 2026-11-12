@@ -32,7 +32,10 @@ export function createMotionGate(win: Window = window): OwnedMotionGate {
     root.classList.toggle("motion-on", now);
     if (now === last) return;
     last = now;
-    for (const fn of [...subs]) {
+    /* A snapshot on purpose: a subscriber may subscribe or unsubscribe while
+     * it runs, and iterating the live Set would change who is notified. */
+    const snapshot = [...subs];
+    for (const fn of snapshot) {
       /* One failing subscriber must not leave the rest moving (or stopped).
        * The error is still reported, so it is never silent. */
       try {

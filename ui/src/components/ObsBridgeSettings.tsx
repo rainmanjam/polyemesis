@@ -4,6 +4,7 @@ import { Loader2, Plus, Save, Trash2 } from "lucide-react";
 
 import { api, type DestinationWithRouting } from "@/lib/api";
 import { useT, type TranslationKey, type Translator } from "@/lib/i18n";
+import { useRowKeys } from "./useRowKeys";
 import type {
   ObsActionRecord,
   Destination,
@@ -84,6 +85,8 @@ const EMPTY: ObsConfig = {
 export function ObsBridgeSettings() {
   const t = useT();
   const [draft, setDraft] = useState<ObsConfig | null>(null);
+  // Client-only keys for the scene rules; the rules themselves stay as sent.
+  const sceneKeys = useRowKeys(draft?.scenes.length ?? 0);
   const [status, setStatus] = useState<ObsStatus | null>(null);
   const [sources, setSources] = useState<SourceView[]>([]);
   const [dests, setDests] = useState<Destination[]>([]);
@@ -326,7 +329,7 @@ export function ObsBridgeSettings() {
             <span className="text-sm font-medium">{t("obs.scenes")}</span>
             <span className="text-sm text-muted-foreground">{t("obs.scenesHint")}</span>
             {draft.scenes.map((rule, i) => (
-              <div key={i} className="flex flex-wrap items-end gap-2">
+              <div key={sceneKeys.at(i)} className="flex flex-wrap items-end gap-2">
                 <div className="flex flex-col gap-1">
                   <Label htmlFor={`obs-scene-${i}`}>{t("obs.sceneName")}</Label>
                   <Input
@@ -360,7 +363,10 @@ export function ObsBridgeSettings() {
                   size="sm"
                   variant="ghost"
                   aria-label={t("obs.removeRule")}
-                  onClick={() => set({ scenes: draft.scenes.filter((_, j) => j !== i) })}
+                  onClick={() => {
+                    sceneKeys.remove(i);
+                    set({ scenes: draft.scenes.filter((_, j) => j !== i) });
+                  }}
                 >
                   <Trash2 />
                 </Button>
@@ -371,7 +377,10 @@ export function ObsBridgeSettings() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => set({ scenes: [...draft.scenes, { scene: "", preset: presets[0]?.id ?? "" }] })}
+                onClick={() => {
+                  sceneKeys.add();
+                  set({ scenes: [...draft.scenes, { scene: "", preset: presets[0]?.id ?? "" }] });
+                }}
               >
                 <Plus /> {t("obs.addRule")}
               </Button>

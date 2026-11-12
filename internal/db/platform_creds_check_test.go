@@ -26,8 +26,8 @@ func TestARecordedCredentialVerdictIsListedWithTheTimeItWasReached(t *testing.T)
 	}
 
 	at := time.Unix(1_800_000_000, 0)
-	if err := d.RecordPlatformCredsCheck(box, PlatformTwitch, "an-id", "a-secret", "rejected", "client_credentials",
-		"The platform refused these credentials.", at); err != nil {
+	if err := d.RecordPlatformCredsCheck(PlatformCredsCheckInput{Box: box, Platform: PlatformTwitch, ClientID: "an-id", ClientSecret: "a-secret", State: "rejected", Method: "client_credentials",
+		Detail: "The platform refused these credentials.", At: at}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
@@ -71,8 +71,8 @@ func TestSavingANewPairDropsTheVerdictTheOldPairEarned(t *testing.T) {
 	if err := d.PutPlatformCreds(box, PlatformTwitch, "old-id", "old-secret"); err != nil {
 		t.Fatalf("put: %v", err)
 	}
-	if err := d.RecordPlatformCredsCheck(box, PlatformTwitch, "old-id", "old-secret", "verified", "client_credentials",
-		"ok", time.Now()); err != nil {
+	if err := d.RecordPlatformCredsCheck(PlatformCredsCheckInput{Box: box, Platform: PlatformTwitch, ClientID: "old-id", ClientSecret: "old-secret", State: "verified", Method: "client_credentials",
+		Detail: "ok", At: time.Now()}); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 	if err := d.PutPlatformCreds(box, PlatformTwitch, "new-id", "new-secret"); err != nil {
@@ -91,7 +91,7 @@ func TestSavingANewPairDropsTheVerdictTheOldPairEarned(t *testing.T) {
 // creating a verdict for no pair.
 func TestRecordingAVerdictWithNoStoredPairIsNotFound(t *testing.T) {
 	d := testDB(t)
-	err := d.RecordPlatformCredsCheck(testBox(t), PlatformYouTube, "an-id", "a-secret", "verified", "format", "", time.Now())
+	err := d.RecordPlatformCredsCheck(PlatformCredsCheckInput{Box: testBox(t), Platform: PlatformYouTube, ClientID: "an-id", ClientSecret: "a-secret", State: "verified", Method: "format", Detail: "", At: time.Now()})
 	if err != ErrNotFound {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -163,8 +163,8 @@ func TestAVerdictForAPairThatWasReplacedMidCheckIsDroppedNotWrittenOntoTheNewPai
 		t.Fatalf("put B: %v", err)
 	}
 	// A's check finishes now, and its verdict is about A.
-	err := d.RecordPlatformCredsCheck(box, PlatformTwitch, "pair-a-id", "pair-a-fake",
-		"verified", "client_credentials", "ok", time.Now())
+	err := d.RecordPlatformCredsCheck(PlatformCredsCheckInput{Box: box, Platform: PlatformTwitch, ClientID: "pair-a-id", ClientSecret: "pair-a-fake",
+		State: "verified", Method: "client_credentials", Detail: "ok", At: time.Now()})
 	if !errors.Is(err, ErrStaleCredsCheck) {
 		t.Fatalf("err = %v, want ErrStaleCredsCheck for a verdict about a replaced pair", err)
 	}
@@ -189,14 +189,14 @@ func TestAVerdictForAReplacedSecretUnderTheSameClientIDInTheSameSecondIsDropped(
 	if err := d.PutPlatformCreds(box, PlatformKick, "same-id", "second-fake"); err != nil {
 		t.Fatalf("put second: %v", err)
 	}
-	err := d.RecordPlatformCredsCheck(box, PlatformKick, "same-id", "first-fake",
-		"verified", "client_credentials", "ok", time.Now())
+	err := d.RecordPlatformCredsCheck(PlatformCredsCheckInput{Box: box, Platform: PlatformKick, ClientID: "same-id", ClientSecret: "first-fake",
+		State: "verified", Method: "client_credentials", Detail: "ok", At: time.Now()})
 	if !errors.Is(err, ErrStaleCredsCheck) {
 		t.Fatalf("err = %v, want ErrStaleCredsCheck", err)
 	}
 	// And the check of the pair that IS stored still lands.
-	if err := d.RecordPlatformCredsCheck(box, PlatformKick, "same-id", "second-fake",
-		"rejected", "client_credentials", "refused", time.Now()); err != nil {
+	if err := d.RecordPlatformCredsCheck(PlatformCredsCheckInput{Box: box, Platform: PlatformKick, ClientID: "same-id", ClientSecret: "second-fake",
+		State: "rejected", Method: "client_credentials", Detail: "refused", At: time.Now()}); err != nil {
 		t.Fatalf("record current pair: %v", err)
 	}
 	list, err := d.ListPlatformCreds()

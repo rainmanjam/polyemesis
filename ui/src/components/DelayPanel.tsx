@@ -90,16 +90,15 @@ export function DelayPanel({
           <Timer className="h-3 w-3 shrink-0" />
           {t("delay.buffering", { buffered: Math.floor(d.bufferedSeconds), seconds })}
         </span>
-        <div
-          className="h-1 w-full overflow-hidden rounded bg-muted"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
+        {/* A native progress element. <progress> cannot hold a child bar, so the
+            fill is drawn with the vendor pseudo-elements. */}
+        <progress
+          className="block h-1 w-full appearance-none overflow-hidden rounded bg-muted [&::-webkit-progress-bar]:rounded [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:rounded [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary"
+          value={pct}
+          max={100}
           aria-valuenow={pct}
           aria-label={t("delay.fillLabel")}
-        >
-          <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
-        </div>
+        />
       </div>
     );
   }

@@ -118,6 +118,19 @@ func (d *DB) ListPlatformCreds() ([]PlatformCreds, error) {
 // the new pair, which has (or will get) its own check.
 var ErrStaleCredsCheck = errors.New("the checked credentials are no longer the stored ones")
 
+// PlatformCredsCheckInput is the input to RecordPlatformCredsCheck: the verdict
+// and the pair it ran against.
+type PlatformCredsCheckInput struct {
+	Box          *secrets.Box
+	Platform     Platform
+	ClientID     string
+	ClientSecret string
+	State        string
+	Method       string
+	Detail       string
+	At           time.Time
+}
+
 // RecordPlatformCredsCheck stores the verdict a check reached on the pair
 // clientID/clientSecret (settings-council R10). ErrNotFound when no pair is
 // stored, so a verdict can never outlive the credentials it was about.
@@ -132,8 +145,8 @@ var ErrStaleCredsCheck = errors.New("the checked credentials are no longer the s
 // between the read and the write changes the blob and the write matches no
 // row. updated_at cannot do this job, because it is in whole seconds and two
 // saves in one second share it. Either way ErrStaleCredsCheck.
-func (d *DB) RecordPlatformCredsCheck(box *secrets.Box, p Platform, clientID, clientSecret,
-	state, method, detail string, at time.Time) error {
+func (d *DB) RecordPlatformCredsCheck(in PlatformCredsCheckInput) error {
+	box, p, clientID, clientSecret, state, method, detail, at := in.Box, in.Platform, in.ClientID, in.ClientSecret, in.State, in.Method, in.Detail, in.At
 	var (
 		storedID string
 		enc      []byte

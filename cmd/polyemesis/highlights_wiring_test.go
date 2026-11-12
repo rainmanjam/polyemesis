@@ -33,7 +33,7 @@ func TestTheHighlightAndClipKindsAreRegistered(t *testing.T) {
 	q := jobs.New(log, store)
 	gov := jobs.NewGovernor(log, q)
 	tools := &ffmpeg.Tools{FFmpeg: filepath.Join(dir, "no-ffmpeg"), FFprobe: filepath.Join(dir, "no-ffprobe")}
-	registerProcessors(log, config.Config{DataDir: dir}, store, nil, gov, q, tools, nil, db.PostProdSettings{})
+	registerProcessors(processorArgs{log: log, cfg: config.Config{DataDir: dir}, store: store, gov: gov, q: q, tools: tools, pp: db.PostProdSettings{}})
 	for _, k := range []jobs.Kind{highlights.JobKind, clipper.JobKind} {
 		if err := q.Register(k, 1, jobs.WorkerFunc(func(context.Context, jobs.Job, jobs.Reporter) error { return nil })); err == nil {
 			t.Errorf("%s is not registered", k)

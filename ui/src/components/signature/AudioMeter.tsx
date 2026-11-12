@@ -449,7 +449,7 @@ export function AudioMeter({
           style={{ gap: `${barGap}px` }}
         >
           {labels.map((l, i) => (
-            <div key={i} className="flex items-center" style={{ height: barHeight }}>
+            <div key={`${i}-${l}`} className="flex items-center" style={{ height: barHeight }}>
               {l}
             </div>
           ))}
@@ -476,20 +476,23 @@ export function AudioMeter({
         </span>
       </div>
       <div data-part="meter-db" className="flex shrink-0 flex-col" style={{ gap: `${barGap}px` }}>
-        {rms.map((_, i) => (
+        {/* One reset button per channel. The key pairs the position with the
+            channel label; rms values change every frame, so they never go in
+            the key. Channels are positional and never reorder. */}
+        {Array.from({ length: channels }, (_, ch) => (
           <button
-            key={i}
+            key={`${ch}-${labels?.[ch] ?? ""}`}
             type="button"
             ref={(el) => {
-              peakRefs.current[i] = el;
+              peakRefs.current[ch] = el;
             }}
             onClick={() => {
               resetRef.current = true;
             }}
             title={t("routing.meters.peakReset")}
             aria-label={
-              labels?.[i]
-                ? t("routing.meters.peakResetFor", { channel: labels[i] })
+              labels?.[ch]
+                ? t("routing.meters.peakResetFor", { channel: labels[ch] })
                 : t("routing.meters.peakReset")
             }
             className="tnum flex items-center justify-end whitespace-nowrap font-mono text-xs leading-none text-muted-foreground hover:text-foreground"

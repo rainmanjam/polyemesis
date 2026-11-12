@@ -111,6 +111,20 @@ export function PollPanel({ twitchAvailable = false }: Readonly<{ twitchAvailabl
   );
 }
 
+/** An option row with a client-only key. The React key is never sent to the
+ *  API: `start` maps the rows back to plain strings first. */
+interface OptionRow {
+  key: number;
+  text: string;
+}
+
+let nextOptionKey = 0;
+
+function newOptionRow(): OptionRow {
+  nextOptionKey += 1;
+  return { key: nextOptionKey, text: "" };
+}
+
 function StartForm({
   onStarted,
   twitchAvailable,
@@ -121,7 +135,7 @@ function StartForm({
 }>) {
   const t = useT();
   const [question, setQuestion] = useState("");
-  const [options, setOptions] = useState<string[]>(["", ""]);
+  const [options, setOptions] = useState<OptionRow[]>(() => [newOptionRow(), newOptionRow()]);
   const [duration, setDuration] = useState(120);
   // On only when there is a Twitch account to mirror to. The old default was
   // "on" with no account, and the only sign of it was a line after start.
@@ -133,12 +147,13 @@ function StartForm({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const setOption = (i: number, v: string) => setOptions((os) => os.map((o, k) => (k === i ? v : o)));
+  const setOption = (i: number, v: string) =>
+    setOptions((os) => os.map((o, k) => (k === i ? { ...o, text: v } : o)));
 
   const start = async () => {
     const spec = {
       question,
-      options,
+      options: options.map((o) => o.text),
       durationSeconds: duration,
       mirrorTwitch: twitchAvailable && mirror,
       mirrorYouTube,
@@ -156,7 +171,7 @@ function StartForm({
       await api.startPoll(spec);
       toast.success(t("polls.started"));
       setQuestion("");
-      setOptions(["", ""]);
+      setOptions([newOptionRow(), newOptionRow()]);
       await onStarted();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("polls.startFailed"));
@@ -186,10 +201,10 @@ function StartForm({
       />
       <span className="text-sm">{t("polls.options")}</span>
       {options.map((o, i) => (
-        <div key={i} className="flex items-center gap-1">
+        <div key={o.key} className="flex items-center gap-1">
           <span className="tnum w-4 text-sm text-muted-foreground">{i + 1}</span>
           <input
-            value={o}
+            value={o.text}
             maxLength={POLL_LIMITS.maxOption}
             onChange={(e) => setOption(i, e.target.value)}
             aria-label={t("polls.optionAria", { n: i + 1 })}
@@ -210,7 +225,7 @@ function StartForm({
         </div>
       ))}
       {options.length < POLL_LIMITS.maxOptions && (
-        <Button type="button" size="sm" variant="ghost" className="self-start" onClick={() => setOptions((os) => [...os, ""])}>
+        <Button type="button" size="sm" variant="ghost" className="self-start" onClick={() => setOptions((os) => [...os, newOptionRow()])}>
           <Plus className="h-3 w-3" /> {t("polls.addOption")}
         </Button>
       )}
@@ -375,12 +390,12 @@ function Delivery({ poll }: Readonly<{ poll: Poll }>) {
   return (
     <ul className="flex flex-col gap-0.5 text-[11px] text-muted-foreground" data-testid="poll-delivery">
       {announced.map((a, i) => (
-        <li key={`a-${i}`} className={a.ok ? undefined : "text-warn"}>
+        <li key={`${i}-${announcedText(t, a)}`} className={a.ok ? undefined : "text-warn"}>
           {announcedText(t, a)}
         </li>
       ))}
       {native.map((n, i) => (
-        <li key={`n-${i}`} className={n.status === "failed" ? "text-warn" : undefined}>
+        <li key={`${i}-${nativeText(t, n)}`} className={n.status === "failed" ? "text-warn" : undefined}>
           {nativeText(t, n)}
         </li>
       ))}

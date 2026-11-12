@@ -1848,58 +1848,8 @@ func (e *Engine) reconcileIngest(s, prev db.Settings) {
 	}
 	e.mu.Unlock()
 
-	// RTMP IS NOT THE SAME CASE, even though it now has a one-port Go listener
-	// too. srtserver hands datagrams straight to a Sink, so an SRT source needs
-	// no child at all; rtmpserver has no Sink and re-publishes to subscribers,
-	// so an RTMP source still needs a child -- one that DIALS the listener on
-	// loopback instead of binding 1935. Extending this early return to RTMP
-	// would leave the programme with a publisher and nobody reading it.
-	if s.Ingest.Mode == db.IngestSRT {
-		e.stopIngestProcess()
+	if e.ingestRefused(s) {
 		return
-	}
-
-	// Nothing chosen yet. A fresh install does not pick an ingest on the
-	// operator's behalf (see db.IngestUnset), so there is nothing to listen
-	// with until they do — and spawning FFmpeg with an empty Kind would build a
-	// command with no input and crash-loop against it.
-	if s.Ingest.Mode == db.IngestUnset {
-		e.stopIngestProcess()
-		return
-	}
-
-	// An RTMP source with no token has no address, and the child must not be
-	// spawned without one. `rtmp://127.0.0.1:1935/live/` resolves — StreamKey
-	// falls back to the whole path when there is no second segment — so the
-	// subscriber would silently attach to the stream key "live" and receive
-	// whatever any publisher happened to send there. Reachable only through
-	// effectiveSettings' fail-open path, where the source row went missing
-	// mid-reconcile, which is exactly when quietly crossing two programmes
-	// would be hardest to notice.
-	if s.Ingest.Mode == db.IngestRTMP && e.ingestToken() == "" {
-		e.log.Error("rtmp ingest not started: the source has no publish token, so it has no address",
-			"source", e.sourceID)
-		e.stopIngestProcess()
-		return
-	}
-
-	// #255: the INHERITED pull source, re-examined here because the save-time
-	// gate cannot see one configured before it existed. Only a REFUSAL stops an
-	// ingest; an upload merely stored unchecked keeps streaming and is reported
-	// on the card. pullUploadRefusal carries the argument for the split, and it
-	// is the file to read before folding the two states back together.
-	//
-	// Above the signature comparison on purpose: a source already running on a
-	// refused upload has an unchanged signature, so a check placed below would
-	// take the `same` early return and never fire for the one case this exists
-	// for -- the one nothing re-examines.
-	if s.Ingest.Mode == db.IngestPull {
-		if refusal := e.pullUploadRefusal("this source", s.Ingest.Pull.URL); refusal != "" {
-			e.log.Error("pull ingest not started: "+refusal, "source", e.sourceID)
-			e.noteReload("ingest", "ingest", reloadStop, refusal)
-			e.stopIngestProcess()
-			return
-		}
 	}
 
 	spec := e.ingestSpec(s)
@@ -2347,6 +2297,97 @@ func (e *Engine) reconcileAfterHoldExpiry() {
 	e.publishStatus()
 }
 
+// ingestRefused reports whether the settings start no ingest child. When they
+// do not, any ingest that is running is stopped first. A refusal is an answer,
+// not an error: the reconcile just starts nothing.
+func (e *Engine) ingestRefused(s db.Settings) bool {
+	// RTMP IS NOT THE SAME CASE, even though it now has a one-port Go listener
+	// too. srtserver hands datagrams straight to a Sink, so an SRT source needs
+	// no child at all; rtmpserver has no Sink and re-publishes to subscribers,
+	// so an RTMP source still needs a child -- one that DIALS the listener on
+	// loopback instead of binding 1935. Extending this early return to RTMP
+	// would leave the programme with a publisher and nobody reading it.
+	if s.Ingest.Mode == db.IngestSRT {
+		e.stopIngestProcess()
+		return true
+	}
+
+	// Nothing chosen yet. A fresh install does not pick an ingest on the
+	// operator's behalf (see db.IngestUnset), so there is nothing to listen
+	// with until they do — and spawning FFmpeg with an empty Kind would build a
+	// command with no input and crash-loop against it.
+	if s.Ingest.Mode == db.IngestUnset {
+		e.stopIngestProcess()
+		return true
+	}
+
+	// An RTMP source with no token has no address, and the child must not be
+	// spawned without one. `rtmp://127.0.0.1:1935/live/` resolves — StreamKey
+	// falls back to the whole path when there is no second segment — so the
+	// subscriber would silently attach to the stream key "live" and receive
+	// whatever any publisher happened to send there. Reachable only through
+	// effectiveSettings' fail-open path, where the source row went missing
+	// mid-reconcile, which is exactly when quietly crossing two programmes
+	// would be hardest to notice.
+	if s.Ingest.Mode == db.IngestRTMP && e.ingestToken() == "" {
+		e.log.Error("rtmp ingest not started: the source has no publish token, so it has no address",
+			"source", e.sourceID)
+		e.stopIngestProcess()
+		return true
+	}
+
+	// #255: the INHERITED pull source, re-examined here because the save-time
+	// gate cannot see one configured before it existed. Only a REFUSAL stops an
+	// ingest; an upload merely stored unchecked keeps streaming and is reported
+	// on the card. pullUploadRefusal carries the argument for the split, and it
+	// is the file to read before folding the two states back together.
+	//
+	// Above the signature comparison on purpose: a source already running on a
+	// refused upload has an unchanged signature, so a check placed below would
+	// take the `same` early return and never fire for the one case this exists
+	// for -- the one nothing re-examines.
+	if s.Ingest.Mode == db.IngestPull {
+		if refusal := e.pullUploadRefusal("this source", s.Ingest.Pull.URL); refusal != "" {
+			e.log.Error("pull ingest not started: "+refusal, "source", e.sourceID)
+			e.noteReload("ingest", "ingest", reloadStop, refusal)
+			e.stopIngestProcess()
+			return true
+		}
+	}
+	return false
+}
+
+// recorderOffReason says why the recorder is not running while recording is not
+// allowed: the setting is off, or the free-space guard is holding it.
+func recorderOffReason(s db.Settings) string {
+	why := "recording turned off"
+	if s.Recording.Enabled {
+		why = "stopped by the free-space guard: the recordings volume is nearly full"
+	}
+	return why
+}
+
+// recorderArgs is the recorder's FFmpeg command: the master recording, and with
+// a stem plan, one file per stem as well.
+func (e *Engine) recorderArgs(s db.Settings, rs ffmpeg.RecorderSpec, pattern string, plan []recording.Stem) []string {
+	args := ffmpeg.RecorderArgs(rs)
+	if len(plan) > 0 {
+		// Fail open: a stems directory that cannot be made costs the stems, not
+		// the archive. Losing the master because a subdirectory was unwritable
+		// would be the worse trade by a wide margin.
+		if err := recording.EnsureStemsDir(e.cfg.RecordingsDir()); err != nil {
+			e.log.Error("stems: cannot create directory; recording master only", "err", err)
+		} else {
+			args = ffmpeg.StemRecorderArgs(ffmpeg.StemRecorderSpec{
+				RecorderSpec: rs,
+				Codec:        s.Recording.StemCodec,
+				Stems:        recording.StemSpecs(e.cfg.RecordingsDir(), pattern, plan),
+			})
+		}
+	}
+	return args
+}
+
 func (e *Engine) reconcileRecorder(s db.Settings) {
 	e.mu.RLock()
 	cur := e.recorder
@@ -2365,11 +2406,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 	if !s.Recording.Enabled || !e.recman.RecordingAllowed() {
 		if cur != nil {
 			e.stopAux(auxRecorder)
-			why := "recording turned off"
-			if s.Recording.Enabled {
-				why = "stopped by the free-space guard: the recordings volume is nearly full"
-			}
-			e.streamRecording(false, why)
+			e.streamRecording(false, recorderOffReason(s))
 		}
 		return
 	}
@@ -2412,21 +2449,7 @@ func (e *Engine) reconcileRecorder(s db.Settings) {
 		OutputPattern:  pattern,
 		SegmentSeconds: s.Recording.SegmentSeconds,
 	}
-	args := ffmpeg.RecorderArgs(rs)
-	if len(plan) > 0 {
-		// Fail open: a stems directory that cannot be made costs the stems, not
-		// the archive. Losing the master because a subdirectory was unwritable
-		// would be the worse trade by a wide margin.
-		if err := recording.EnsureStemsDir(e.cfg.RecordingsDir()); err != nil {
-			e.log.Error("stems: cannot create directory; recording master only", "err", err)
-		} else {
-			args = ffmpeg.StemRecorderArgs(ffmpeg.StemRecorderSpec{
-				RecorderSpec: rs,
-				Codec:        s.Recording.StemCodec,
-				Stems:        recording.StemSpecs(e.cfg.RecordingsDir(), pattern, plan),
-			})
-		}
-	}
+	args := e.recorderArgs(s, rs, pattern, plan)
 
 	// The consumer the wake exists for: stopped after the publisher has gone --
 	// the ingest ending, recording.enabled=false, `docker stop` on an idle
@@ -2964,6 +2987,65 @@ func (e *Engine) reconcileMeters(s db.Settings) {
 	proc.Start()
 }
 
+// advanceHoldClock runs the hold's clock for one pass. The clock runs only while
+// a stream has been seen, and an expiry stays latched until a layout is measured.
+func (e *Engine) advanceHoldClock(holdDests, unmeasurable bool, now time.Time) {
+	switch {
+	case holdDests && e.streamSeen.Load():
+		e.holdBegan(now)
+	case holdDests:
+		e.holdSince.Store(0)
+	case unmeasurable:
+		// Latched: do not clear, or the next pass flips back to holding.
+	default:
+		e.holdSince.Store(0)
+	}
+}
+
+// holdStatusFor is the status published while destinations are held, and nil
+// when they are not.
+//
+// Worded for an operator watching a dashboard, not for the person who wrote the
+// hold. "A routing graph compiled against the placeholder would map tracks that
+// may not exist" is the true reason and belongs in reconcileOutputs' comment,
+// where it already is; on a card it reads as a fault report about track
+// mapping, which is not what is happening. What the operator needs is that this
+// is a normal, transient, pre-stream state and nothing is wrong.
+func holdStatusFor(holdDests bool) *HoldStatus {
+	if !holdDests {
+		return nil
+	}
+	return &HoldStatus{
+		Code: "awaiting-ingest-probe",
+		Reason: "Waiting for the first look at the incoming stream. " +
+			"Destinations start once its audio and video tracks are known.",
+	}
+}
+
+// announceHold puts the reason destinations are held, or cannot be measured, on
+// the reload notes.
+func (e *Engine) announceHold(holdDests, unmeasurable bool) {
+	switch {
+	case holdDests:
+		e.noteReload("destinations", "all", AppliedRestart,
+			"held: the ingest layout has not been probed yet, and a routing graph "+
+				"compiled against the placeholder would map tracks that may not exist")
+	case unmeasurable:
+		e.noteReload("destinations", "all", AppliedRestart,
+			"the ingest layout cannot be measured, so each track is downmixed by "+
+				"FFmpeg at runtime rather than by its profile's matrix")
+	}
+}
+
+// renditionsByID indexes renditions by their id.
+func renditionsByID(rows []*db.Rendition) map[int64]*db.Rendition {
+	byID := make(map[int64]*db.Rendition, len(rows))
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	return byID
+}
+
 // reconcileOutputs brings the shared encodes and the destinations that consume
 // them into line with the database.
 //
@@ -3124,45 +3206,13 @@ func (e *Engine) reconcileOutputs() error {
 	// when the probe finally landed. Waiting is the only behaviour that cannot
 	// do that, so the clock does not run before there is a stream to probe, and
 	// an expiry is kept until a layout is measured or the ingest is invalidated.
-	switch {
-	case holdDests && e.streamSeen.Load():
-		e.holdBegan(now)
-	case holdDests:
-		e.holdSince.Store(0)
-	case unmeasurable:
-		// Latched: do not clear, or the next pass flips back to holding.
-	default:
-		e.holdSince.Store(0)
-	}
+	e.advanceHoldClock(holdDests, unmeasurable, now)
 	// Published from the decision itself, not recomputed anywhere else, so
 	// /status cannot disagree with the reconcile about why nothing is running.
 	// Cleared on every pass that does not hold, so a stale reason cannot outlive
-	// the condition that produced it.
-	// Worded for an operator watching a dashboard, not for the person who wrote
-	// the hold. "A routing graph compiled against the placeholder would map tracks
-	// that may not exist" is the true reason and belongs in reconcileOutputs'
-	// comment, where it already is; on a card it reads as a fault report about
-	// track mapping, which is not what is happening. What the operator needs is
-	// that this is a normal, transient, pre-stream state and nothing is wrong.
-	var hold *HoldStatus
-	if holdDests {
-		hold = &HoldStatus{
-			Code: "awaiting-ingest-probe",
-			Reason: "Waiting for the first look at the incoming stream. " +
-				"Destinations start once its audio and video tracks are known.",
-		}
-	}
-	e.destHold.Store(hold)
-	switch {
-	case holdDests:
-		e.noteReload("destinations", "all", AppliedRestart,
-			"held: the ingest layout has not been probed yet, and a routing graph "+
-				"compiled against the placeholder would map tracks that may not exist")
-	case unmeasurable:
-		e.noteReload("destinations", "all", AppliedRestart,
-			"the ingest layout cannot be measured, so each track is downmixed by "+
-				"FFmpeg at runtime rather than by its profile's matrix")
-	}
+	// the condition that produced it. The wording is holdStatusFor's.
+	e.destHold.Store(holdStatusFor(holdDests))
+	e.announceHold(holdDests, unmeasurable)
 
 	// PLANNED AND STOPPED ALWAYS. ONLY THE START IS HELD.
 	//
@@ -3224,10 +3274,7 @@ func (e *Engine) reconcileOutputs() error {
 	e.reconcileSilence(silenceSig)
 	e.reconcileSelector(settings, selSig, silenceSig)
 
-	byID := make(map[int64]*db.Rendition, len(rendRows))
-	for _, r := range rendRows {
-		byID[r.ID] = r
-	}
+	byID := renditionsByID(rendRows)
 	for _, id := range startRends {
 		e.startRendition(byID[id], wantRends[id], fps, counts[id])
 	}
@@ -4069,6 +4116,26 @@ func (e *Engine) stopAux(a auxSlot) {
 
 // ------------------------------------------------------------------ probing
 
+// observeHoldExpiry reconciles on the edge where the hold's clock expires, and
+// returns the expired state for the next pass. Expiry is an edge, as the
+// give-up is.
+func (e *Engine) observeHoldExpiry(wasExpired bool) bool {
+	expiredNow := e.holdExpired(time.Now())
+	if expiredNow && !wasExpired {
+		e.reconcileAfterHoldExpiry()
+	}
+	return expiredNow
+}
+
+// announceLayoutCleared tells the log and the event stream that the track layout
+// was forgotten, when there was one to forget.
+func (e *Engine) announceLayoutCleared(wasProbed bool) {
+	if wasProbed {
+		e.log.Info("ingest stopped; track layout cleared")
+		e.bus.Publish(events.TypeSource, e.SourceInfo())
+	}
+}
+
 // probeLoop keeps the ingest's track layout up to date.
 //
 // Probing costs a short-lived ffprobe against its own relay subscription. It
@@ -4108,12 +4175,7 @@ func (e *Engine) probeLoop(ctx context.Context) {
 		// to arrive: a stream that alternates between quiet and flowing never
 		// produced a `changed` or a give-up flip, so nothing re-planned when the
 		// clock ran out (#473). Expiry is an edge like the give-up is.
-		expiredNow := e.holdExpired(time.Now())
-		expiryFlipped := expiredNow && !wasExpired
-		wasExpired = expiredNow
-		if expiryFlipped {
-			e.reconcileAfterHoldExpiry()
-		}
+		wasExpired = e.observeHoldExpiry(wasExpired)
 
 		rx := e.hub.RxBytes()
 		flowing := rx > lastRx
@@ -4183,10 +4245,7 @@ func (e *Engine) probeLoop(ctx context.Context) {
 				wasProbed := e.probed
 				e.clearProbed()
 				e.mu.Unlock()
-				if wasProbed {
-					e.log.Info("ingest stopped; track layout cleared")
-					e.bus.Publish(events.TypeSource, e.SourceInfo())
-				}
+				e.announceLayoutCleared(wasProbed)
 			}
 		}
 		timer.Reset(next)
@@ -5453,6 +5512,57 @@ func captionSig(cfg transcribe.LiveConfig, hub string) string {
 	return hashStrings([]string{string(b), hub})
 }
 
+// applyCaptionIntentNow reads what the destinations want from captions and
+// applies it. A failed read keeps whatever the captioner was doing: a database
+// hiccup must not stop a running captioner.
+func (e *Engine) applyCaptionIntentNow() {
+	if in, err := e.captionIntentNow(); err != nil {
+		e.log.Warn("live captions: could not read the destinations; keeping the current captioner", "err", err)
+	} else {
+		e.applyCaptionIntent(in)
+		e.useCaptionPolicy(in.policy)
+		e.syncCaptionRoute(in.targets)
+		e.syncCaptionPosters(in.posts)
+	}
+}
+
+// captionRunCtx is the context a captioner starts under: the engine's own, or a
+// background one when the engine has none.
+func (e *Engine) captionRunCtx() context.Context {
+	if e.ctx == nil {
+		return context.Background()
+	}
+	return e.ctx
+}
+
+// captionWant is the configuration a captioner runs from, and its signature,
+// when captions are wanted at all. Otherwise the configuration is returned as
+// given and the signature is empty.
+func (e *Engine) captionWant(cfg transcribe.LiveConfig, choice transcribe.TrackChoice, pinned string, wanted bool) (transcribe.LiveConfig, string) {
+	if !wanted {
+		return cfg, ""
+	}
+	cfg = resolveCaptionConfig(cfg, choice, transcribe.HintFromTools(e.tools), pinned)
+	return cfg, captionSig(cfg, e.sourceLabel())
+}
+
+// noteCaptionExit logs a captioner that stopped on its own, unless the restart
+// budget is spent and it is going to be given up instead.
+func (e *Engine) noteCaptionExit(giveUp bool, ran time.Duration) {
+	if !giveUp {
+		e.log.Warn("live captions stopped on their own; starting them again", "ran", ran)
+	}
+}
+
+// abandonCaptionStart gives back what a captioner that could not be built or
+// started had taken, and reports why.
+func (e *Engine) abandonCaptionStart(hub *relay.Hub, port int, vtt *transcribe.LiveVTT, reason string) {
+	hub.Unsubscribe(captSubName)
+	e.releasePort(port)
+	_ = vtt.Close()
+	e.captionsFailed(reason)
+}
+
 // reconcileCaptions brings the captioner into line with the switch.
 //
 // Like the clip buffer it reads e.downstreamHub(), so the captions describe
@@ -5469,14 +5579,7 @@ func (e *Engine) reconcileCaptions() {
 	// use. They are read first so the snapshot below sees the decision. A failed
 	// read keeps whatever the captioner was doing: a database hiccup must not
 	// stop a running captioner.
-	if in, err := e.captionIntentNow(); err != nil {
-		e.log.Warn("live captions: could not read the destinations; keeping the current captioner", "err", err)
-	} else {
-		e.applyCaptionIntent(in)
-		e.useCaptionPolicy(in.policy)
-		e.syncCaptionRoute(in.targets)
-		e.syncCaptionPosters(in.posts)
-	}
+	e.applyCaptionIntentNow()
 
 	e.mu.RLock()
 	on, cfg, cur, sig, stopped := e.captOn, e.captCfg, e.capt, e.captSig, e.stopped
@@ -5492,12 +5595,8 @@ func (e *Engine) reconcileCaptions() {
 	// cfg is the operator's configuration until here, and the resolved one the
 	// captioner runs from here on. e.captCfg keeps the operator's: an automatic
 	// track must stay automatic, so a later source change can pick another one.
-	want := ""
 	autoModel := cfg.Model == ""
-	if on && !stopped && whisper.Available() && haveTrack {
-		cfg = resolveCaptionConfig(cfg, choice, transcribe.HintFromTools(e.tools), pinned)
-		want = captionSig(cfg, e.sourceLabel())
-	}
+	cfg, want := e.captionWant(cfg, choice, pinned, on && !stopped && whisper.Available() && haveTrack)
 	if captionerIsCurrent(cur, sig, want) {
 		return
 	}
@@ -5513,9 +5612,7 @@ func (e *Engine) reconcileCaptions() {
 		e.mu.Lock()
 		giveUp = e.captBudget.exited(ran)
 		e.mu.Unlock()
-		if !giveUp {
-			e.log.Warn("live captions stopped on their own; starting them again", "ran", ran)
-		}
+		e.noteCaptionExit(giveUp, ran)
 	}
 
 	if cur != nil {
@@ -5593,22 +5690,12 @@ func (e *Engine) reconcileCaptions() {
 		transcribe.WithLiveExit(func() { go e.onCaptionerExited(capt) }),
 	)
 	if err != nil {
-		hub.Unsubscribe(captSubName)
-		e.releasePort(port)
-		_ = vtt.Close()
-		e.captionsFailed(err.Error())
+		e.abandonCaptionStart(hub, port, vtt, err.Error())
 		return
 	}
 
-	ctx := e.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := capt.Start(ctx, url, modelPath, transcribe.LiveWorkDir(e.cfg.DataDir)); err != nil {
-		hub.Unsubscribe(captSubName)
-		e.releasePort(port)
-		_ = vtt.Close()
-		e.captionsFailed(err.Error())
+	if err := capt.Start(e.captionRunCtx(), url, modelPath, transcribe.LiveWorkDir(e.cfg.DataDir)); err != nil {
+		e.abandonCaptionStart(hub, port, vtt, err.Error())
 		return
 	}
 

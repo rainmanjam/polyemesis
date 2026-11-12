@@ -863,7 +863,7 @@ func protection() {
 	h := chat.New(chat.WithLogger(log), chat.WithHistory(256))
 	gate := overlay.New(nopPub{})
 	h.SetDisplay(gate)
-	api.ApplyAutomod(h, nil, nil, log, set, automod.NewBudget(), automod.NewBudget(), nil)
+	api.ApplyAutomod(api.AutomodApply{Hub: h, Log: log, Settings: set, Budget: automod.NewBudget(), SecondaryBudget: automod.NewBudget()})
 
 	ad := &protAdapter{done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())
