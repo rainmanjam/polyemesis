@@ -6,7 +6,7 @@
 // runners are keyed by (platform, account), so a second transport for the same
 // account (Twitch EventSub beside Twitch IRC) cannot sit beside one. An
 // activity is none of those things. Every producer -- a chat adapter through
-// chat.ActivitySink, an own-transport Source through Hub.Attach, "Send test
+// chat.ActivityReceiver, an own-transport Source through Hub.Attach, "Send test
 // alert" through the API -- therefore ends in Hub.Submit, which does the same
 // five things in the same order:
 //

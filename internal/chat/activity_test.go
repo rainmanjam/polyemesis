@@ -63,7 +63,7 @@ func TestActivityWithNoIngesterIsDroppedAndASinkWithoutTheCapabilityIsFine(t *te
 	}}
 	attach(t, h, a)
 	<-done
-	// SinkFunc is not an ActivitySink: emitting to it is a silent no-op.
+	// SinkFunc is not an ActivityReceiver: emitting to it is a silent no-op.
 	emitActivity(SinkFunc(func(Message) {}), activity.Event{Kind: activity.KindFollow})
 
 	rec := &ingestRecorder{}

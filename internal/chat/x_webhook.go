@@ -591,7 +591,7 @@ func (x *XAdapter) run(ctx context.Context, sink Receiver) error {
 
 	inbox := make(chan xWebhookEvent, xInboxSize)
 	// Activity is subscribed only when the sink can take it: a sink that cannot would receive events nobody reads.
-	_, canActivity := sink.(ActivitySink)
+	_, canActivity := sink.(ActivityReceiver)
 	x.act.reset()
 	x.act.setWanted(canActivity)
 	x.goLive(userID, inbox)
