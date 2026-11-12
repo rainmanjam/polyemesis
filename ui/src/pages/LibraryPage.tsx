@@ -1100,7 +1100,7 @@ function captionTrackUrl(id: number, hasTranscript: boolean): string {
 
 /** The transcribe button's tooltip: the per-track action while whisper is
  *  available, otherwise why it is not. */
-function transcribeTitle(available: boolean, note: string | undefined, t: Translator): string {
+function transcribeTitle({ available, note }: { available: boolean; note?: string }, t: Translator): string {
   return available
     ? t("lib.transcribeEachTrackOnIts")
     : t("lib.transcriptionUnavailableReason", {
@@ -1357,7 +1357,7 @@ export function PlayerDialog({
                       size="sm"
                       disabled={busy || !transcribeAvailable}
                       onClick={retranscribe}
-                      title={transcribeTitle(transcribeAvailable, transcribeNote, t)}
+                      title={transcribeTitle({ available: transcribeAvailable, note: transcribeNote }, t)}
                     >
                       <Captions />
                       {t("lib.transcribe")}
