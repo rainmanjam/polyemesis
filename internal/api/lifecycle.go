@@ -1219,7 +1219,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		c.forgetTarget(d.ID)
 		c.untrack(d.ID)
 		return true
-	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase): // NOSONAR go:S1871: FINISHED BUSINESS (disabled, broadcast already completed) is not the YouTube broadcast that never aired on a switched-off destination, read once since, which the quietUnairedYouTube case keeps
+	case !d.Enabled && isTerminalPhase(d.Lifecycle.Phase):
 		// FINISHED BUSINESS, AND WITHOUT THIS IT COSTS QUOTA FOREVER. A
 		// disabled row whose broadcast has already completed has nothing left
 		// that can be done to it -- complete and revoked are both terminal, and
@@ -1235,7 +1235,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// Untracking also releases the Wanted() gate: c.tracked being non-empty
 		// is what keeps the engine building snapshots, so a row nobody will ever
 		// act on would otherwise pin the observe loop on forever too.
-		c.untrack(d.ID)
+		c.untrack(d.ID) // NOSONAR go:S1871: a disabled row whose broadcast already completed (finished business) and the never-aired YouTube broadcast on a switched-off destination that quietUnairedYouTube keeps are different states that end in the same untrack
 		return true
 	case d.Enabled && mode == sweepEndsOnly:
 		// Shutting down. Never go live on the way out.
@@ -1290,7 +1290,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// operator who gives up on going live and switches the destination off
 		// must still have their broadcast ended.
 		return true
-	case !d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter*2: // NOSONAR go:S1871: a disabled row past twice the give-up budget (the disabled path's own bound) is not the unaired X broadcast on a switched-off destination, read once since, which the quietUnairedX case keeps
+	case !d.Enabled && d.Lifecycle.Attempts >= lifecycleGiveUpAfter*2:
 		// THE DISABLED PATH NEEDS A BOUND TOO, JUST A LATER ONE. Exempting it
 		// from the hold above is right -- a pending end must still land -- but
 		// "not held" was implemented as "retried at fifteen seconds for ever",
@@ -1302,7 +1302,7 @@ func (c *lifecycleCoordinator) skipStateRead(d *db.Destination, broadcastID stri
 		// a broadcast left live is worse than one left un-started, so this tries
 		// considerably harder before it stops. endOrphan already works this way;
 		// this is the same rule for the row that still exists.
-		if d.Lifecycle.GoLiveSentMS != 0 && !c.raiseLeftLive(d, broadcastID) {
+		if d.Lifecycle.GoLiveSentMS != 0 && !c.raiseLeftLive(d, broadcastID) { // NOSONAR go:S1871: a disabled row past twice the give-up budget and the unaired X broadcast on a switched-off destination that quietUnairedX keeps are different states with the same window-then-untrack body
 			return true
 		}
 		c.untrack(d.ID)

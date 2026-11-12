@@ -836,7 +836,7 @@ type rendition struct {
 // manager owns the one sampler and runs it. Nil is allowed and means this
 // engine publishes an empty host block on its telemetry frame, which is what a
 // test engine built outside a manager gets.
-func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker, sourceID int64, alloc *relay.PortAllocator, host *stats.Host) (*Engine, error) {
+func New(log *slog.Logger, cfg config.Config, store *db.DB, tools *ffmpeg.Tools, bus *events.Broker, sourceID int64, alloc *relay.PortAllocator, host *stats.Host) (*Engine, error) { // NOSONAR go:S107: the constructor takes each collaborator explicitly (eight parameters, logger to host stats); its nine call sites are manager.go, which passes the live port allocator and host stats, and eight test builds across five files that pass nil for both, so a params struct would only move the list
 	hub, err := relay.New(log, 0)
 	if err != nil {
 		return nil, err

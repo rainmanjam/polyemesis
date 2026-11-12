@@ -1791,6 +1791,22 @@ func (e *Engine) subscribeFeedPort(in *relay.Hub) (string, int, error) {
 	return url, port, nil
 }
 
+// relayFeedInput resolves the relay a feed of this kind copies from and
+// subscribes to it, returning the hub, the subscriber URL and the port. A kind
+// with no relay to read is an error here, which startFeed records on the tier
+// the same way as a failed subscribe.
+func (e *Engine) relayFeedInput(kind sourceKind) (*relay.Hub, string, int, error) {
+	in := e.downstreamFeedInput(kind)
+	if in == nil {
+		return nil, "", 0, fmt.Errorf("the %s source has no relay to read", kind)
+	}
+	url, port, err := e.subscribeFeedPort(in)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	return in, url, port, nil
+}
+
 // startFeed spawns the process that publishes one source into the selector's
 // hub. The caller must hold selMu.
 func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig string, now time.Time) *sourceFeed {
@@ -1838,11 +1854,7 @@ func (e *Engine) startFeed(s db.Settings, kind sourceKind, upstream, silenceSig 
 		// tier's timestamp offset. Re-reading the file here instead would put a
 		// second decoder on the same input and reset its timeline on every
 		// switch, which is the thing the offset exists to prevent.
-		in := e.downstreamFeedInput(kind)
-		if in == nil {
-			return fail(fmt.Errorf("the %s source has no relay to read", kind))
-		}
-		url, port, err := e.subscribeFeedPort(in)
+		in, url, port, err := e.relayFeedInput(kind)
 		if err != nil {
 			return fail(err)
 		}
@@ -2053,7 +2065,7 @@ func (e *Engine) stopOwn(f *sourceFeed) error {
 // detached reports that the replacement will start before the old child has
 // gone; done then closes once it has, its port included, and once the chain
 // behind it has too. stopErr is only known when detached is false.
-func (e *Engine) retireFeed(f *sourceFeed) (stopErr error, detached bool, done <-chan struct{}) {
+func (e *Engine) retireFeed(f *sourceFeed) (stopErr error, detached bool, done <-chan struct{}) { // NOSONAR go:S3776: teardown is one select loop over the process stop, the wake-grace and cap timers and the hop's woken channel, plus goroutines that finish the stop after a detach; splitting it would separate the timers from the channels they race
 	if f == nil {
 		return nil, false, nil
 	}
