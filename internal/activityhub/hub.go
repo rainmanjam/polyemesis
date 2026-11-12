@@ -34,8 +34,8 @@ import (
 	"github.com/rainmanjam/polyemesis/internal/events"
 )
 
-// Bus is the in-process event bus: *events.Broker.
-type Bus interface {
+// Publisher is the in-process event bus: *events.Broker.
+type Publisher interface {
 	Publish(t events.Type, data any)
 }
 
@@ -97,7 +97,7 @@ type Stats struct {
 type Option func(*Hub)
 
 // WithBus sets the bus the console and the events stream read.
-func WithBus(b Bus) Option { return func(h *Hub) { h.bus = b } }
+func WithBus(b Publisher) Option { return func(h *Hub) { h.bus = b } }
 
 // WithDisplay sets the alerts overlay's gate.
 func WithDisplay(d Display) Option { return func(h *Hub) { h.display = d } }
@@ -131,7 +131,7 @@ func WithBackoff(fn func(attempt int) time.Duration) Option { return func(h *Hub
 
 // Hub ingests, deduplicates, filters, remembers and fans out activity.
 type Hub struct {
-	bus      Bus
+	bus      Publisher
 	display  Display
 	hooks    Hooks
 	settings func() (db.ActivitySettings, error)
