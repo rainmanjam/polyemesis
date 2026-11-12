@@ -61,10 +61,10 @@ type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Source supplies the enabled hooks, with their secrets decrypted. An interface
+// Provider supplies the enabled hooks, with their secrets decrypted. An interface
 // rather than *db.DB so the package is testable without a database, and so an
 // edited hook is picked up without a restart.
-type Source interface {
+type Provider interface {
 	Hooks() ([]Hook, error)
 }
 
@@ -221,7 +221,7 @@ type worker struct {
 // reason.
 type Dispatcher struct {
 	log         *slog.Logger
-	src         Source
+	src         Provider
 	doer        Doer
 	now         func() time.Time
 	sleep       func(context.Context, time.Duration) bool
@@ -300,7 +300,7 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 
 // NewDispatcher builds a dispatcher. It does nothing until Run is called, which
 // is what lets main wire it before it has a context.
-func NewDispatcher(log *slog.Logger, src Source, opts ...Option) *Dispatcher {
+func NewDispatcher(log *slog.Logger, src Provider, opts ...Option) *Dispatcher {
 	d := &Dispatcher{
 		log:            log,
 		src:            src,

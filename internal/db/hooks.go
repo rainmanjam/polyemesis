@@ -113,7 +113,7 @@ func (d *DB) ListHooks(box *secrets.Box) ([]hooks.Hook, error) {
 	return d.queryHooks(box, hooksQuery)
 }
 
-// EnabledHooks returns the enabled hooks. It is what satisfies hooks.Source, so
+// EnabledHooks returns the enabled hooks. It is what satisfies hooks.Provider, so
 // the dispatcher never sees one that is switched off.
 func (d *DB) EnabledHooks(box *secrets.Box) ([]hooks.Hook, error) {
 	return d.queryHooks(box, hooksEnabledQuery)
