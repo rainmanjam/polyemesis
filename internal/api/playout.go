@@ -756,7 +756,7 @@ func (s *Server) playoutHandler() http.Handler {
 
 		h := resolve()
 		if h == nil {
-			w.Header().Set("Cache-Control", cacheNoStore)
+			w.Header().Set("Cache-Control", cacheNoStore) // NOSONAR go:S1192: internal/api/shape_derivation_test.go needs this header name as a literal at each use
 			writeError(w, http.StatusServiceUnavailable, "playout is not running")
 			return
 		}
