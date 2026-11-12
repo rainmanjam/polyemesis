@@ -92,7 +92,7 @@ func invalid(format string, a ...any) error {
 // the ends are trimmed. Invalid UTF-8 is replaced rather than passed on.
 func Clean(s string) string {
 	if !utf8.ValidString(s) {
-		s = strings.ToValidUTF8(s, "�")
+		s = strings.ToValidUTF8(s, "\uFFFD")
 	}
 	var b strings.Builder
 	space := false
