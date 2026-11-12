@@ -142,7 +142,7 @@ func (e *Engine) closeCaptionStage(capt *destCaption) {
 	e.seiStages.CompareAndDelete(capt.id, capt.stage)
 }
 
-// captionSink is the production CueSink. The CueRouter calls Deliver from its
+// captionSink is the production CueReceiver. The CueRouter calls Deliver from its
 // timers, so it only looks the stage up and queues the text. It takes no engine
 // lock, which keeps it clear of the lock order the reconcile path holds.
 type captionSink struct{ e *Engine }
