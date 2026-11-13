@@ -1,0 +1,150 @@
+<!doctype html>
+<!-- Link-preview card template, 1200x630. Rendered by scripts/build-og.mjs; open it by hand
+     with ?d=<url-encoded JSON of one OG_CARDS entry> to look at a single card.
+
+     OFFLINE ON PURPOSE. Fonts are the site's own files in ../public/fonts, loaded by relative
+     file URL; there is no script, stylesheet or image from anywhere else, so the generator
+     works with no network and renders the same bytes every time. Colours are the site tokens
+     (web/src/styles/global.css). No gradients, no shadows, no noise: flat fills keep each PNG
+     well under the 150,000-byte budget. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>polyemesis link-preview card</title>
+<style>
+@font-face{font-family:"Bricolage Grotesque";src:url("../public/fonts/bricolage-grotesque.woff2") format("woff2");font-weight:200 800}
+@font-face{font-family:"JetBrains Mono";src:url("../public/fonts/jetbrains-mono.woff2") format("woff2");font-weight:400 500}
+@font-face{font-family:"Instrument Serif";src:url("../public/fonts/instrument-serif-italic.woff2") format("woff2");font-style:italic;font-weight:400}
+:root{
+  --bg:#07080a; --panel:#0c0e12; --ink:#ece9e2; --dim:#8b8f97; --faint:#4a4e56;
+  --line:#1f2228; --edge:#2a2e36; --accent:#ff5a3c;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --serif:"Instrument Serif",serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1200px;height:630px;background:var(--bg);overflow:hidden}
+html.social,html.social body{width:1280px;height:640px}
+.card{position:absolute;left:0;top:0;width:1200px;height:630px;background:var(--bg);color:var(--ink);overflow:hidden}
+html.social .card{left:40px;top:5px}
+/* a flat 1px frame so the card reads as an object when a chat app puts it on its own dark ground */
+.card::after{content:"";position:absolute;inset:0;border:1px solid var(--line);pointer-events:none}
+html.social .card::after{display:none}
+
+.head{position:absolute;left:60px;right:60px;top:52px;height:44px;display:flex;align-items:center;gap:22px;white-space:nowrap}
+.mark{font:700 42px/1 var(--display);letter-spacing:-.035em;color:var(--ink)}
+.mark i{font-style:normal;color:var(--accent)}
+.eyebrow{font:500 20px/1 var(--mono);letter-spacing:.08em;color:var(--dim);text-transform:uppercase;display:flex;align-items:center;gap:20px}
+.eyebrow::before{content:"";width:1px;height:26px;background:var(--edge);display:block}
+.domain{margin-left:auto;font:400 20px/1 var(--mono);color:var(--dim)}
+
+.body{position:absolute;left:60px;right:60px;top:140px;bottom:56px;display:flex}
+h1{font-family:var(--display);font-weight:700;letter-spacing:-.03em;word-spacing:.02em;line-height:1;color:var(--ink);text-wrap:balance}
+h1 em{font-family:var(--serif);font-style:italic;font-weight:400;color:var(--accent);letter-spacing:-.01em;font-size:1.12em;line-height:.8}
+.sub{font:400 26px/1.35 var(--display);color:var(--dim);margin-top:26px;max-width:1040px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+
+.side{flex-direction:row;gap:40px}
+.side .txt{flex:0 0 600px;display:flex;flex-direction:column;justify-content:flex-end}
+.side .vis{flex:1;display:flex;align-items:flex-end;justify-content:flex-end}
+.stack{flex-direction:column;justify-content:space-between}
+.stack .txt{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:flex-start;padding-top:6px}
+.stack .vis{flex:none;margin-top:22px}
+.text{flex-direction:column;justify-content:flex-end}
+.text .txt{width:1080px}
+
+/* the install command */
+.term{border:1px solid var(--edge);background:var(--panel);width:100%}
+.term .bar{height:42px;border-bottom:1px solid var(--edge);display:flex;align-items:center;padding:0 18px;font:400 20px/1 var(--mono);color:var(--dim)}
+.term pre{font:400 26px/1.5 var(--mono);color:var(--ink);padding:16px 22px 18px;white-space:pre}
+.term .p{color:var(--accent)}
+
+/* destinations and the mix each receives (illustrative names) */
+.tbl{border:1px solid var(--edge);background:var(--panel);width:100%;font:400 18px/1 var(--mono)}
+.tbl .r{display:grid;align-items:center;height:38px;border-top:1px solid var(--edge);padding:0 20px;color:var(--ink)}
+.tbl .r:first-child{border-top:0;color:var(--dim);height:40px}
+.tbl .r span:not(:first-child){display:flex;align-items:center;gap:10px}
+.tbl .on::before,.tbl .off::before{content:"";width:14px;height:14px;display:block}
+.tbl .on::before{background:var(--accent)}
+.tbl .off::before{border:2px solid var(--faint)}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="head"><span class="mark">polyemesis<i>.</i></span><span class="eyebrow" id="eyebrow"></span><span class="domain">polyemesis.com</span></div>
+  <div class="body" id="body"><div class="txt" id="txt"><h1 id="h1"></h1><p class="sub" id="sub"></p></div><div class="vis" id="vis"></div></div>
+</div>
+<script>
+const card = JSON.parse(new URLSearchParams(location.search).get('d') || '{}');
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+if (card.social) document.documentElement.classList.add('social');
+
+// headline, with one accent word set in the serif italic
+let t = esc(card.title || '');
+if (card.accent) t = t.replace(esc(card.accent), '<em>' + esc(card.accent) + '</em>');
+document.getElementById('h1').innerHTML = t;
+const eyebrow = document.getElementById('eyebrow');
+if (card.eyebrow) eyebrow.textContent = card.eyebrow; else eyebrow.remove();
+const subEl = document.getElementById('sub');
+if (card.sub) subEl.textContent = card.sub; else subEl.remove();
+
+const V = {};
+// one source, a video line and an audio line to each of five language chips
+V.diagram = () => {
+  const langs = ['English', 'Español', 'Português', 'Français', 'Arabic'];
+  const cx = 258, cw = 172, ch = 56, gap = 22, sy = 2 * (ch + gap) + ch / 2;
+  let svg = `<svg width="430" height="446" viewBox="0 0 430 446" xmlns="http://www.w3.org/2000/svg" font-family="JetBrains Mono, monospace" font-size="20">`;
+  svg += `<rect x="1" y="${sy - 52}" width="100" height="104" fill="#0c0e12" stroke="#4a4e56" stroke-width="1.5"/>`;
+  svg += `<text x="51" y="${sy + 7}" fill="#ece9e2" text-anchor="middle">source</text>`;
+  let video = '', audio = '';
+  langs.forEach((l, i) => {
+    const y = i * (ch + gap) + ch / 2;
+    video += `<path d="M101 ${sy - 14} C 180 ${sy - 14}, 180 ${y - 9}, ${cx} ${y - 9}" fill="none" stroke="#ece9e2" stroke-width="2.5"/>`;
+    audio += `<path d="M101 ${sy + 14} C 160 ${sy + 14}, 200 ${y + 9}, ${cx} ${y + 9}" fill="none" stroke="#ff5a3c" stroke-width="2.5"/>`;
+    svg += `<rect x="${cx}" y="${i * (ch + gap)}" width="${cw}" height="${ch}" fill="#0c0e12" stroke="#4a4e56" stroke-width="1.5"/>`;
+    svg += `<text x="${cx + 18}" y="${y + 7}" fill="#ece9e2">${l}</text>`;
+  });
+  svg += video + audio;
+  const ly = 424;
+  svg += `<line x1="1" y1="${ly}" x2="49" y2="${ly}" stroke="#ece9e2" stroke-width="2.5"/><text x="62" y="${ly + 7}" fill="#8b8f97">video</text>`;
+  svg += `<line x1="170" y1="${ly}" x2="218" y2="${ly}" stroke="#ff5a3c" stroke-width="2.5"/><text x="231" y="${ly + 7}" fill="#8b8f97">audio</text>`;
+  return svg + `</svg>`;
+};
+V.command = () => `<div class="term"><div class="bar">docker run</div><pre><span class="p">$</span> ${esc(card.command || '')}</pre></div>`;
+// The grid comes in as card data (from the site's sports example in src/data/cases.mjs).
+V.table = () => {
+  const t = card.table || { columns: [], rows: [] };
+  const cols = `grid-template-columns:1fr repeat(${t.columns.length},114px)`;
+  const head = `<div class="r" style="${cols}"><span>destination</span>${t.columns.map((c) => `<span>${esc(c)}</span>`).join('')}</div>`;
+  const rows = t.rows.map((r) => `<div class="r" style="${cols}"><span>${esc(r.name)}</span>${r.cells.map((x) => `<span class="${x ? 'on' : 'off'}"></span>`).join('')}</div>`).join('');
+  return `<div class="tbl">${head}${rows}</div>`;
+};
+V.none = () => '';
+
+const layout = { diagram: 'side', command: 'stack', table: 'stack', none: 'text' }[card.visual] || 'text';
+const body = document.getElementById('body');
+body.classList.add(layout);
+const visEl = document.getElementById('vis');
+const visHtml = V[card.visual] ? V[card.visual]() : '';
+if (visHtml) visEl.innerHTML = visHtml; else visEl.remove();
+
+// fit: the largest headline size (stepping by 2px) whose headline and sub line stay inside the text box
+const MAX = { side: 96, stack: 112, text: 132 }[layout];
+function fit() {
+  const h1 = document.getElementById('h1');
+  const limitW = layout === 'side' ? 600 : 1080;
+  const box = layout === 'stack' ? body.clientHeight - visEl.offsetHeight - 28 : body.clientHeight;
+  let size = MAX;
+  h1.style.fontSize = size + 'px';
+  const over = () => {
+    const subH = subEl.isConnected ? subEl.offsetHeight + 26 : 0;
+    return h1.scrollWidth > limitW + 1 || h1.offsetHeight + subH > box + 1;
+  };
+  while (over() && size > 40) { size -= 2; h1.style.fontSize = size + 'px'; }
+  document.documentElement.dataset.fit = String(size);
+  document.documentElement.dataset.clamped = String(subEl.isConnected && subEl.scrollHeight > subEl.clientHeight + 1);
+  document.documentElement.dataset.overflow = String(over());
+}
+document.fonts.ready.then(() => { fit(); document.documentElement.dataset.ready = '1'; });
+</script>
+</body>
+</html>

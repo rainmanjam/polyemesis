@@ -2,7 +2,9 @@
  * encoder drops. It is a diagram, not telemetry, so the log has no timestamps
  * and the copy says so (aria-label "Event log, illustrative").
  *
- * The root is [data-failover]. Markup contract (Recovery.astro owns it):
+ * The root is the feature tour's failover panel, [data-panel="failover"]
+ * (panels.ts passes it in; this module reads only inside the root it is given).
+ * Markup contract (FeatureTour.astro owns it):
  *   [data-fo-controls]      hidden in the server render, shown here, so no
  *                           control sits on the page doing nothing before JS
  *   button[data-stage="i"]  one per stage, steppable by hand

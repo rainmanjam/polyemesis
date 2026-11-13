@@ -5,7 +5,15 @@ import { createMotionGate, whileVisible } from "./motion";
 
 type MQL = { matches: boolean; listeners: Array<(e: { matches: boolean }) => void> };
 let mql: MQL;
-let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null;
+type FakeEntry = {
+  isIntersecting: boolean;
+  intersectionRatio: number;
+  boundingClientRect?: { height: number };
+  intersectionRect?: { height: number };
+  rootBounds?: { height: number } | null;
+};
+let ioCallback: ((entries: FakeEntry[]) => void) | null;
+let ioOptions: IntersectionObserverInit | undefined;
 let ioDisconnect: () => void;
 const original = {
   matchMedia: window.matchMedia,
@@ -17,8 +25,17 @@ function setReduced(matches: boolean) {
   mql.matches = matches;
   for (const l of [...mql.listeners]) l({ matches });
 }
-function intersect(isIntersecting: boolean) {
-  ioCallback!([{ isIntersecting }]);
+function intersect(isIntersecting: boolean, intersectionRatio = isIntersecting ? 1 : 0, extra: Partial<FakeEntry> = {}) {
+  ioCallback!([
+    {
+      isIntersecting,
+      intersectionRatio,
+      boundingClientRect: { height: 100 },
+      intersectionRect: { height: 100 * intersectionRatio },
+      rootBounds: { height: 1000 },
+      ...extra,
+    },
+  ]);
 }
 function setVisibility(state: "visible" | "hidden") {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
@@ -40,8 +57,9 @@ beforeEach(() => {
     },
   })) as unknown as typeof window.matchMedia;
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-    constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+    constructor(cb: (entries: FakeEntry[]) => void, options?: IntersectionObserverInit) {
       ioCallback = cb;
+      ioOptions = options;
     }
     observe() {}
     unobserve() {}
@@ -190,5 +208,49 @@ describe("whileVisible", () => {
     gate.setUserPaused(true);
     gate.setUserPaused(false);
     expect(start).toHaveBeenCalledTimes(2);
+  });
+
+  it("honours its threshold: a sliver on screen is not visible enough", () => {
+    const gate = createMotionGate(window);
+    const start = vi.fn();
+    const stop = vi.fn();
+    whileVisible(document.createElement("div"), gate, start, stop, 0.5);
+    expect(ioOptions?.threshold).toEqual(expect.arrayContaining([0, 0.5]));
+    intersect(true, 0.1);
+    expect(start).not.toHaveBeenCalled();
+    intersect(true, 0.5);
+    expect(start).toHaveBeenCalledTimes(1);
+    intersect(true, 0.3);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("a block taller than the viewport counts once it fills the threshold of the viewport height", () => {
+    const gate = createMotionGate(window);
+    const start = vi.fn();
+    const stop = vi.fn();
+    whileVisible(document.createElement("div"), gate, start, stop, 0.5);
+    const tall = (inter: number) => ({
+      boundingClientRect: { height: 3000 },
+      intersectionRect: { height: inter },
+      rootBounds: { height: 800 },
+    });
+    intersect(true, 150 / 3000, tall(150)); // 150 of 800 px: not yet
+    expect(start).not.toHaveBeenCalled();
+    intersect(true, 400 / 3000, tall(400)); // half the viewport height
+    expect(start).toHaveBeenCalledTimes(1);
+    intersect(true, 100 / 3000, tall(100));
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("a short block does not take the tall-block rule", () => {
+    const gate = createMotionGate(window);
+    const start = vi.fn();
+    whileVisible(document.createElement("div"), gate, start, vi.fn(), 0.5);
+    intersect(true, 0.2, {
+      boundingClientRect: { height: 300 },
+      intersectionRect: { height: 60 },
+      rootBounds: { height: 1000 },
+    });
+    expect(start).not.toHaveBeenCalled();
   });
 });

@@ -73,7 +73,21 @@ export function createMotionGate(win: Window = window): OwnedMotionGate {
   };
 }
 
-/* Runs `start` only while the element is on screen, the gate allows motion and
+/* Is the observed element on screen enough? IntersectionObserver's
+ * isIntersecting is true from the first pixel, so the threshold is applied here:
+ * the visible share of the element must reach it, or, for a block taller than the
+ * viewport (whose share can never get there), the visible part must fill that
+ * share of the viewport's height. */
+function visibleEnough(entry: IntersectionObserverEntry, threshold: number, viewportHeight: number): boolean {
+  if (!entry.isIntersecting) return false;
+  if (entry.intersectionRatio >= threshold) return true;
+  const viewport = entry.rootBounds?.height ?? viewportHeight;
+  const tall = viewport > 0 && entry.boundingClientRect.height > viewport;
+  return tall && entry.intersectionRect.height >= threshold * viewport;
+}
+
+/* Runs `start` only while the element is on screen (at least `threshold` of it,
+ * see visibleEnough), the gate allows motion and
  * the tab is visible; `stop` otherwise. Calls are edge-triggered, so start and
  * stop strictly alternate and `stop` is never called before the first `start`.
  * Returns a disposer that stops (if running) and detaches every listener. */
@@ -99,10 +113,11 @@ export function whileVisible(
   const io = new IntersectionObserver(
     (entries) => {
       const last = entries.at(-1);
-      if (last) intersecting = last.isIntersecting;
+      if (last) intersecting = visibleEnough(last, threshold, doc.defaultView?.innerHeight ?? 0);
       update();
     },
-    { threshold },
+    /* The grid lets a block taller than the viewport be re-judged as it scrolls. */
+    { threshold: [...new Set([0, threshold, ...Array.from({ length: 20 }, (_, i) => (i + 1) / 20)])].sort((a, b) => a - b) },
   );
   io.observe(el);
   const unsub = gate.subscribe(update);

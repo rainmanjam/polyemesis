@@ -54,7 +54,10 @@ const TOLERANCE = 1;
  * another. Change a number alongside the markup change that adds or removes a
  * grid. */
 const REQUIRED = {
-  "/": 2,
+  // 0 is falsy, so the count check at `REQUIRED[route] && ...` is SKIPPED for the homepage: it is still visited
+  // and every other layout check runs on it, but "exactly zero .card-grid" is not asserted. (The 2026-11
+  // homepage has its own section layouts and no .card-grid; this is ruling-backed, not an assertion of zero.)
+  "/": 0,
   "/features": 1,
   "/comparison": 3,
   "/download": 1,

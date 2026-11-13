@@ -99,21 +99,22 @@ The rules that matter:
   `--card` it fails AA besides. The lamp's L 56.5% is the lightest a white label
   survives: at L 63.5% white measures 3.67. (The home page has one marketing
   exception, the bullet below.)
-- **Marketing exception, the home page only.** This is a deliberate exception
-  to the rule above. The owner decided it on 2026-11-10 ("Keep the red"). The
-  app's rule is unchanged, and the logo is unchanged.
-  - `.btn-onair` (a `--tally` fill under `--tally-foreground`, 4.97:1) is the
-    homepage's primary CTA, Install included. The on-air lamp, the how-it-works
-    rail and the step pips are tally fills too.
-  - Tally is still never ink. The Nav, the other pages and the console keep the
-    blue `--primary`.
+- **Marketing exception, the website.** This is a deliberate exception to the
+  rule above. The owner decided on 2026-11-12 that the site's primary action is
+  the coral accent (`--color-accent` `#ff5a3c` under `--color-accent-ink`),
+  superseding the 2026-11-10 on-air-red decision. The app's rule is unchanged,
+  and the logo is unchanged.
+  - Coral means audio and the primary action, never decoration and never a
+    status colour. The Nav, the console and the app keep the blue `--primary`.
+  - The console's `--down` is close to the site accent. Console footage on the
+    site must caption a failed state rather than rely on the colour.
   - The upload meter's over-limit bar uses `--down`, because "over your upload"
     is a failure state, not decoration.
 - **Blue is interaction only:** links, focus and the primary button. Blue is
   never a state, a chart series or decoration. `--primary` is **fill-only**
   (buttons, checked controls, a lit crosspoint); every blue that is text is
   `--primary-bright`, because `--primary` as text measures 4.49:1 on `--card`.
-  On the home page the primary CTA is the tally `.btn-onair` instead; see the
+  On the website the primary CTA is the coral accent instead; see the
   Marketing exception above.
 - **Amber means warn only.** It is not a meter stop and not a crosspoint. The
   meter is green, yellow and red; the website's lit crosspoint reads `--primary`.
@@ -277,15 +278,15 @@ while the control is enabled.
 ### Typefaces
 
 Two shared families, and both halves of the product load the same two files.
-The website adds Space Grotesk for display and IBM Plex Serif Italic for one
+The website adds Bricolage Grotesque for display and Instrument Serif Italic for one
 emphasis word on the homepage. Both are website-only.
 
 | Token | Family | Served from |
 |---|---|---|
 | `--font-sans` | IBM Plex Sans | `ui/public/fonts/` and `web/public/fonts/` |
 | `--font-mono` | JetBrains Mono | `ui/public/fonts/` and `web/public/fonts/` |
-| `--font-display` | Space Grotesk | `web/public/fonts/` only |
-| `--font-accent` | IBM Plex Serif Italic, stack `"IBM Plex Serif", serif` | `web/public/fonts/` only, not preloaded |
+| `--font-display` | Bricolage Grotesque | `web/public/fonts/` only |
+| `--font-accent` | Instrument Serif Italic, stack `"Instrument Serif", serif` | `web/public/fonts/` only, not preloaded |
 
 Self-hosted woff2, one variable file per family subset to latin, with
 `font-display: swap`. Not a CDN link: a font request to a third party is a
@@ -309,13 +310,15 @@ Plex and JetBrains Mono under `:root:lang(…)`. A CJK subset worth shipping is
 several megabytes per script, and every desktop OS an operator runs the
 console on carries one.
 
-The website also carries **Space Grotesk** for marketing headlines. The console
-has no display type — its largest step is `--text-display`, a 28px page title —
-so it does not ship that file.
+The website also carries **Bricolage Grotesque** for marketing headlines. The
+console has no display type — its largest step is `--text-display`, a 28px page
+title — so it does not ship that file. It is the latin, weight-axis variable
+file from `@fontsource-variable/bricolage-grotesque` 5.3.0 (41,344 bytes),
+served from `web/public/fonts/` only.
 
-The website also carries **IBM Plex Serif Italic** for the one emphasis word in
-the homepage headline. It is the unmodified Latin-1 split file from the OFL
-release (`@ibm/plex-serif` 2.0.0), about 24 KB (24,512 bytes), served from
+The website also carries **Instrument Serif Italic** for at most one emphasis
+word per heading. It is the unmodified latin 400 italic file from
+`@fontsource/instrument-serif` 5.3.0 (22,128 bytes), served from
 `web/public/fonts/` only and not preloaded. Its fallback is the generic
 `serif`.
 
@@ -435,12 +438,7 @@ the value rather than left to a reader to infer:
 |---|---|
 | `--color-cohost`, `--color-game` | Track colours for legend chips. A track is a label, not a state, so none may read a signal token (`--color-meter`, the mic chip, now reads the shared identity token `--cat-cyan`; it used to borrow `--armed`, which went grey). `--color-cohost` sat 9.5° from the meter's yellow. Co-host is a magenta chosen for distance from every signal, meter and track colour (nearest: `--color-game`, ΔEOK 0.18) |
 | `--color-primary-bright`, `--font-display`, `--motion-enter`, `--ease-breath` | Site-only; the console has nothing for them to do |
-
-Two site tokens read an app token of a **different name**, because the names
-collide and the meanings do not. `--color-surface` is a card fill, so it reads
-`--card` rather than the app's `--surface`, which is a page. `--color-muted` is
-secondary text, so it reads `--muted-foreground` rather than the app's `--muted`,
-which is a slider track.
+| `--color-ink` `#07080a`, `--color-surface` `#0c0e12`, `--color-raised` `#11141a`, `--color-line` `#1f2228`, `--color-line-strong` `#2a2e36`, `--color-fg` `#ece9e2`, `--color-muted` `#8b8f97`, `--color-faint` `#4a4e56`, `--color-accent` `#ff5a3c`, `--color-accent-ink` `#120503` | Site layer: the marketing site is darker and warmer than the console; status colours stay shared |
 
 `--color-cross`, the lit crosspoint on the site's patchbay, reads `--primary`
 (and `--color-cross-dim` reads `--primary-dim`). It used to be a literal kept
@@ -475,9 +473,9 @@ Structure, taken from the four sites above, which agree almost exactly:
 - Thin announcement bar, accent background, one sentence, one link
 - Near-black hero, headline at two lines maximum
 - One-line subhead that says what it *is*, not what it *enables*
-- Filled primary CTA plus an outlined secondary — never two filled. On the home
-  page the filled CTA is the `.btn-onair` tally fill (see the Marketing exception
-  under Colour).
+- Filled primary CTA plus an outlined secondary — never two filled. On the
+  website the filled CTA is the coral accent (see the Marketing exception under
+  Colour).
 - Below the fold: **the product**, either a live meter or a real screenshot
 
 The hero is the split diagram: one feed goes out as untouched video plus a mix

@@ -1,302 +1,144 @@
-/* Hero behaviour: story tabs, destination solo, the live status line.
+/* Hero behaviour: the case tabs, the fine print and the auto-advance.
  *
- * The server renders every story panel and the destinations as plain divs, so
- * the page reads without script. This upgrades it: it reveals the tablist and
- * Pause, swaps each destination div for a button, and wires the rest. Pause
- * itself is wired by boot() alone, so it is bound exactly once per page. */
-import { STORIES, STORY_ORDER, statusFor, type Dest, type StoryKey } from "./stories";
+ * The server renders every case panel (only the first visible) and the first
+ * case's fine print, so the page is complete without this. This wires the tabs
+ * through the shared controller, keeps [data-fine] on the current case, and
+ * steps through the cases every 12 s while motion is allowed and the hero is on
+ * screen; the same gate moves the level meters and the ON AIR clock. The first pointer or key press inside the hero ends the stepping for
+ * good: the visitor has taken over. Pause itself is wired by boot() alone.
+ *
+ * Each change is announced as a `case:change` event on the root. The globe
+ * replaces the poster inside [data-globe]: its module (and three.js with it) is
+ * imported only once the box is near the viewport, which is after boot has run,
+ * so the poster is what paints first. This file forwards each change to it. */
+import { CASES, CASE_ORDER } from "../../data/cases.mjs";
+import { initTabs } from "../tabs";
+import { clockText, meterLevel } from "./hero-model";
+import { whenNear } from "./lazy";
 import { whileVisible, type MotionGate } from "./motion";
+import type { Case } from "./globe";
 
-export interface HeroController {
-  story(): StoryKey;
-  setStory(k: StoryKey): void;
-  solo(id: string | null): void;
-  destroy(): void;
-}
+const ADVANCE_MS = 12_000;
+const METER_MS = 100;
+/* Meters are numbered by destination within a case (every case has five). */
+const DESTS = 5;
 
-const SWAP_MS = 150;
+export function initHero(root: HTMLElement, gate: MotionGate): () => void {
+  const tablist = root.querySelector<HTMLElement>("[data-case-tabs]");
+  if (!tablist) return () => {};
+  const fine = root.querySelector<HTMLElement>("[data-fine]");
 
-/** Marks the destination buttons: the solo'd or previewed one, and the pinned one for aria-pressed. */
-function markDests(panel: HTMLElement, dest: Dest | undefined, pinned: string | null): void {
-  for (const el of panel.querySelectorAll<HTMLElement>(".dest")) {
-    const id2 = el.dataset.dest;
-    el.classList.toggle("is-solo", !!dest && id2 === dest.id);
-    el.classList.toggle("dim", !!dest && id2 !== dest.id);
-    el.setAttribute("aria-pressed", pinned !== null && id2 === pinned ? "true" : "false");
-  }
-}
+  let current: string = CASE_ORDER[0];
+  let tabs: ReturnType<typeof initTabs> | null = null;
 
-/** Dims the flow lines that do not carry the solo'd destination. */
-function dimLines(panel: HTMLElement, dest: Dest | undefined, silent: (src: number) => boolean): void {
-  for (const el of panel.querySelectorAll<SVGElement>(".ln")) {
-    const from = el.dataset.from ?? "";
-    const to = el.dataset.to ?? "";
-    let dim = false;
-    if (dest) dim = from === "hub" ? to !== dest.id : silent(Number(from));
-    el.classList.toggle("dim", dim);
-  }
-}
+  const onSelect = (key: string) => {
+    current = key;
+    // textContent, never innerHTML: the string is data, not markup.
+    const text = (CASES as Record<string, { fine: string } | undefined>)[key]?.fine;
+    if (fine && text !== undefined) fine.textContent = text;
+    root.dispatchEvent(new CustomEvent("case:change", { detail: { key } }));
+  };
+  tabs = initTabs(tablist, onSelect);
 
-/** A destination div becomes a button: same classes, children, data-* and box;
- * the accessible name moves from data-label to aria-label. */
-export function upgradeToButton(el: HTMLElement): HTMLButtonElement {
-  const btn = el.ownerDocument.createElement("button");
-  for (const a of Array.from(el.attributes)) btn.setAttribute(a.name, a.value);
-  btn.type = "button";
-  btn.setAttribute("aria-pressed", "false");
-  const label = el.dataset.label;
-  if (label !== undefined) btn.setAttribute("aria-label", label);
-  while (el.firstChild) btn.appendChild(el.firstChild);
-  el.replaceWith(btn);
-  return btn;
-}
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let taken = false; // the visitor has used the hero: no more stepping
 
-export function initHero(root: HTMLElement, gate: MotionGate): HeroController {
-  const doc = root.ownerDocument;
-  const ac = new AbortController();
-  const { signal } = ac;
+  const clearAdvance = () => {
+    if (timer !== undefined) clearInterval(timer);
+    timer = undefined;
+  };
+  const startAdvance = () => {
+    if (taken || timer !== undefined) return;
+    timer = setInterval(() => {
+      const next = CASE_ORDER[(CASE_ORDER.indexOf(current as (typeof CASE_ORDER)[number]) + 1) % CASE_ORDER.length];
+      tabs?.select(next);
+    }, ADVANCE_MS);
+  };
 
-  const tablist = root.querySelector<HTMLElement>("[data-story-tabs]");
-  const pause = root.querySelector<HTMLElement>("[data-pause]");
-  const statusEl = root.querySelector<HTMLElement>("[data-status]");
-  const fineEl = root.querySelector<HTMLElement>("[data-fine]");
-  const tabs = new Map<StoryKey, HTMLElement>();
-  const panels = new Map<StoryKey, HTMLElement>();
-  for (const k of STORY_ORDER) {
-    const tab = root.querySelector<HTMLElement>(`#tab-${k}`);
-    const panel = root.querySelector<HTMLElement>(`#panel-${k}`);
-    if (tab) tabs.set(k, tab);
-    if (panel) panels.set(k, panel);
-  }
-  const keys = STORY_ORDER.filter((k) => tabs.has(k) && panels.has(k));
-
-  if (tablist) tablist.hidden = false;
-  if (pause) pause.hidden = false;
-  for (const el of root.querySelectorAll<HTMLElement>(".dest")) {
-    if (el.tagName !== "BUTTON") upgradeToButton(el);
-  }
-
-  let story: StoryKey = keys.find((k) => !panels.get(k)?.hidden) ?? keys[0] ?? "streamer";
-  let pinned: string | null = null;
-  let preview: string | null = null;
-  let stopVisible: (() => void) | null = null;
-  let swapTimer: ReturnType<typeof setTimeout> | null = null;
-  let finishSwap: (() => void) | null = null;
-
-  const panelOf = (k: StoryKey) => panels.get(k);
-
-  /** Selected state and roving tabindex follow `story`. */
-  function syncTabs() {
-    for (const key of keys) {
-      const t = tabs.get(key);
-      t?.setAttribute("aria-selected", String(key === story));
-      t?.setAttribute("tabindex", key === story ? "0" : "-1");
+  /* The meters and the ON AIR clock: a picture of the product, moving only
+   * while the gate allows. Stopping freezes them where they are; the server
+   * markup is the fixed, complete state with motion off. The time is a counter
+   * we advance ourselves, so the motion is a pure function of ticks. */
+  const meters = [...root.querySelectorAll<HTMLElement>("[data-meter]")];
+  const clocks = [...root.querySelectorAll<HTMLElement>("[data-clock]")];
+  let meterTimer: ReturnType<typeof setInterval> | undefined;
+  let clockTimer: ReturnType<typeof setInterval> | undefined;
+  let t = 0;
+  let seconds = 0;
+  const startMotion = () => {
+    if (meterTimer === undefined && meters.length) {
+      meterTimer = setInterval(() => {
+        t += METER_MS / 1000;
+        meters.forEach((m, i) => {
+          m.style.transform = `scaleX(${meterLevel(i % DESTS, t).toFixed(3)})`;
+        });
+      }, METER_MS);
     }
-  }
-
-  function bindVisibility() {
-    stopVisible?.();
-    stopVisible = null;
-    const dg = panelOf(story)?.querySelector<HTMLElement>(".dg");
-    if (!dg) return;
-    stopVisible = whileVisible(
-      dg,
-      gate,
-      () => dg.classList.add("is-playing"),
-      () => dg.classList.remove("is-playing"),
-    );
-  }
-
-  function writeStatus(name: string | null, text: string) {
-    if (!statusEl) return;
-    statusEl.replaceChildren();
-    if (name !== null) {
-      const b = doc.createElement("b");
-      b.textContent = name;
-      statusEl.append(b, doc.createTextNode(` ${text}`));
-    } else {
-      statusEl.textContent = text;
+    if (clockTimer === undefined && clocks.length) {
+      clockTimer = setInterval(() => {
+        seconds += 1;
+        for (const el of clocks) el.textContent = clockText(seconds);
+      }, 1000);
     }
-  }
+  };
+  const stopMotion = () => {
+    if (meterTimer !== undefined) clearInterval(meterTimer);
+    if (clockTimer !== undefined) clearInterval(clockTimer);
+    meterTimer = clockTimer = undefined;
+  };
 
-  /** Repaint the visible diagram and status for the current pin or preview. */
-  function render() {
-    const s = STORIES[story];
-    const id = pinned ?? preview;
-    const dest = id === null ? undefined : s.dests.find((d) => d.id === id);
-    const panel = panelOf(story);
-    const st = statusFor(s, dest ? dest.id : null, !dest);
-    writeStatus(st.name, st.text);
-    if (!panel) return;
+  const start = () => {
+    startAdvance();
+    startMotion();
+  };
+  const stop = () => {
+    clearAdvance();
+    stopMotion();
+  };
+  const unwatch = whileVisible(root, gate, start, stop);
 
-    markDests(panel, dest, pinned);
-    const silent = (src: number) => !!dest && (src === 0 ? !dest.video : dest.mix[src - 1] === 0);
-    for (const el of panel.querySelectorAll<HTMLElement>(".si")) {
-      el.classList.toggle("dim", silent(Number(el.dataset.src)));
-    }
-    dimLines(panel, dest, silent);
-  }
+  /* The globe. The case can change while the module is still loading, so the
+   * handle is told the current case once it exists; and a globe that arrives
+   * after the disposer ran is destroyed on arrival. */
+  const caseOf = (key: string) => (CASES as Record<string, Case>)[key];
+  const globeEl = root.querySelector<HTMLElement>("[data-globe]");
+  let globe: Awaited<ReturnType<typeof import("./globe").mountGlobe>> | null = null;
+  let disposed = false;
+  const unnear = globeEl
+    ? whenNear(globeEl, async () => {
+        const first = current;
+        const { mountGlobe } = await import("./globe");
+        const g = await mountGlobe(globeEl, gate, caseOf(first));
+        if (disposed) {
+          g.destroy();
+          return;
+        }
+        globe = g;
+        if (current !== first) g.setCase(caseOf(current));
+      })
+    : () => {};
+  const onCase = (e: Event) => globe?.setCase(caseOf((e as CustomEvent<{ key: string }>).detail.key));
+  root.addEventListener("case:change", onCase);
 
-  function solo(id: string | null) {
-    pinned = id;
-    preview = null;
-    render();
-  }
+  const takeOver = (e: Event) => {
+    /* Pause lives inside the hero but is a page control, not a visitor taking
+     * the cases over: pressing it must not end the auto-advance for good. */
+    if (e.target instanceof Element && e.target.closest("[data-pause]")) return;
+    taken = true;
+    clearAdvance();
+  };
+  const events = ["pointerdown", "keydown", "click"] as const;
+  for (const e of events) root.addEventListener(e, takeOver);
 
-  function setStory(k: StoryKey) {
-    // Re-selecting the story on show changes nothing, so a pin survives it.
-    if (!keys.includes(k) || k === story) return;
-    finishSwap?.();
-    const prev = story;
-    pinned = null;
-    preview = null;
-    story = k;
-    syncTabs();
-    if (fineEl) fineEl.textContent = STORIES[k].fine;
-    stopVisible?.();
-    stopVisible = null;
-
-    const from = panelOf(prev);
-    const to = panelOf(k);
-    const done = () => {
-      if (swapTimer !== null) clearTimeout(swapTimer);
-      swapTimer = null;
-      finishSwap = null;
-      if (from) {
-        from.classList.remove("swap-out");
-        from.inert = false;
-        from.hidden = true;
-      }
-      for (const key of keys) {
-        const p = panelOf(key);
-        if (p && key !== k) p.hidden = true;
-      }
-      if (to) to.hidden = false;
-      render();
-      bindVisibility();
-    };
-    if (gate.allowed() && from) {
-      // The fading panel takes no clicks: its destinations share ids with the
-      // incoming story's, so a click there would pin one in the new story.
-      from.inert = true;
-      from.classList.add("swap-out");
-      finishSwap = done;
-      swapTimer = setTimeout(done, SWAP_MS);
-    } else {
-      done();
-    }
-  }
-
-  // Tabs: roving tabindex, arrows wrap, Home/End jump, activation follows focus.
-  for (const [k, tab] of tabs) {
-    tab.addEventListener("click", () => setStory(k), { signal });
-    tab.addEventListener(
-      "keydown",
-      (e) => {
-        const i = keys.indexOf(k);
-        let next: number | null = null;
-        if (e.key === "ArrowRight") next = (i + 1) % keys.length;
-        else if (e.key === "ArrowLeft") next = (i - 1 + keys.length) % keys.length;
-        else if (e.key === "Home") next = 0;
-        else if (e.key === "End") next = keys.length - 1;
-        if (next === null) return;
-        e.preventDefault();
-        const target = keys[next];
-        tabs.get(target)?.focus();
-        setStory(target);
-      },
-      { signal },
-    );
-  }
-
-  // Destinations: hover or keyboard focus previews, a click pins (Enter and
-  // Space reach us as clicks on a button), clicking the pinned one unpins.
-  const idOf = (t: EventTarget | null) => (t as HTMLElement | null)?.closest<HTMLElement>(".dest")?.dataset.dest;
-  root.addEventListener(
-    "click",
-    (e) => {
-      const id = idOf(e.target);
-      if (id === undefined) return;
-      solo(pinned === id ? null : id);
-    },
-    { signal },
-  );
-  root.addEventListener(
-    "pointerover",
-    (e) => {
-      const id = idOf(e.target);
-      if (id === undefined || id === preview || (e as PointerEvent).pointerType !== "mouse" || pinned !== null) return;
-      preview = id;
-      render();
-    },
-    { signal },
-  );
-  root.addEventListener(
-    "pointerout",
-    (e) => {
-      // Moving within a card, or straight onto another card (whose pointerover
-      // takes over), is not leaving: rewriting the live status there is churn.
-      if (idOf(e.target) === undefined || preview === null || idOf((e as PointerEvent).relatedTarget) !== undefined) return;
-      preview = null;
-      render();
-    },
-    { signal },
-  );
-  root.addEventListener(
-    "focusin",
-    (e) => {
-      const id = idOf(e.target);
-      let visible = false;
-      try {
-        visible = (e.target as HTMLElement).matches(":focus-visible");
-      } catch {
-        visible = false;
-      }
-      if (id === undefined || !visible || pinned !== null) return;
-      preview = id;
-      render();
-    },
-    { signal },
-  );
-  root.addEventListener(
-    "focusout",
-    (e) => {
-      if (idOf(e.target) === undefined || preview === null) return;
-      preview = null;
-      render();
-    },
-    { signal },
-  );
-  root.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key !== "Escape" || (pinned === null && preview === null)) return;
-      solo(null);
-    },
-    { signal },
-  );
-
-  // Initial state.
-  syncTabs();
-  for (const key of keys) {
-    const p = panelOf(key);
-    if (p) p.hidden = key !== story;
-  }
-  if (fineEl) fineEl.textContent = STORIES[story].fine;
-  render();
-  bindVisibility();
-
-  return {
-    story: () => story,
-    setStory,
-    solo,
-    destroy() {
-      ac.abort();
-      if (swapTimer !== null) clearTimeout(swapTimer);
-      swapTimer = null;
-      finishSwap = null;
-      stopVisible?.();
-      stopVisible = null;
-    },
+  return () => {
+    for (const e of events) root.removeEventListener(e, takeOver);
+    disposed = true;
+    root.removeEventListener("case:change", onCase);
+    unnear();
+    globe?.destroy();
+    globe = null;
+    unwatch();
+    stop();
+    tabs?.destroy();
   };
 }

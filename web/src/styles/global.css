@@ -75,65 +75,60 @@
    THE MAPPING IS BY ROLE, NOT BY SPELLING, and two names make that necessary:
 
      - The app's --surface is the PAGE it paints; this site's --color-surface is
-       a CARD's fill, and the page here is --color-ink. Wiring them by name
-       would have put the app's page colour behind every card, 1.8% of lightness
-       off the page they sit on, and dissolved the card edges the layout depends
-       on. The card level in DESIGN-SYSTEM.md's elevation table is --card, so
-       that is what --color-surface reads.
+       a PANEL's fill, and the page here is --color-ink. Wiring them by name
+       would have put the app's page colour behind every panel and dissolved the
+       edges the layout depends on. --color-surface is therefore a site literal
+       (#0c0e12), no longer a read of the app's --card.
      - The app's --muted is an inert FILL (a slider track); this site's
-       --color-muted is secondary TEXT. Taking the fill by name would have set
-       every secondary line to oklch 25% on a 16% ground — unreadable rather
-       than merely wrong. The app token that means what this one means is
-       --muted-foreground.
+       --color-muted is secondary TEXT. --color-muted is likewise a site literal
+       (#8b8f97), no longer a read of --muted-foreground, so no secondary line
+       can land on the app's low-contrast fill by accident.
 
    --------------------------------------------------------------------------- */
 
 @theme {
-  /* Space Grotesk carries the headings: mechanical and geometric, and audibly
-     not the Inter that every adjacent developer tool uses. Plex Sans carries
-     body copy because Grotesk gets tiring below 15px and this page is dense.
-     JetBrains Mono carries every number, route and config line.
+  /* Bricolage Grotesque carries the headings: a variable display face with
+     real character at large sizes. Plex Sans carries body copy because a
+     display face gets tiring below 15px and this page is dense. JetBrains Mono
+     carries every number, route and config line.
 
-     SITE-ONLY, and the only one of the three still declared here. A display
-     face is a marketing need: the console's largest step is a 28px page title,
-     so there is nothing there for a headline face to do, and shipping a third
-     woff2 into the binary would buy a family nothing may use.
+     SITE-ONLY. A display face is a marketing need: the console's largest step
+     is a 28px page title, so there is nothing there for a headline face to do,
+     and shipping another woff2 into the binary would buy a family nothing may
+     use.
 
-     --font-sans and --font-mono are deliberately absent. Both now come from the
+     --font-sans and --font-mono are deliberately absent. Both come from the
      shared block imported at the top of this file, which is unlayered and
-     therefore beats the defaults Tailwind puts in @layer theme — the app self-
-     hosts the same two woff2 files and names the same two stacks, so the
-     product renders in one pair of typefaces for the first time. Re-declaring
+     therefore beats the defaults Tailwind puts in @layer theme. Re-declaring
      either name here would take that back silently. */
-  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
-  /* The one italic word in the home headline (.it). Not preloaded: it paints
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  /* One italic accent word per heading at most (.it). Not preloaded: it paints
      in the serif fallback, then swaps. No ui-serif/Georgia in the stack, so a
      visitor without the file sees a plain serif, not a system-dependent one. */
-  --font-accent: "IBM Plex Serif", serif;
+  --font-accent: "Instrument Serif", serif;
 
-  /* --- 60 / NEUTRAL --- */
-  --color-ink: var(--background); /* the page; the app paints its shell with it */
-  /* Not var(--surface) — see "the mapping is by role" above. This is a card
-     fill, and the app's card fill is --card. */
-  --color-surface: var(--card);
-  --color-raised: var(--card-raised);
-  --color-line: var(--border);
-  --color-line-strong: var(--border-strong);
+  /* --- SITE LAYER (2026-11 redesign). The marketing site is darker and warmer
+     than the console, so the neutrals and the accent below are site-only
+     literals, not aliases of the app's tokens. Status colours (ok, warn, down)
+     stay shared further down. --- */
+  --color-ink: #07080a; /* the page */
+  --color-surface: #0c0e12; /* panels and cards */
+  --color-raised: #11141a;
+  --color-line: #1f2228;
+  --color-line-strong: #2a2e36;
 
-  --color-fg: var(--foreground);
-  /* The app's --muted-foreground, NOT its --muted: this token is secondary
-     text and --muted is a slider track. Reads 6.39:1 on --color-ink, 5.84 on a
-     card and 5.41 on a raised card, so the WCAG headroom the note below insists
-     on for --color-subtle holds here too. */
-  --color-muted: var(--muted-foreground);
-  /* Shared now. Lighthouse (desktop, 2026-08-16) failed color-contrast on
-     twelve nodes of small type at #6b7686, and this page moved to oklch(62.1%
-     0.0282 261.1) on its own -- 5.36:1 on --color-ink, not the 4.5 minimum, so
-     a later darkening or a rounding difference cannot put it back in breach.
-     The app's placeholder token was 51.2% (3.41:1) and has now taken the same
-     value, so the one neutral the two products disagreed about is a var()
-     like every other. */
+  --color-fg: #ece9e2;
+  --color-muted: #8b8f97;
+  /* Decorative only: below the 4.5:1 text minimum. Never body or label text. */
+  --color-faint: #4a4e56;
+  /* --color-subtle is unchanged: it still reads the shared placeholder token. */
   --color-subtle: var(--subtle-foreground);
+
+  /* Coral means audio and the primary action; never decoration, never a
+     status colour. The console's --down is close to it, so console footage on
+     the site must caption a failed state. */
+  --color-accent: #ff5a3c;
+  --color-accent-ink: #120503; /* text on the accent */
 
   /* --- 30 / THE ONE ACCENT --- */
   --color-primary: var(--primary);
@@ -184,13 +179,12 @@
   --color-meter: var(--cat-cyan);
   --color-cohost: oklch(80.0% 0.1900 328.0);
   --color-game: oklch(65.7% 0.1262 298.0);
-  /* The second voice: the patchbay's track 2, Co-host mic, as the homepage
-     split diagram's co-host lane draws it. Not --color-cohost: despite its
-     name, that magenta is the split diagram's Music lane (it predates the
-     four-track layout), and a co-host lane in the same magenta would be one
-     colour on two tracks. Chosen like --color-cohost was, by maximising its
-     smallest ΔEOK to every signal, meter, track and wire colour in the
-     diagram, over L 60-90 with at least 3:1 on a card (a wire, not text) and
+  /* The second voice: the patchbay's track 2, Co-host mic, as a
+     diagram would draw it. Not --color-cohost: despite its name, that
+     magenta is the Music colour (it predates the four-track layout), and a
+     co-host lane in the same magenta would be one colour on two tracks.
+     Chosen like --color-cohost was, by maximising its smallest ΔEOK to every
+     signal, meter, track and wire colour on the page, over L 60-90 with at least 3:1 on a card (a wire, not text) and
      away from the status hues: 0.150 to --color-ok and to the video lane (the
      nearest), 0.160 to the mic cyan, 0.19 to --meter-mid. 12.3:1 against a
      card. That is below the 0.18 --color-cohost got; the free hues left on
@@ -219,18 +213,50 @@
 }
 
 @layer base {
+  /* The sticky nav's height. Nav.astro sizes itself from this, and anything
+     that sticks beneath it (the homepage journey bar) uses it as its `top`,
+     so the two cannot drift apart. */
+  :root {
+    --nav-h: 4rem;
+    /* The journey bar's height, border included (JourneyBar.astro). 0 on a page
+       without the bar, so --stack-h is the nav alone there; the :has() rule
+       below sets the real height only on a page that renders [data-journey]. */
+    --journey-h: 0px;
+    /* Everything stuck at the top of the home page: the nav and the journey
+       bar. Pinned sections stick at this offset. how-steps.ts overwrites it on
+       its own section with the measured height, which is the nav alone while
+       the page has no journey bar. */
+    --stack-h: calc(var(--nav-h) + var(--journey-h));
+    /* Clear space between what is stuck at the top and a section an anchor
+       lands on. With the nav alone it is 4rem + 16px = 5rem, the offset every
+       page had before the journey bar. journey.ts lands its clicks on this
+       same value (it reads the target's computed scroll-margin-top). */
+    --anchor-gap: 16px;
+    --anchor-offset: calc(var(--stack-h) + var(--anchor-gap));
+  }
+  :root:has([data-journey]) {
+    --journey-h: 45px;
+  }
+  /* The vertical gap between homepage sections: 1.5rem on a phone (390 and 320 are
+     both under the 6vw crossover at 400px; the page is long enough there,
+     check-home.mjs "length"), growing with the width to the old 2.5rem+ from
+     667px up and the same 5rem cap. One rule, no media query. From 768px it is
+     identical to what it was (6vw is already past 2.5rem there). */
+  :root {
+    --sec-gap: clamp(1.5rem, 6vw, 5rem);
+  }
   html {
     scroll-behavior: smooth;
     background-color: var(--color-ink);
     color-scheme: dark;
   }
-  /* The home page has a motion gate (scripts/home/motion.ts) that sets
+  /* The home page (the one with [data-hero]) has a motion gate (scripts/home/motion.ts) that sets
      html.motion-on only while motion is allowed: not under reduced motion,
      not while its Pause control is pressed, not before its script runs.
      There, smooth scrolling is motion like any other and follows the gate.
      Every other page keeps smooth scrolling (reduced motion still turns it
      off in the block at the end of this file). */
-  html:has(.home):not(.motion-on) {
+  html:has([data-hero]):not(.motion-on) {
     scroll-behavior: auto;
   }
   body {
@@ -243,17 +269,19 @@
     font-family: var(--font-display);
     letter-spacing: -0.02em;
   }
-  /* THE HOMEPAGE'S BONE INK, declared once on the wrapper and carried by
-     inheritance, so text-muted / text-subtle utilities still win and nothing
-     outside the home page changes. check-home pins it at 7:1 on the ground. */
-  .home {
-    --home-bone: oklch(93% 0.014 85);
-    color: var(--home-bone);
-  }
   .it {
     font-family: var(--font-accent);
     font-style: italic;
     font-weight: 400;
+  }
+  /* The one accent word of a heading: Instrument Serif italic (.it) in coral,
+     the single sanctioned non-audio use of the accent. Used by the hero and
+     "How it works"; the older sections do not use it and keep their colours. */
+  .it-hot {
+    color: var(--color-accent);
+    font-size: 1.12em;
+    line-height: 0.8;
+    letter-spacing: -0.02em;
   }
   /* Every figure on this page sits in a column that has to line up. */
   .tnum, table td, table th {
@@ -267,8 +295,9 @@
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
   }
+  /* An anchor never lands under the sticky nav and the journey bar. */
   [id] {
-    scroll-margin-top: 5rem;
+    scroll-margin-top: var(--anchor-offset);
   }
 }
 
@@ -276,53 +305,12 @@
   .wrap {
     margin-inline: auto;
     width: 100%;
-    max-width: 80rem;
-    padding-inline: 1.25rem;
+    max-width: 1320px;
+    padding-inline: 20px;
   }
-
-  /* A faint signal-flow grid. The product is a signal path, so the page has
-     one running under it. Under 4% opacity: texture, not pattern.
-
-     The grid itself never moves. What moves is a single wide, soft band that
-     drifts across it — a bus sweep, the thing that makes the grid read as a
-     backplane carrying something rather than as graph paper.
-
-     WHY A PSEUDO-ELEMENT AND transform, NOT background-position.
-     Animating background-position on a full-viewport element repaints that
-     element every frame: background-position is not a compositor-only
-     property, so the raster work lands on the main thread behind the whole
-     hero. transform and opacity are the only two properties the compositor can
-     animate on its own, so the band is its own layer and translating it costs
-     nothing per frame. On a page whose audience opens devtools, a background
-     that shows up in a paint-flashing trace is worse than no background. */
-  .signal-grid {
-    position: relative;
-    background-image:
-      linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: radial-gradient(ellipse 90% 60% at 50% 0%, #000 40%, transparent 100%);
-    overflow: hidden;
+  @media (min-width: 768px) {
+    .wrap { padding-inline: 40px; }
   }
-
-  /* The same grid behind the top of the other marketing pages (Base `grid`).
-     Sized like the home hero band so the fade lands at the same depth, and
-     sent behind the content: isolation keeps z-index -1 above the body's
-     ground instead of under it. */
-  .page-grid { position: relative; isolation: isolate; }
-  .page-grid-layer {
-    position: absolute;
-    inset: 0 0 auto;
-    height: 880px;
-    z-index: -1;
-    pointer-events: none;
-  }
-
-  /* No sweep. A blue light used to pass across this grid every 19 seconds: a
-     linear-gradient on ::after. Gradients appear only in the logo mark
-     (docs/DESIGN-SYSTEM.md), and blue is for interaction, so a decorative blue
-     fade is both rules broken at once. The grid itself is 1px lines drawn
-     with gradient syntax, a pattern rather than a colour fade, and stays. */
 
   .card {
     border: 1px solid var(--color-line);
@@ -538,9 +526,9 @@
   .code {
     position: relative;
     margin-top: 1rem;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-token);
-    background: var(--color-ink);
+    border: 1px solid var(--color-line-strong);
+    border-radius: 2px;
+    background: var(--color-surface);
     overflow: hidden;
   }
   /* Quoted evidence, not an instruction. Same box and type as a command block
@@ -573,13 +561,13 @@
     padding: 0.5rem 0.5rem 0.5rem 0.875rem;
     border-bottom: 1px solid var(--color-line);
     background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
   }
   .code-label {
     font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-subtle);
+    font-size: 0.75rem;
+    color: var(--color-muted);
   }
   /* WRAP INSTEAD OF SCROLL, AT EVERY WIDTH. A command that scrolls sideways
      inside its own box hides its own tail, and the tail of an install command
@@ -598,12 +586,12 @@
      that would otherwise have been hidden behave differently. */
   .code pre {
     margin: 0;
-    padding: 1rem;
+    padding: 1.125rem 1rem;
     overflow-x: auto;
     font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 0.75rem;
-    line-height: 1.65;
-    color: var(--color-muted);
+    font-size: 0.8125rem;
+    line-height: 1.7;
+    color: var(--color-fg);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -619,12 +607,13 @@
 
   .code-copy {
     flex-shrink: 0;
-    padding: 0.3rem 0.6rem;
+    padding: 0.3rem 0.75rem;
     border: 1px solid var(--color-line-strong);
-    border-radius: 0.375rem;
+    border-radius: 2px;
     background: var(--color-ink);
-    color: var(--color-muted);
-    font-size: 0.6875rem;
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
     cursor: pointer;
     transition:
       color 140ms ease,
@@ -632,7 +621,7 @@
   }
   .code-copy:hover {
     color: var(--color-fg);
-    border-color: var(--color-primary);
+    border-color: var(--color-fg);
   }
   .code-copy:focus-visible {
     outline: 2px solid var(--color-primary-bright);
@@ -654,58 +643,6 @@
   .code-copy[data-copied="true"] {
     color: var(--color-ok);
     border-color: var(--color-ok);
-  }
-
-  /* --- the announcement bar --------------------------------------------- */
-
-  /* THE ONE SATURATED FIELD ON THE SITE. Everything else is near-black with
-     saturation reserved for signal; this is the single exception, and it is
-     deliberate — it is the accent's home, and a band of it at the top of the
-     page is what makes the accent read as one decision rather than as a colour
-     that turns up wherever something needed emphasis.
-     If a second saturated field ever appears, this one has stopped working.
-
-     ink ON primary, NOT fg. Measured from the tokens: #0b0d11 on #5b7fc7 is
-     4.91:1, which clears AA for text under 18pt; #edf2f8 on the same ground is
-     3.52:1 and does not. The light text is the obvious choice and it is the
-     failing one, which is exactly the sort of thing that ships on a bar nobody
-     re-measures. It is also the pairing .btn-primary already uses, so the bar
-     and the primary CTA are the same object seen twice. */
-  .announce {
-    background: var(--color-primary);
-    color: var(--color-ink);
-    font-size: 0.75rem;
-    line-height: 1.5;
-    /* Thin. This is a line of type, not a section: it has to be readable and
-       then forgotten. It is on the home page only (see Announce.astro). */
-    padding-block: 0.4375rem;
-  }
-  .announce a {
-    font-weight: 500;
-    /* The same 24px hit area as .tap, for the one link in the bar. */
-    padding-block: 0.3125rem;
-    margin-block: -0.3125rem;
-    text-decoration: underline;
-    /* Far enough off the baseline that the descender in "p" does not sit on the
-       rule, matching .doc-prose a — the same fix for the same reason. */
-    text-underline-offset: 0.2em;
-    /* 45% ink over the accent: visible as a rule without competing with the
-       text it belongs to. It goes to full ink on hover, so the link gains
-       weight on approach rather than announcing itself the whole time. */
-    text-decoration-color: color-mix(in srgb, var(--color-ink) 45%, transparent);
-    transition: text-decoration-color var(--motion-instant) var(--ease-out);
-  }
-  .announce a:hover {
-    text-decoration-color: var(--color-ink);
-  }
-  /* The focus ring everywhere else is --color-primary-bright, which is a
-     lighter version of the ground this link sits on and would be close to
-     invisible here. Ink is the highest-contrast outline available against the
-     accent, and this is the only place on the site that needs the exception. */
-  .announce a:focus-visible {
-    outline: 2px solid var(--color-ink);
-    outline-offset: 2px;
-    border-radius: 2px;
   }
 
   .chip {
@@ -747,7 +684,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
-    border-radius: var(--radius-token);
+    border-radius: 2px; /* the site's corners are 0-4px; --radius-token is the console's */
     padding: 0.625rem 1.125rem;
     font-size: 0.9375rem;
     font-weight: 500;
@@ -768,24 +705,108 @@
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
   }
-  .btn-primary { background: var(--color-primary); color: var(--color-ink); }
-  .btn-primary:hover { background: var(--color-primary-bright); }
-  /* The "on air" action: tally red as a FILL only, never as text (see
-     tokens.css). The inset ring on hover keeps it distinguishable without a
-     lighter red, which would fail its own label contrast. */
-  .btn-onair { background: var(--tally); color: var(--tally-foreground); }
-  .btn-onair:hover { box-shadow: inset 0 0 0 1px var(--tally-foreground); }
+  .btn-primary { background: var(--color-accent); color: var(--color-accent-ink); font-weight: 600; }
+  .btn-primary:hover { background: color-mix(in srgb, var(--color-accent) 85%, white); }
   .btn-ghost { border: 1px solid var(--color-line-strong); color: var(--color-fg); }
-  .btn-ghost:hover { border-color: var(--color-primary); background: var(--color-primary-dim); }
+  .btn-ghost:hover { border-color: var(--color-fg); }
 
   .eyebrow {
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 500;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--color-subtle);
+    color: var(--color-muted);
   }
+  /* The one coloured word of an eyebrow: <b> inside carries the accent. */
+  .eyebrow b { color: var(--color-accent); font-weight: 500; }
+
+  /* The lede under a section heading: one measure, dim, never wider than
+     reading width. */
+  .sec-lede {
+    margin-top: 1.125rem;
+    max-width: 38em;
+    font-size: 1.1875rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  @media (max-width: 767px) {
+    .sec-lede {
+      margin-top: 0.75rem;
+      font-size: 1.0625rem;
+      line-height: 1.45;
+    }
+  }
+
+  /* A mono text link with an arrow. The rule is faint until the link is
+     approached, then it takes the accent. */
+  .more {
+    display: inline-block;
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--color-faint);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg);
+    transition:
+      color var(--motion-instant) var(--ease-out),
+      border-color var(--motion-instant) var(--ease-out);
+  }
+  .more::after { content: " \2192"; }
+  .more:hover,
+  .more:focus-visible {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+  }
+
+  /* Fold.astro: secondary content behind a real <details> on a phone. Closed
+     it is one 44px row naming what is inside; from 768px up the content is
+     shown and the row is gone. ::details-content lets a CLOSED details show its
+     content with no script (so nothing moves after paint); `display: contents`
+     on both boxes makes the content a direct child of the parent again, so the
+     wide layout is the one the page had before the fold existed. */
+  .fold > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 44px;
+    padding: 8px 0;
+    border-block: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg);
+    cursor: pointer;
+    list-style: none;
+  }
+  .fold > summary::-webkit-details-marker { display: none; }
+  .fold > summary::after { content: "+"; font-size: 1.125rem; line-height: 1; color: var(--color-accent); }
+  .fold[open] > summary::after { content: "\2212"; }
+  .fold > summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  @media (min-width: 768px) {
+    @supports selector(::details-content) {
+      .fold { display: contents; }
+      .fold::details-content { display: contents; content-visibility: visible; }
+      .fold > summary { display: none; }
+    }
+  }
+
+  /* A screenshot frame: a bordered panel with a bar for the title above the
+     image. */
+  .frame {
+    position: relative;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-surface);
+  }
+  .frame-bar {
+    display: flex;
+    gap: 0.4375rem;
+    padding: 0.625rem 0.875rem;
+    border-bottom: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .frame img { display: block; width: 100%; height: auto; }
 
   /* --- the patchbay ---------------------------------------------------- */
 
@@ -1115,17 +1136,13 @@
     64%  { transform: scaleX(0.935); }  /* and falls back at a fixed rate */
     100% { transform: scaleX(0.90); }
   }
-  .loud-fast {
-    transform-origin: left;
-    animation: loud-momentary 0.72s linear infinite;
-  }
 
   /* `meter`/.meter-live, `peak-hold`/.meter-peak-tick and `flow`/.route-live
      stood here until the hero stopped drawing the six-track fan-out and the
      signal path. They had no consumers left, and three animated classes with
      nothing to animate is a false statement about the motion scale this file
-     documents. The ballistics rule they encoded is not lost — it is restated on
-     .loud-fast above, which is now the page's only meter-like motion.
+     documents. The ballistics rule they encoded is not lost — it is kept
+     in the loud-momentary keyframe above, which check-build.mjs guards.
 
      The crosspoint's press used to be a `latch` keyframe here. It is now a
      spring in MixMatrix.astro, because a keyframe restarts from scale(0.88)

@@ -1,0 +1,349 @@
+---
+/* "Then make it yours": three recipes that start from a working install, the
+ * next stops, and the closing band. No script; every recipe is on the page.
+ *
+ * Sources: the OBS, source and destination steps are docs/QUICKSTART.md steps 4
+ * to 7 and docs/OBS.md; connecting a platform is docs/CONNECTING-PLATFORMS.md
+ * ("Register an app", "Settings, Platform credentials", "Connect account", for
+ * X, Twitch, Kick, YouTube and Facebook per QUICKSTART's next-steps table); the
+ * bonded-encoder recipe is docs/SRTLA.md. The Stream Deck blurb is the opening
+ * of docs/STREAM-DECK.md.
+ *
+ * Each recipe links to the nearest page that exists today. Plan 4 adds a page
+ * per recipe, and those links move there (listed in the task report), not
+ * before: the build fails a link to a page that does not exist. */
+import { PUBLISHED } from "../../data/docs.mjs";
+
+const RECIPES = [
+  {
+    tag: "Audio routing · OBS",
+    title: "Two languages, one broadcast",
+    out: "The picture goes out once; each channel carries the commentary language its audience wants.",
+    steps: [
+      ["Give each voice its own track.", "In OBS, open Advanced Audio Properties and tick which of the six tracks each source feeds."],
+      ["Send it as one SRT stream.", "Settings, Output, Advanced, Recording: Custom Output (FFmpeg), Output to URL, container mpegts. The dashboard shows a meter per incoming track within a couple of seconds."],
+      ["Label the tracks.", "On Sources, annotations: name them mic, commentary, and a language where it matters."],
+      ["One destination per language.", "Tick the tracks each one carries, then check the Meters page, which measures after routing."],
+    ],
+    links: [
+      ["/docs/audio-routing", "Audio routing guide"],
+      ["/docs/obs", "OBS setup"],
+    ],
+  },
+  {
+    tag: "OBS · connecting platforms",
+    title: "OBS to five platforms",
+    out: "One push from OBS, a destination for each platform you stream to.",
+    steps: [
+      ["Run polyemesis and make your admin.", "The Install section above is all of it."],
+      ["Point OBS at it.", "Settings, Output, Advanced, Recording: Custom Output (FFmpeg), Output to URL, container mpegts. Press Start Recording."],
+      ["Connect each platform.", "Register an app, paste its credentials into Settings, Platform credentials, then press Connect account. This works for X, Twitch, Kick, YouTube and Facebook."],
+      ["Add a destination per platform.", "On Destinations, press Add, pick the connected account and enable it."],
+    ],
+    links: [
+      ["/how-to-multistream-from-obs", "How to multistream from OBS"],
+      ["/docs/connecting-platforms", "Connecting platforms"],
+    ],
+  },
+  {
+    tag: "SRTLA · bonded encoders",
+    title: "Streaming from a backpack",
+    out: "Several network links in, one ordinary SRT publish out. Failover, recording and destinations work the same.",
+    steps: [
+      ["Turn the receiver on.", "Settings, Ingest, Listeners: set the SRTLA bonding port. 5000 is the usual choice."],
+      ["Open that port as UDP.", "In Docker, publish it, for example -p 5000:5000/udp."],
+      ["Point the encoder at it.", "Choose SRTLA, enter your server, the port, and the source's publish token as the stream ID."],
+      ["Watch the links.", "The source card shows the merged stream (bitrate, RTT, loss) and one row per network link."],
+    ],
+    links: [["/docs/srtla", "SRTLA guide"]],
+  },
+] as const;
+
+const DOORS = [
+  {
+    k: "Docs",
+    note: `${PUBLISHED.length} pages`,
+    text: "Quickstart, audio routing, platforms, the API, monitoring and troubleshooting, in one place.",
+    href: "/docs",
+    cta: "Browse the docs",
+    external: false,
+  },
+  {
+    k: "Stream Deck plugin",
+    note: "with every release",
+    text: "Keys show what each destination is doing, start or stop it, and mute one track on one destination. On a Stream Deck\u00a0+, dials show the meters and set track gain.",
+    href: "/docs/stream-deck",
+    cta: "Set up the plugin",
+    external: false,
+  },
+  {
+    k: "GitHub",
+    note: "MIT",
+    text: "The source, the issue tracker and every release, including the static binaries.",
+    href: "https://github.com/rainmanjam/polyemesis",
+    cta: "rainmanjam/polyemesis",
+    external: true,
+  },
+] as const;
+import Fold from "./Fold.astro";
+---
+
+<section id="use" class="use-sec" data-journey-stage="use" aria-labelledby="h-use">
+  <div class="wrap">
+    <p class="eyebrow"><b>05</b> Use</p>
+    <h2 id="h-use">Then make it <em class="it it-hot">yours</em>.</h2>
+    <p class="sec-lede">Three guides that start from a working install. Pick the one that looks like your show.</p>
+
+    <div class="use-recipes">
+      {
+        RECIPES.map((r, i) => (
+          <article class="use-rec" aria-labelledby={`h-use-${i + 1}`}>
+            <p class="use-tag">{r.tag}</p>
+            <h3 id={`h-use-${i + 1}`}>{r.title}</h3>
+            <p class="use-out">{r.out}</p>
+            <Fold class="use-fold" summary={`Steps · ${r.steps.length}`}>
+              <ol class="use-steps">
+                {r.steps.map(([head, text]) => (
+                  <li>
+                    <span>
+                      <b>{head}</b> {text}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </Fold>
+            <p class="use-links">
+              {r.links.map(([href, text]) => (
+                <a class="more" href={href}>{text}</a>
+              ))}
+            </p>
+          </article>
+        ))
+      }
+    </div>
+
+    <div class="use-next">
+      <h3>Next stops</h3>
+      <div class="use-doors">
+        {
+          DOORS.map((d) => (
+            <div class="use-door">
+              <p class="use-k">
+                {d.k} <span>{d.note}</span>
+              </p>
+              <p>{d.text}</p>
+              {d.external ? (
+                <a class="more" href={d.href} rel="noopener">{d.cta}</a>
+              ) : (
+                <a class="more" href={d.href}>{d.cta}</a>
+              )}
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <div class="use-close">
+      <p class="use-big">One broadcast. <em class="it it-hot">Every</em> audience.</p>
+      <div class="use-cta">
+        <a class="btn btn-primary" href="/download">Install polyemesis</a>
+        <a class="btn btn-ghost" href="/docs">Read the docs</a>
+      </div>
+      <p class="use-fine">self-hosted · open source · MIT license</p>
+    </div>
+  </div>
+</section>
+
+<style>
+  .use-sec {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+  }
+  .use-sec h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .use-recipes {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+    margin-top: 3rem;
+  }
+  @media (min-width: 1100px) {
+    .use-recipes {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 40px;
+    }
+  }
+  .use-rec {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding-top: 18px;
+    border-top: 1px solid var(--color-line-strong);
+  }
+  .use-tag {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .use-rec h3 {
+    margin-top: 12px;
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .use-out {
+    margin-top: 12px;
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .use-steps {
+    list-style: none;
+    margin: 20px 0 0;
+    padding: 0;
+    border-top: 1px solid var(--color-line);
+    counter-reset: userec;
+  }
+  .use-steps li {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-line);
+    counter-increment: userec;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .use-steps li::before {
+    content: counter(userec);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-accent);
+    padding-top: 1px;
+  }
+  .use-steps b {
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  /* On a phone the steps sit behind a Fold (the summary carries the rule). */
+  :global(.use-fold) { margin-top: 20px; }
+  @media (max-width: 767px) {
+    .use-steps { margin-top: 0; border-top: 0; }
+  }
+  .use-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin-top: 20px;
+  }
+
+  .use-next {
+    margin-top: 72px;
+  }
+  .use-next h3 {
+    font-size: 1.625rem;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+  }
+  .use-doors {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    margin-top: 20px;
+    border-top: 1px solid var(--color-line);
+  }
+  @media (min-width: 900px) {
+    .use-doors {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 40px;
+      border-top: 0;
+    }
+  }
+  .use-door {
+    padding: 18px 0 8px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  @media (min-width: 900px) {
+    .use-door {
+      border-top: 1px solid var(--color-line);
+      border-bottom: 0;
+    }
+  }
+  .use-door > p:not(.use-k) {
+    margin-top: 10px;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .use-door .more {
+    margin-top: 14px;
+    margin-bottom: 14px;
+  }
+  .use-k {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    font-size: 1.1875rem;
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  .use-k span {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+
+  .use-close {
+    margin-top: 80px;
+    padding: 48px 0 8px;
+    border-top: 1px solid var(--color-line-strong);
+    text-align: center;
+  }
+  .use-big {
+    font-size: clamp(2rem, 1rem + 4vw, 3.5rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+  .use-cta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 28px;
+  }
+  .use-fine {
+    margin-top: 18px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .use-recipes { margin-top: 1.5rem; gap: 28px; }
+    .use-next { margin-top: 40px; }
+    .use-door { padding: 12px 0 2px; }
+    .use-close { margin-top: 40px; padding: 32px 0 8px; }
+    .use-links { margin-top: 14px; }
+    .use-cta { margin-top: 20px; }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .use-rec h3 { font-size: 1.5rem; }
+  }
+</style>

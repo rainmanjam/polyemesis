@@ -1,118 +1,47 @@
 ---
 import Base from "../layouts/Base.astro";
 import Hero from "../components/home/Hero.astro";
-import Problem from "../components/home/Problem.astro";
+import JourneyBar from "../components/home/JourneyBar.astro";
 import HowItWorks from "../components/home/HowItWorks.astro";
-import Recovery from "../components/home/Recovery.astro";
-import Run from "../components/home/Run.astro";
-/* Counted, never typed. A literal "23 documents" in the explore row below is a claim
- * that goes stale the first time somebody publishes a document, and nothing
- * would fail — the page would simply be wrong about the thing it is inviting
- * you to read. docs.mjs is the allowlist, so it is also the count. */
-import { PUBLISHED } from "../data/docs.mjs";
-/* Read from GitHub at build time, and null when that read fails. The trust
- * line below prints the star count and release only when this is present, so
- * a failed fetch yields a plain link, never a number. See lib/github-stats.ts. */
-import { fetchRepoStats } from "../lib/github-stats";
-const repo = await fetchRepoStats();
+import MixMatrixPlay from "../components/home/MixMatrixPlay.astro";
+import Audiences from "../components/home/Audiences.astro";
+import FeatureTour from "../components/home/FeatureTour.astro";
+import StreamDeck from "../components/home/StreamDeck.astro";
+import CalcMini from "../components/home/CalcMini.astro";
+import Why from "../components/home/Why.astro";
+import Install from "../components/home/Install.astro";
+import Use from "../components/home/Use.astro";
 ---
 
-{/* Title: problem first, brand second, and under 60 characters so a search
+{/* index.astro only assembles the sections; the copy lives in components/home/.
+
+    The sections are direct children of <main> (Base.astro) on purpose: the
+    journey bar is position: sticky, and sticky holds only while its parent is
+    on screen, so a wrapper element around it would unstick it as soon as the
+    wrapper ended. It sits right after the hero and stays under the nav while
+    the five stages scroll past.
+
+    Title: problem first, brand second, and under 60 characters so a search
     result does not truncate it mid-clause. The previous one led with the
     product name and the phrase "per-destination audio routing", which is the
     vocabulary of someone who has already found the project — #143's finding was
     that the person with this problem searches for the problem. */}
 <Base
   title="Multistream, a different mix per platform — polyemesis"
-  description="Multistream to Twitch, YouTube and Kick from one upload, with a different audio mix per platform and the video untouched. Free, on your own server."
+  description="Multistream to Twitch, YouTube, Kick, Facebook and X from one upload, with a different audio mix per destination and the video untouched. Free, open source, on your own server."
   path="/"
-  announce={{ release: repo?.release ?? null }}
 >
-<div class="home">
   <Hero />
-
-  <Problem />
-
+  <JourneyBar />
   <HowItWorks />
-
-  <Recovery />
-
-  <Run />
-
-  {/* --------------------------------------------------------- who it is for */}
-  {/* SAYING WHEN ANOTHER TOOL FITS BETTER is the point of the second column,
-      and it is the reason this section exists. Both reviews said the same
-      thing from different angles: a product that cannot say who it suits
-      reads as marketing.
-
-      PHRASED AS A CHOICE, NOT A VERDICT (2026-11 design review). The labels
-      were the mono caps pair "BUILT FOR / NOT BUILT FOR", which read as a spec
-      sheet's exclusions. They are sentence-case headings now, each naming the
-      choice a reader makes, and the second column says what a hosted service
-      is good at rather than what polyemesis lacks.
-
-      It sits after the install steps and before the closing trust line
-      deliberately. A reader who recognises themselves in the right-hand column
-      is better served by the comparison than by an install. */}
-  <section class="border-t border-line py-20 sm:py-24">
-    <div class="wrap">
-      <h2 class="text-balance text-3xl font-medium">Is this for you?</h2>
-      <div class="card-grid card-grid--2 mt-10">
-        <div class="card p-6">
-          <h3 class="text-lg font-medium text-fg">Choose polyemesis if</h3>
-          <ul class="mt-4 space-y-3 text-sm leading-relaxed text-muted">
-            <li>You stream to more than one platform and want each to hear something different.</li>
-            <li>
-              Your VODs get muted for music, and a music-free mix would fix it. Twitch can even keep the music live and drop it from the VOD (experimental; Twitch requires a GPU):{" "}
-              <a href="/twitch-vod-track" class="underline decoration-line underline-offset-4 hover:text-fg">how the Twitch VOD track works</a>.
-            </li>
-            <li>You have a small server, or are happy to rent one. A VPS is enough.</li>
-          </ul>
-        </div>
-        <div class="card p-6">
-          <h3 class="text-lg font-medium text-fg">Choose a hosted service if</h3>
-          <ul class="mt-4 space-y-3 text-sm leading-relaxed text-muted">
-            <li>
-              You want somebody else to run it. Hosted services are good at that.{" "}
-              <a href="/free-restream-service" class="underline decoration-line underline-offset-4 hover:text-fg">What you trade either way</a>{" "}
-              is written out.
-            </li>
-            <li>You want a browser studio, guest invites or cloud recording storage.</li>
-            <li>You send one mix to one platform and want nothing extra to run.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  {/* ------------------------------------------------- trust line, explore */}
-  {/* The trust line is the stars/release span plus the source link, unchanged
-      from the old call-to-action card. The explore row replaces that card's
-      three document tiles: the page ends on where to go next, not on a sell. */}
-  <section class="wrap pb-20 pt-4 sm:pb-24">
-    <p class="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
-      <a
-        href="https://github.com/rainmanjam/polyemesis"
-        rel="noopener"
-        class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright">Read the source</a
-      >
-      {repo && (
-        <span class="text-subtle">
-          {repo.stars} {repo.stars === 1 ? "star" : "stars"} on GitHub
-          {repo.release && <> · release {repo.release}</>}
-        </span>
-      )}
-    </p>
-    <nav aria-label="Explore" class="mt-6 flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm">
-      <a href="/docs/quickstart" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright">Quickstart</a>
-      <a href="/docs" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright">All {PUBLISHED.length} documents</a>
-      <a href="/features" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright">Features</a>
-      <a href="/comparison" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright">Comparison</a>
-      <a href="/calculator" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright">Bandwidth calculator</a>
-    </nav>
-  </section>
-
-</div>
+  <MixMatrixPlay />
+  <Audiences />
+  <FeatureTour />
+  <StreamDeck />
+  <CalcMini />
+  <Why />
+  <Install />
+  <Use />
   <script>
     const go = () => import("../scripts/home/boot").then((m) => m.boot(document));
     "requestIdleCallback" in window ? requestIdleCallback(go, { timeout: 2000 }) : setTimeout(go, 200);

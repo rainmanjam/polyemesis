@@ -1,0 +1,256 @@
+---
+/* "Will my connection handle it?": a small working copy of /calculator. Two
+ * sliders (bitrates), two steppers (counts), three outputs. The outputs are
+ * computed here, at build time, from the default inputs with the same
+ * src/lib/calc.ts functions the script uses, so the block is correct with
+ * JavaScript off and nothing is typed in by hand. scripts/home/calc-mini.ts
+ * recomputes them as the visitor moves a control.
+ *
+ * Model (docs: README.md "Video is copied through untouched"): video is copied,
+ * so every destination carries the same bitstream; the encoder-to-server leg and
+ * the server-to-platform leg are different connections, so they are reported
+ * apart. Each coral bar is that leg's figure as a share of the larger of the two
+ * (the mockup's gauge): it compares the two legs and means nothing else.
+ * Defaults are what /calculator opens with: two destinations, 6000 video, 160
+ * audio, one track, 5% overhead, 20% headroom. */
+import { HEADROOM_PCT, OVERHEAD_PCT } from "../../lib/calc";
+import { DEFAULTS, LIMITS, compute, fillPct } from "../../scripts/home/calc-mini";
+
+const view = compute(DEFAULTS);
+const L = LIMITS;
+---
+
+<section id="calc" class="cm" data-calc data-journey-stage="understand" aria-labelledby="h-calc">
+  <div class="wrap">
+    <p class="eyebrow"><b>02</b> Understand</p>
+    <h2 id="h-calc">Will my connection <em class="it it-hot">handle</em> it?</h2>
+    <p class="sec-lede">
+      Your encoder uploads one stream to polyemesis. The server copies the video to every destination, so with several
+      destinations its uplink carries more than your home connection does. Move a control to see both.
+    </p>
+
+    <div class="frame cm-panel">
+      <div class="frame-bar cm-strip">
+        <span>Bandwidth · copied video</span>
+        <span>the same formulas as the full calculator</span>
+      </div>
+      <div class="cm-body">
+        <div class="cm-in" role="group" aria-label="What you are sending">
+          <div class="cm-pair">
+            <div class="cm-field">
+              <div class="cm-lab">
+                <label for="calc-video">Video from your encoder</label>
+                <output for="calc-video" aria-live="off" data-calc-readout="video">{DEFAULTS.video} kbps</output>
+              </div>
+              <input id="calc-video" class="cm-range" type="range" data-calc-in="video" min={L.video.min} max={L.video.max} step={L.video.step} value={DEFAULTS.video} aria-valuetext={`${DEFAULTS.video} kbps`} style={`--p:${fillPct("video", DEFAULTS.video)}%`} />
+            </div>
+            <div class="cm-field">
+              <div class="cm-lab">
+                <label for="calc-audio">Audio per destination</label>
+                <output for="calc-audio" aria-live="off" data-calc-readout="audio">{DEFAULTS.audio} kbps</output>
+              </div>
+              <input id="calc-audio" class="cm-range" type="range" data-calc-in="audio" min={L.audio.min} max={L.audio.max} step={L.audio.step} value={DEFAULTS.audio} aria-valuetext={`${DEFAULTS.audio} kbps`} style={`--p:${fillPct("audio", DEFAULTS.audio)}%`} />
+            </div>
+          </div>
+          <div class="cm-pair">
+            {
+              (["tracks", "dests"] as const).map((k) => (
+                <div class="cm-field">
+                  <label class="cm-lab" for={`calc-${k}`}>{k === "tracks" ? "Audio tracks from your encoder" : "Destinations"}</label>
+                  <div class="cm-step">
+                    <button type="button" data-calc-step={k} data-dir="-1" aria-label={k === "tracks" ? "Fewer audio tracks" : "Fewer destinations"} aria-disabled={DEFAULTS[k] <= L[k].min ? "true" : "false"}>&minus;</button>
+                    <input id={`calc-${k}`} type="number" inputmode="numeric" data-calc-in={k} min={L[k].min} max={L[k].max} step="1" value={DEFAULTS[k]} />
+                    <button type="button" data-calc-step={k} data-dir="1" aria-label={k === "tracks" ? "More audio tracks" : "More destinations"} aria-disabled={DEFAULTS[k] >= L[k].max ? "true" : "false"}>+</button>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+        <div class="cm-out">
+          <div class="cm-leg">
+            <p class="cm-lab">Encoder upload needed <em>(your home or studio)</em></p>
+            <output class="cm-big" for="calc-video calc-audio calc-tracks" aria-live="off" data-calc-out="ingest">{view.ingest}</output>
+            <div class="cm-bar" aria-hidden="true"><i data-calc-bar="ingest" style={`--w:${view.ingestShare}`}></i></div>
+            <p class="cm-note" data-calc-out="ingest-note">{view.ingestNote}</p>
+          </div>
+          <div class="cm-leg">
+            <p class="cm-lab">Server upload needed <em>(where polyemesis runs)</em></p>
+            <output class="cm-big" for="calc-video calc-audio calc-dests" aria-live="off" data-calc-out="egress">{view.egress}</output>
+            <div class="cm-bar" aria-hidden="true"><i data-calc-bar="egress" style={`--w:${view.egressShare}`}></i></div>
+            <p class="cm-note" data-calc-out="egress-note">{view.egressNote}</p>
+          </div>
+          <div class="cm-data">
+            <p class="cm-lab">Data the server sends per hour</p>
+            <output class="cm-mid" for="calc-video calc-audio calc-dests" aria-live="off" data-calc-out="per-hour">{view.perHour}</output>
+            <p class="cm-note">To the platforms, with {OVERHEAD_PCT}% overhead and no headroom: headroom is spare capacity, not data.</p>
+          </div>
+        </div>
+      </div>
+      <p class="sr-only" role="status" aria-live="polite" data-calc-live></p>
+    </div>
+
+    <div class="cm-foot">
+      <p>
+        The bars compare the two legs: each is that figure as a share of the larger one. The bandwidth figures include {OVERHEAD_PCT}% protocol overhead and {HEADROOM_PCT}% headroom. The full calculator adds
+        platform recommendations, per-destination bitrates and weekly and monthly data.
+      </p>
+      <a class="more" href="/calculator">Open the full calculator</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .cm { margin-block: var(--sec-gap); scroll-margin-top: var(--anchor-offset); }
+  .cm h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .cm-panel { margin-top: 2.25rem; }
+  .cm-strip { justify-content: space-between; flex-wrap: wrap; min-height: 42px; align-items: center; }
+  .cm-strip span:first-child { color: var(--color-fg); letter-spacing: 0.06em; text-transform: uppercase; }
+  .cm-body { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .cm-in { display: flex; flex-direction: column; gap: 28px; padding: 20px 16px; min-width: 0; }
+  .cm-pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .cm-field { min-width: 0; }
+  .cm-lab {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin: 0 0 4px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .cm-lab em { font-style: normal; color: var(--color-fg); display: block; }
+  .cm-out .cm-lab { display: block; }
+  .cm-lab output { color: var(--color-fg); font-size: 0.8125rem; }
+
+  .cm-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 40px;
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .cm-range::-webkit-slider-runnable-track {
+    height: 2px;
+    background: linear-gradient(to right, var(--color-accent) var(--p, 50%), var(--color-line-strong) var(--p, 50%));
+  }
+  .cm-range::-moz-range-track { height: 2px; background: var(--color-line-strong); }
+  .cm-range::-moz-range-progress { height: 2px; background: var(--color-accent); }
+  .cm-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 22px;
+    margin-top: -10px;
+    background: var(--color-fg);
+    border: 0;
+    border-radius: 1px;
+  }
+  .cm-range::-moz-range-thumb { width: 16px; height: 22px; background: var(--color-fg); border: 0; border-radius: 1px; }
+  .cm-range:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+
+  .cm-step { display: flex; border: 1px solid var(--color-line-strong); border-radius: 2px; }
+  .cm-step button {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: none;
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 1.125rem;
+    cursor: pointer;
+  }
+  .cm-step button:hover:not([aria-disabled="true"]) { color: var(--color-accent); }
+  .cm-step button[aria-disabled="true"] { color: var(--color-faint); cursor: default; }
+  .cm-step input {
+    flex: 1;
+    min-width: 0;
+    height: 44px;
+    border: 0;
+    border-inline: 1px solid var(--color-line);
+    background: transparent;
+    color: var(--color-fg);
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  .cm-step input::-webkit-inner-spin-button, .cm-step input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .cm-step :focus-visible { outline: 2px solid var(--color-fg); outline-offset: -2px; }
+
+  .cm-out {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 22px;
+    padding: 20px 16px;
+    border-top: 1px solid var(--color-line);
+    min-width: 0;
+    align-content: start;
+  }
+  .cm-leg { min-width: 0; }
+  .cm-big {
+    display: block;
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: clamp(2rem, 8vw, 3rem);
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--color-fg);
+  }
+  .cm-mid {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: 1.75rem;
+    color: var(--color-fg);
+  }
+  .cm-bar { height: 6px; margin-top: 10px; background: var(--color-raised); overflow: hidden; }
+  .cm-bar i { display: block; height: 100%; background: var(--color-accent); transform: scaleX(var(--w, 0)); transform-origin: 0 50%; }
+  .cm-note {
+    margin: 8px 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .cm-data { padding-top: 16px; border-top: 1px solid var(--color-line); }
+  .cm-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; margin-top: 22px; }
+  .cm-foot p {
+    flex: 1 1 320px;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  @media (min-width: 900px) {
+    .cm-body { grid-template-columns: minmax(0, 1fr) minmax(0, 560px); }
+    .cm-in { padding: 24px 28px; justify-content: center; gap: 40px; }
+    .cm-big { font-size: 2.5rem; }
+    .cm-pair { grid-template-columns: 1fr 1fr; gap: 28px; }
+    .cm-out { grid-template-columns: 1fr 1fr; gap: 20px 28px; padding: 24px 28px; border-top: 0; border-left: 1px solid var(--color-line); }
+    .cm-data { grid-column: 1 / -1; }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .cm-panel { margin-top: 1.25rem; }
+    .cm-in { gap: 20px; padding: 14px 16px; }
+    .cm-pair { gap: 16px; }
+    .cm-out { gap: 14px; padding: 14px 16px; }
+    .cm-foot { margin-top: 14px; }
+  }
+</style>

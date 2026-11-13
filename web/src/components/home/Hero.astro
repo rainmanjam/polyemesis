@@ -1,144 +1,432 @@
 ---
-/* THE HOME HERO: one headline, one lede, two actions and the split diagram
- * with its story tabs. Everything is server-rendered so the page reads with no
- * script; scripts/home/hero.ts (loaded lazily by the page) un-hides the tablist
- * and Pause, swaps the destination divs for buttons and drives the status line.
+/* THE HOME HERO, three columns on a wide screen: the copy and the case
+ * readout on the left, the globe in the middle, one tile per destination on the
+ * right; the in -> out strip and the install command run full width below.
+ * Complete without script: the server renders every case (only the first
+ * visible) and its fine print; scripts/home/hero.ts switches between cases and,
+ * while motion is allowed, moves the meters and the ON AIR clock.
  *
- * DOM CONTRACT (hero.ts reads exactly this): section[data-hero], a hidden
- * [role=tablist][data-story-tabs] holding #tab-<k> buttons, #panel-<k>
- * tabpanels (hidden except Streamer), [data-status][aria-live=polite],
- * [data-fine] and a hidden [data-pause].
+ * DOM CONTRACT (hero.ts reads exactly this): section[data-hero]; a
+ * [role=tablist][data-case-tabs] holding button#tab-<key>[data-key], each with
+ * aria-controls="panel-<key>" (initTabs reads ONE id); div#panel-<key>
+ * [role=tabpanel] (hidden except the first) holding that case's readout, tile
+ * header and tiles, and laid out with display: contents so those three land in
+ * their own grid areas; [data-meter] and [data-clock]; [data-fine]; [data-globe]
+ * (the globe mounts here in a later task, over this still poster);
+ * button[data-pause], wired by boot().
  *
- * NO LAYOUT SHIFT. The tab row's height is reserved while the tablist is still
- * hidden, Pause is absolutely positioned inside space the stage already keeps,
- * and the status line reserves three lines. The server prints the Streamer
- * story's status caption and fine print, the same text hero.ts starts from. */
-import SplitDiagram from "./SplitDiagram.astro";
-import { STORIES, STORY_ORDER, statusFor } from "../../scripts/home/stories";
+ * NO LAYOUT SHIFT. [data-globe] has a fixed aspect-ratio box. The chips of a
+ * tile are not controls: they are a picture of which tracks the destination
+ * carries (data-on). Coral marks audio only; the video stays off-white.
+ *
+ * Children of .hero-grid are placed by grid-template-areas, so source order
+ * (reading and tab order) is the phone's stacking order.
+ *
+ * FOCUS ORDER = VISUAL ORDER at both widths: tabs, Install, See how, Pause
+ * motion, Copy. The foot (meta + Pause) sits before the install block in the
+ * source and in the phone's areas; on a wide screen the foot is above the
+ * install row in its own area. check-home.mjs ("keyboard") compares the focus
+ * order with the on-screen order at 1440 and 390. */
+import { Picture } from "astro:assets";
+import CodeBlock from "../CodeBlock.astro";
+import poster from "../../assets/home/globe-poster.png";
+import { CASES, CASE_ORDER } from "../../data/cases.mjs";
+import { DOCKER_RUN } from "../../data/install.mjs";
+import { latestRelease } from "../../lib/release";
+import { clockText, heroModel } from "../../scripts/home/hero-model";
 
-const first = STORY_ORDER[0];
-const status = statusFor(STORIES[first], null, false);
+const first = CASES[CASE_ORDER[0]];
+const release = latestRelease();
+const meta = [release && `v${release.version}`, release?.date, "MIT", "self-hosted"].filter(Boolean).join(" · ");
+const clock = clockText(0);
 ---
 
-<section class="hero relative overflow-hidden border-b border-line" data-hero>
-  <div class="signal-grid absolute inset-0" aria-hidden="true"></div>
-  <div class="wrap relative py-12 lg:py-10">
-    <h1 class="rise rise-1 hero-h1">One video. A <em class="it">different</em> sound for every audience.</h1>
-    <p class="rise rise-2 hero-lede">
-      Upload once from OBS, an IRL backpack or any SRT encoder.{" "}<span class="lede-more">polyemesis sends your video to Twitch, YouTube and Kick untouched, with the music on Twitch and off YouTube. Free, and it runs on your own server.</span>
-    </p>
-    <div class="rise rise-3 hero-cta">
-      <a class="btn btn-onair" href="#run">Install polyemesis</a>
-      <a class="btn btn-ghost" href="#how">See how it works</a>
-    </div>
+<section class="hero border-b border-line" data-hero>
+  <div class="wrap">
+    <div class="hero-grid">
+      <h1 class="hero-h1">One stream in. <br /><em class="it it-hot">Different</em> audio out.</h1>
+      <p class="hero-lede">
+        Open-source software you host yourself: stream from anywhere to anywhere, and give every audience the version meant for them.
+      </p>
 
-    <div class="rise rise-4 stage">
-      <div class="tabrow">
-        <div role="tablist" aria-label="Example setups" data-story-tabs hidden class="tabs">
-          {
-            STORY_ORDER.map((k) => (
-              <button
-                type="button"
-                role="tab"
-                class="tab"
-                id={`tab-${k}`}
-                aria-controls={`panel-${k}`}
-                aria-selected={k === first ? "true" : "false"}
-                tabindex={k === first ? 0 : -1}
-              >
-                {STORIES[k].tab}
-              </button>
-            ))
-          }
-        </div>
+      <div class="hero-tabs" role="tablist" aria-label="Example: who is watching" data-case-tabs>
+        {
+          CASE_ORDER.map((k, i) => (
+            <button
+              type="button"
+              role="tab"
+              class="hero-tab"
+              id={`tab-${k}`}
+              data-key={k}
+              aria-controls={`panel-${k}`}
+              aria-selected={i === 0 ? "true" : "false"}
+              tabindex={i === 0 ? 0 : -1}
+            >
+              {CASES[k].tab}
+            </button>
+          ))
+        }
       </div>
 
       {
-        STORY_ORDER.map((k) => (
-          <div class="panel" role="tabpanel" id={`panel-${k}`} aria-labelledby={`tab-${k}`} hidden={k !== "streamer"}>
-            <SplitDiagram story={k} mode="hero" />
-          </div>
-        ))
+        CASE_ORDER.map((k, i) => {
+          const c = CASES[k];
+          const m = heroModel(k);
+          return (
+            <div role="tabpanel" id={`panel-${k}`} aria-labelledby={`tab-${k}`} hidden={i !== 0} class="case-panel">
+              <div class="readout">
+                <p class="readout-src">
+                  <span class="k">SOURCE</span> <b>{c.source.label} · {c.source.city}</b>
+                </p>
+                <p>IN · {c.source.spec}</p>
+                <p>{m.flow}</p>
+                <p class="onair">
+                  <i aria-hidden="true" />
+                  <span data-clock>{clock}</span>
+                </p>
+              </div>
+              <div class="dest">
+              <p class="tiles-head">
+                <span>DESTINATIONS {m.header.destinations} LIVE</span>
+                <span>AUDIO MIXES {m.header.mixes}</span>
+              </p>
+              <ul class="tiles">
+                {m.tiles.map((t) => (
+                  <li class="tile">
+                    <p class="tile-row">
+                      <span class="tile-name">{t.name}</span>
+                      <span class="tile-city">{t.city}</span>
+                    </p>
+                    <p class="tile-mix">▸ {t.mix}</p>
+                    <ul class="chips">
+                      {t.chips.map((chip) => (
+                        <li class="chip" data-on={chip.on ? "true" : "false"}>
+                          {chip.label}
+                        </li>
+                      ))}
+                    </ul>
+                    <div class="meter" aria-hidden="true">
+                      <i data-meter style={`transform: scaleX(${t.rest})`} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              </div>
+            </div>
+          );
+        })
       }
 
-      <p class="status" data-status aria-live="polite">{status.text}</p>
-      <p class="fine" data-fine>{STORIES[first].fine}</p>
-      <button type="button" class="pause btn btn-ghost" data-pause aria-pressed="false" hidden>Pause motion</button>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="/download">Install polyemesis</a>
+        <a class="btn btn-ghost" href="#how">See how it works</a>
+      </div>
+
+      <div class="hero-foot">
+        <p class="hero-meta">{meta}</p>
+        <button type="button" class="hero-pause" data-pause aria-pressed="false" hidden>Pause motion</button>
+      </div>
+
+      <CodeBlock class="hero-code" label="docker run" code={DOCKER_RUN} codeId="hero-docker" />
+
+      <div class="hero-globe" data-globe>
+        <Picture
+          src={poster}
+          formats={["avif", "webp"]}
+          alt=""
+          width={650}
+          height={650}
+          widths={[325, 650]}
+          sizes="(min-width: 1100px) 540px, 90vw"
+          loading="eager"
+          fetchpriority="high"
+          decoding="async"
+        />
+      </div>
+
+      <div class="hero-strip" role="group" aria-label="Supported inputs and outputs">
+        <span><span class="k">IN</span> OBS · RTMP · SRT · IRL backpack (SRTLA)</span>
+        <span class="arrow" aria-hidden="true"></span>
+        <span><span class="k">OUT</span> Twitch · YouTube · Kick · Facebook · X · custom RTMP/SRT</span>
+      </div>
+
+      <p class="hero-fine" data-fine>{first.fine}</p>
     </div>
   </div>
 </section>
 
 <style>
-  /* The headline slides in but never starts transparent. A text block painted
-     at opacity 0 is not a largest-contentful-paint candidate, and its entry
-     animation runs on the compositor, so it is never re-measured: with the
-     global opacity rise the announcement bar's line was the page's LCP. */
-  @keyframes hero-rise {
-    from { transform: translateY(14px); }
-    to { transform: none; }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "head" "lede" "tabs" "readout" "cta" "foot" "code" "globe" "dest" "strip" "fine";
+    padding-block: 2rem 1.5rem;
   }
+  .case-panel { display: contents; }
+  .case-panel[hidden] { display: none; }
+
   .hero-h1 {
-    animation-name: hero-rise;
-    font-family: var(--font-display);
-    font-size: clamp(30px, 4.6vw, 65px);
-    line-height: 1.06;
-    font-weight: 700;
+    grid-area: head;
+    font-weight: 600;
+    font-size: clamp(2.5rem, 11.5vw, 3.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
     text-wrap: balance;
-    max-width: 22ch;
   }
   .hero-lede {
-    margin-top: 1.5rem;
-    max-width: 40rem;
-    font-size: 1.125rem;
-    line-height: 1.6;
-    text-wrap: pretty;
-    /* --color-muted is 6.4:1 on the page ground; the home pins body text at
-       7:1 (check-home J), so the lede reads a step toward the home bone. */
-    color: color-mix(in oklab, var(--color-muted) 50%, var(--home-bone));
+    grid-area: lede;
+    margin-top: 1.25rem;
+    max-width: 30em;
+    font-size: 1.1875rem;
+    line-height: 1.45;
+    color: var(--color-fg);
   }
-  .hero-cta { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
 
-  .stage { position: relative; margin-top: 1.75rem; padding-bottom: 3.25rem; }
-  /* The row keeps the tablist's 44px while the tablist is hidden (no script). */
-  .tabrow { min-height: 44px; margin-bottom: 0.75rem; }
-  .tabs { display: flex; gap: 0.5rem; }
-  .tabs[hidden] { display: none; }
-  .tab {
-    flex: 1 1 0;
-    min-height: 44px;
-    padding-inline: 0.75rem;
+  .hero-tabs {
+    grid-area: tabs;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 1.5rem;
+  }
+  .hero-tab {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1;
+    padding: 0.6875rem 0.875rem;
     border: 1px solid var(--color-line-strong);
-    border-radius: 0.5rem;
+    border-radius: 2px;
     background: transparent;
     color: var(--color-muted);
-    font-size: 0.9375rem;
     cursor: pointer;
   }
-  .tab[aria-selected="true"] { color: var(--color-fg); border-color: var(--color-fg); background: var(--color-primary-dim); }
-  @media (min-width: 640px) {
-    .tab { flex: 0 0 auto; min-width: 7.5rem; }
+  .hero-tab:hover { color: var(--color-fg); border-color: var(--color-muted); }
+  .hero-tab[aria-selected="true"] {
+    color: var(--color-fg);
+    border-color: var(--color-fg);
+    background: var(--color-raised);
   }
 
-  .status { margin-top: 1rem; min-height: 3lh; max-width: 44rem; color: var(--color-muted); }
-  .status :global(b) { font-weight: 600; color: var(--color-fg); }
-  .fine { margin-top: 0.5rem; max-width: 44rem; font-size: 13px; color: var(--color-subtle); }
-  /* Out of flow: the stage already keeps the room Pause takes. */
-  .pause { position: absolute; right: 0; bottom: 0; min-height: 44px; }
+  .readout {
+    grid-area: readout;
+    margin-top: 1rem;
+    display: grid;
+    gap: 0.1875rem;
+    align-content: start;
+    padding-left: 0.875rem;
+    border-left: 1px solid var(--color-line-strong);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .readout p { margin: 0; }
+  .readout b { color: var(--color-fg); font-weight: 500; }
+  .readout .k { color: var(--color-muted); }
+  .onair { display: flex; align-items: center; gap: 0.5rem; color: var(--color-fg); margin-top: 0.1875rem; }
+  .onair i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-fg); display: inline-block; }
 
-  @media (max-width: 639px) {
-    .lede-more { display: none; }
+  .hero-cta {
+    grid-area: cta;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    align-self: start;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
   }
 
-  /* The outgoing panel fades for 150ms during a story switch (hero.ts adds
-     .swap-out). Only while motion is on, which is off for reduced-motion
-     visitors and while the page's Pause is pressed. */
-  /* The site-wide .btn has a 90ms hover and press feedback, including a 1px
-     press translate. In the hero that is motion like the rest: off while the
-     gate is off (Pause, reduced motion, before the script runs). */
-  :global(html:not(.motion-on)) .btn { transition: none; }
+  .hero-globe {
+    grid-area: globe;
+    width: min(100%, 520px);
+    aspect-ratio: 1 / 1;
+    margin: 1.5rem auto 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .hero-globe :global(img),
+  .hero-globe :global(picture) { display: block; width: 100%; height: 100%; }
+  /* The poster has a wide margin of page colour round the globe; scaling it up
+     and cropping the margin makes the globe fill its box. */
+  .hero-globe :global(img) { transform: scale(1.12); }
 
-  @media (prefers-reduced-motion: no-preference) {
-    :global(.motion-on) .panel { transition: opacity 150ms ease-out; }
-    :global(.motion-on) .panel.swap-out { opacity: 0; }
+  /* The globe's labels (globe.ts) are real text over its canvas. */
+  .hero-globe :global(.globe-labels) { position: absolute; inset: 0; pointer-events: none; }
+  .hero-globe :global(.globe-leaders) { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .hero-globe :global(.globe-leaders line) { stroke: var(--color-muted); stroke-width: 1; opacity: 0; }
+  .hero-globe :global(.gl-label) {
+    position: absolute;
+    left: 0;
+    top: 0;
+    padding: 2px 6px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    white-space: nowrap;
+    color: var(--color-fg);
+    background: var(--color-ink);
+    border: 1px solid var(--color-line);
+    opacity: 0;
+  }
+  .hero-globe :global(.gl-label.src) { color: var(--color-muted); }
+
+  .dest { grid-area: dest; }
+  .tiles-head {
+    display: flex;
+    justify-content: space-between;
+    margin: 1.5rem 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .tiles {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3125rem;
+    padding: 0.5rem 0.5rem 0.625rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+    font-family: var(--font-mono);
+  }
+  .tile p { margin: 0; }
+  .tile-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.9375rem; font-weight: 600; }
+  .tile-city { font-size: 0.75rem; font-weight: 400; color: var(--color-muted); }
+  .tile-mix { font-size: 0.75rem; color: var(--color-muted); overflow-wrap: anywhere; }
+  .chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 3px; }
+  .chip {
+    font-size: 0.75rem;
+    line-height: 1.35;
+    padding: 2px 2px;
+    /* Tight on purpose: the longest example (five tracks with long names) must fit
+       one row of the 392px tile column, or its tiles grow and the install command
+       leaves the first screen. */
+    letter-spacing: -0.02em;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 2px;
+    color: var(--color-muted);
+    text-transform: uppercase;
+  }
+  /* Lit = this destination carries the track. Coral is audio. */
+  .chip[data-on="true"] {
+    color: var(--color-fg);
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  }
+  .meter { position: relative; height: 5px; background: var(--color-raised); }
+  .meter i { position: absolute; inset: 0; background: var(--color-accent); transform-origin: left; }
+
+  .hero-foot {
+    grid-area: foot;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    margin-top: 0.875rem;
+  }
+  .hero-meta, .hero-fine {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .hero-fine { grid-area: fine; margin-top: 0.75rem; max-width: 60em; }
+  .hero-pause {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.4375rem 0.625rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--color-muted);
+    cursor: pointer;
+  }
+  .hero-pause:hover { color: var(--color-fg); border-color: var(--color-muted); }
+
+  .hero-strip {
+    grid-area: strip;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem 1rem;
+    margin: 1.5rem 0 0;
+    padding-block: 0.875rem;
+    border-block: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+  .hero-strip .k { color: var(--color-muted); margin-right: 0.5rem; }
+  .hero-strip .arrow { color: var(--color-muted); }
+  .hero-strip .arrow::before { content: "\2193"; }
+  .hero-grid :global(.hero-code) { grid-area: code; margin-top: 1rem; }
+
+  @media (min-width: 900px) {
+    .hero-strip { flex-direction: row; flex-wrap: wrap; align-items: baseline; }
+    .hero-strip .arrow::before { content: "\2192"; }
+  }
+
+  @media (min-width: 1100px) {
+    .hero-grid {
+      grid-template-columns: 340px minmax(0, 1fr) 392px;
+      column-gap: 1.5rem;
+      /* The 1fr row (foot) takes any extra height, so the copy stays packed at
+         the top beside the taller globe and tiles. */
+      grid-template-rows: auto auto auto auto auto 1fr auto auto auto;
+      grid-template-areas:
+        "head   head  dest"
+        "lede   globe dest"
+        "tabs   globe dest"
+        "readout globe dest"
+        "cta    globe dest"
+        "foot   globe dest"
+        "strip  strip strip"
+        "code   code  code"
+        "fine   fine  fine";
+      padding-block: 0.5rem 0.75rem;
+    }
+    .hero-h1 { font-size: clamp(3.5rem, 4.6vw, 4.25rem); white-space: nowrap; }
+    .hero-lede { margin-top: 0.75rem; }
+    .hero-tabs { margin-top: 1rem; }
+    /* The two buttons must share one row of the 340px column. Linux Chromium sets the text about 3% wider than
+       macOS, and at the old padding they wrapped there (a second 45px row, which pushed the install command
+       off a 900px screen on the CI runner), so the padding and gap are trimmed to leave ~15px spare. */
+    .hero-cta { gap: 0.5rem; }
+    .hero-cta :global(.btn) { padding-inline: 0.875rem; }
+    .hero-globe { margin: 0; width: 100%; align-self: start; }
+    .tiles-head { margin: 0 0 0.5rem; }
+    .hero-foot { align-self: start; }
+    .hero-strip { margin-top: 1rem; }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .hero-grid { padding-block: 1.25rem 1rem; }
+    .hero-lede { margin-top: 0.875rem; }
+    .hero-tabs { margin-top: 1rem; }
+    .hero-cta { margin-top: 1rem; }
+    .hero-globe { margin-top: 0.5rem; }
+    .tiles-head { margin-top: 0.75rem; }
+    .tiles { gap: 6px; }
+    .tile { gap: 3px; padding-block: 6px 7px; }
+    .hero-foot { margin-top: 0.5rem; }
+    .hero-strip { margin-top: 1rem; padding-block: 0.625rem; }
+    .hero-fine { margin-top: 0.5rem; }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .hero-globe { width: min(100%, 300px); }
   }
 </style>

@@ -1,0 +1,430 @@
+---
+/* "Run the show from your desk": a real Stream Deck + whose keys are drawn by
+ * the plugin's own key code, with a legend of the real controls beside it.
+ *
+ * The server renders the whole section in its resting state (the still, every
+ * legend row with its state, the log, the copy, the credit), so it is complete
+ * without script. scripts/home/deck/index.ts then enables the controls and
+ * plays a short scripted show; scripts/home/deck/scene.ts replaces the still
+ * with the 3D model, and it is imported only when the section is near, so
+ * neither three.js nor the model is fetched on first load.
+ *
+ * This is the one place on the site where platform marks appear, and only the
+ * ones the plugin itself draws on its keys (the marks come from the plugin's
+ * keyImage.ts through faces.ts). Destination names, the preset name and the
+ * audience count are illustrative; the key labels, tap and hold behaviour, hold
+ * length, gain step and requirements are the plugin's (docs/STREAM-DECK.md,
+ * integrations/streamdeck/README.md and manifest.json).
+ *
+ * Status colours are the console's tokens; coral is only the audio controls
+ * and the focus ring. */
+import { Picture } from "astro:assets";
+import still from "../../assets/home/deck-still.jpg";
+import manifest from "../../../../integrations/streamdeck/com.polyemesis.streamdeck.sdPlugin/manifest.json";
+import { glyphPath, keyFace, layoutFor } from "../../scripts/home/deck/faces";
+import { DESTS, KEYS, REST, REST_LOG, dialDesc, gainName, keyDesc, GAIN_STEP, HOLD_SECONDS } from "../../scripts/home/deck/state";
+
+const marks = DESTS.map((d, i) => ({ platform: d.platform, path: glyphPath(layoutFor(keyFace(REST, 3 + i))) }));
+const mark = (platform?: string) => marks.find((m) => m.platform === platform);
+
+/* The plugin's actions that the legend does not show a row for. */
+const SHOWN = new Set(["Destination", "Go live", "Stop all", "Routing preset", "Track gain", "Meter", "Viewers"]);
+const also = (manifest.Actions as Array<{ Name: string }>).map((a) => a.Name).filter((n) => !SHOWN.has(n));
+const mac = manifest.OS.find((o) => o.Platform === "mac")?.MinimumVersion;
+const win = manifest.OS.find((o) => o.Platform === "windows")?.MinimumVersion;
+const appMin = manifest.Software.MinimumVersion;
+
+const clock = (t: number) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+const DIAL_OPS = [
+  ["down", "−", `turn down ${GAIN_STEP} dB`],
+  ["up", "+", `turn up ${GAIN_STEP} dB`],
+  ["push", "push", "push to mute or unmute"],
+  ["zero", "0 dB", "touch the strip, back to 0 dB"],
+] as const;
+---
+
+<section id="deck" class="dk" data-deck data-journey-stage="understand" aria-labelledby="h-deck">
+  <svg class="dk-sprite" aria-hidden="true" focusable="false" width="0" height="0">
+    {marks.map((m) => <symbol id={`deck-mk-${m.platform}`} viewBox="0 0 24 24"><path d={m.path} fill="currentColor" /></symbol>)}
+  </svg>
+
+  <div class="wrap">
+    <div class="dk-head">
+      <div>
+        <p class="eyebrow"><b>02</b> Understand</p>
+        <h2 id="h-deck">Run the show from your <em class="it it-hot">desk</em>.</h2>
+      </div>
+      <p class="sec-lede">
+        The polyemesis plugin puts every destination on a key: see which are live, go live, retry one that failed, and ride a track's level with a dial on a Stream Deck +.
+      </p>
+    </div>
+
+    <div class="dk-grid">
+      <div class="dk-stage">
+        <div
+          class="dk-box"
+          data-deck-box
+          role="group"
+          aria-label="A Stream Deck + running the polyemesis plugin. The list beside it has the same controls."
+        >
+          <Picture
+            class="dk-still"
+            src={still}
+            formats={["avif", "webp"]}
+            alt="A Stream Deck + running the polyemesis plugin: eight keys, Go live, Stop all and Routing preset, then five destinations each with its platform mark (Club TV on YouTube, Twitch, Kick, Club page on Facebook and X), all live, with the touch strip and four dials below."
+            width={1025}
+            height={911}
+            widths={[640, 1025]}
+            sizes="(min-width: 1000px) 740px, 100vw"
+            loading="lazy"
+            decoding="async"
+          />
+          <div class="dk-tip" data-tip aria-hidden="true"></div>
+          <p class="dk-hint" data-hint hidden>drag to orbit · press a key · turn a dial</p>
+          <p class="dk-mode" data-mode hidden><i></i><span>show loop</span></p>
+        </div>
+        <div class="dk-sr" data-sr role="status" aria-live="polite"></div>
+      </div>
+
+      <aside class="dk-side">
+        <div class="dk-log">
+          {/* The clock sits beside the heading, not in it: a heading whose text keeps changing renames itself. */}
+          <div class="dk-hd">
+            <h3>What just happened</h3>
+            <em data-clock>{clock(REST_LOG[0].t)}</em>
+          </div>
+          <ol data-log aria-label="Recent plugin actions">
+            {REST_LOG.map((e) => (
+              <li class={e.audio ? "audio" : undefined}>
+                <span class="t">{clock(e.t)}</span>
+                <span class="v">{e.verb}</span>
+                <span class="m">
+                  {mark(e.platform) && (
+                    <svg class="mk" aria-hidden="true" focusable="false"><use href={`#deck-mk-${e.platform}`} /></svg>
+                  )}
+                  {e.what}{" "}<i>{e.res}</i>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <div class="dk-acts">
+          <h3><span>On the deck</span><em data-acts-hint></em></h3>
+          <ul class="dk-rows">
+            {KEYS.map((k, i) => (
+              <li>
+                <button
+                  type="button"
+                  class="dk-r"
+                  data-key={i}
+                  disabled
+                  aria-label={`${k.name}, ${k.kind === "hold" ? `hold ${HOLD_SECONDS} seconds` : "tap"}. ${keyDesc(REST, i)}`}
+                  title={k.tip}
+                >
+                  <span class="n">
+                    {mark(k.platform) && <svg class="mk" aria-hidden="true" focusable="false"><use href={`#deck-mk-${k.platform}`} /></svg>}
+                    <span>{k.name}</span>
+                  </span>
+                  <span class="d" data-desc>{keyDesc(REST, i)}</span>
+                  <span class={k.kind === "hold" ? "c hold" : "c"}>{k.kind === "hold" ? `hold ${HOLD_SECONDS} s` : k.kind}</span>
+                </button>
+              </li>
+            ))}
+            {([0, 1] as const).map((dial) => (
+              <li>
+                <div class="dk-r dial" data-dial={dial}>
+                  <span class="n">
+                    <svg class="mk" aria-hidden="true" focusable="false"><use href={`#deck-mk-${DESTS[dial].platform}`} /></svg>
+                    <span>{gainName(dial)}</span>
+                  </span>
+                  <span class="d db" data-db>{dialDesc(REST, dial)}</span>
+                  <span class="bs">
+                    {DIAL_OPS.map(([op, text, what]) => (
+                      <button type="button" data-op={op} disabled aria-label={`${gainName(dial)} gain: ${what}`} title={`${gainName(dial)} gain: ${what}`}>{text}</button>
+                    ))}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <p class="dk-also">
+            <b>On the other dials:</b> Meter shows the loudest channel, read five times a second; Viewers shows the audience across every platform. <b>Also in the plugin:</b> {also.join(", ")}.
+          </p>
+        </div>
+
+        <div class="dk-links">
+          <a class="more" href="/docs/stream-deck">Stream Deck plugin guide</a>
+          <a class="more" href="https://github.com/rainmanjam/polyemesis/releases">Plugin on GitHub releases</a>
+        </div>
+      </aside>
+    </div>
+
+    <div class="dk-foot">
+      <p class="dk-need">
+        <b>You need:</b> Stream Deck app {appMin} or later (macOS {mac}+ or Windows {win}+) · a Stream Deck + for the Meter and Track gain dials, and for Viewers on a dial; every other action is a key and works on any model · an API token from polyemesis Settings (a read token shows state; an admin token changes things, and shows Viewers)
+      </p>
+      <p class="dk-legal">
+        Platform logos identify where a destination streams. polyemesis is not affiliated with or endorsed by YouTube, Twitch, Kick, Facebook, Meta, X or Elgato; their names and logos are trademarks of their owners.
+      </p>
+      <p class="dk-credit">Stream Deck + model: Elgato · <a class="more" href="/models/NOTICE.txt">model notice</a></p>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  #deck {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+    overflow: hidden;
+  }
+  #deck h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  #deck .dk-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+  #deck .dk-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: 1.25rem 3rem;
+    align-items: end;
+  }
+  #deck .dk-head .sec-lede { margin: 0; font-size: 1.125rem; max-width: 34em; }
+  #deck .dk-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    gap: 2.25rem;
+    margin-top: 0.5rem;
+    align-items: start;
+  }
+
+  /* The fixed box: the still and the canvas share it, so nothing moves when the
+     canvas arrives. Both dissolve at the edges (a 3px transparent rim, then a
+     fade), so the 3D area has no visible rectangle. */
+  #deck .dk-box {
+    position: relative;
+    aspect-ratio: 1025 / 911;
+    touch-action: pan-y;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #deck .dk-box.over { cursor: pointer; }
+  #deck .dk-box.grab { cursor: grabbing; }
+  #deck .dk-box canvas,
+  #deck .dk-box picture,
+  #deck .dk-box img {
+    -webkit-mask-image:
+      linear-gradient(to right, transparent 0, transparent 3px, #000 7%, #000 93%, transparent calc(100% - 3px), transparent 100%),
+      linear-gradient(to bottom, transparent 0, transparent 3px, #000 6%, #000 94%, transparent calc(100% - 3px), transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(to right, transparent 0, transparent 3px, #000 7%, #000 93%, transparent calc(100% - 3px), transparent 100%),
+      linear-gradient(to bottom, transparent 0, transparent 3px, #000 6%, #000 94%, transparent calc(100% - 3px), transparent 100%);
+    mask-composite: intersect;
+  }
+  #deck .dk-box picture,
+  #deck .dk-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #deck .dk-box img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #deck .dk-box canvas { touch-action: pan-y; cursor: grab; }
+  #deck .dk-box.over canvas { cursor: pointer; }
+  #deck .dk-box.grab canvas { cursor: grabbing; }
+
+  #deck .dk-tip {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+    max-width: 260px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line-strong);
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--color-fg);
+    opacity: 0;
+  }
+  #deck .dk-tip.on { opacity: 1; }
+  #deck .dk-tip b { display: block; font-weight: 500; }
+  #deck .dk-tip span { color: var(--color-muted); }
+  #deck .dk-hint,
+  #deck .dk-mode {
+    position: absolute;
+    bottom: 0;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+    pointer-events: none;
+  }
+  #deck .dk-hint { left: 0; }
+  #deck .dk-mode { right: 0; display: flex; gap: 8px; align-items: center; }
+  #deck .dk-mode[hidden], #deck .dk-hint[hidden] { display: none; }
+  #deck .dk-mode i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-faint); display: inline-block; }
+  #deck .dk-mode.on i { background: var(--color-ok); }
+  #deck .dk-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+  #deck .dk-side { display: flex; flex-direction: column; gap: 1.125rem; min-width: 0; }
+  #deck .dk-log .dk-hd,
+  #deck .dk-acts h3 {
+    margin: 0 0 8px;
+    font-family: var(--font-mono);
+    font-weight: 400;
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  #deck .dk-log .dk-hd h3 { margin: 0; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+  #deck .dk-log .dk-hd em, #deck .dk-acts h3 em { font-style: normal; letter-spacing: 0; text-transform: none; }
+  #deck .dk-log ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-surface);
+    height: 142px;
+    overflow: hidden;
+  }
+  #deck .dk-log li {
+    display: grid;
+    grid-template-columns: 34px 38px 1fr;
+    gap: 0 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+    height: 35px;
+    overflow: hidden;
+    align-items: center;
+  }
+  #deck .dk-log li:last-child { border-bottom: 0; }
+  #deck .dk-log li .t { color: var(--color-muted); }
+  #deck .dk-log li .v { color: var(--color-fg); }
+  #deck .dk-log li.audio .v { color: var(--color-accent); }
+  #deck .dk-log li .m { color: var(--color-fg); min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #deck .dk-log li .m i { font-style: normal; color: var(--color-muted); }
+  #deck .mk { width: 14px; height: 14px; display: inline-block; vertical-align: -2px; margin-right: 6px; flex: none; }
+
+  #deck .dk-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--color-line); }
+  #deck .dk-rows li { border-bottom: 1px solid var(--color-line); }
+  #deck .dk-r {
+    display: grid;
+    grid-template-columns: minmax(0, 156px) minmax(0, 1fr) auto;
+    gap: 0 10px;
+    align-items: center;
+    width: 100%;
+    min-height: 29px;
+    padding: 3px 6px;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    text-align: left;
+    border-radius: 0;
+  }
+  #deck button.dk-r { cursor: pointer; }
+  #deck button.dk-r:disabled { cursor: default; }
+  #deck button.dk-r:not(:disabled):hover { background: var(--color-raised); }
+  #deck button.dk-r:not(:disabled):active { background: var(--color-line); }
+  #deck button.dk-r:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+  #deck .dk-r .n { display: flex; align-items: center; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #deck .dk-r .d { color: var(--color-muted); min-width: 0; }
+  #deck .dk-r .c { color: var(--color-muted); border: 1px solid var(--color-line-strong); border-radius: 2px; padding: 2px 6px; line-height: 1.2; }
+  #deck .dk-r .c.hold { color: var(--color-fg); }
+  #deck .dk-r .bs { display: inline-flex; }
+  #deck .dk-r .bs button {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1;
+    min-height: 26px;
+    min-width: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-surface);
+    color: var(--color-fg);
+    cursor: pointer;
+    margin-left: -1px;
+    border-radius: 0;
+  }
+  #deck .dk-r .bs button:disabled { cursor: default; }
+  #deck .dk-r .bs button:first-child { margin-left: 0; border-radius: 2px 0 0 2px; }
+  #deck .dk-r .bs button:last-child { border-radius: 0 2px 2px 0; }
+  #deck .dk-r .bs button:not(:disabled):hover { border-color: var(--color-accent); }
+  #deck .dk-r .bs button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; position: relative; z-index: 1; }
+  #deck .dk-r .d.db { color: var(--color-fg); }
+  #deck .dk-r .d.db.mut { color: var(--color-accent); }
+  #deck .dk-also { margin: 8px 0 0; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55; color: var(--color-muted); }
+  #deck .dk-also b { font-weight: 400; color: var(--color-fg); }
+  #deck .dk-links { display: flex; gap: 10px 26px; flex-wrap: wrap; }
+  #deck .dk-foot {
+    margin-top: 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 40px;
+    border-top: 1px solid var(--color-line);
+    padding-top: 10px;
+  }
+  #deck .dk-need,
+  #deck .dk-legal,
+  #deck .dk-credit { margin: 0; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.6; color: var(--color-muted); max-width: none; flex: 1 1 100%; }
+  #deck .dk-need b { font-weight: 400; color: var(--color-fg); }
+  #deck .dk-credit a { margin-left: 0.25rem; }
+
+  @media (max-width: 1000px) {
+    #deck .dk-head { grid-template-columns: 1fr; }
+    #deck .dk-grid { grid-template-columns: 1fr; gap: 1.375rem; }
+  }
+  @media (max-width: 520px) {
+    #deck .dk-box { aspect-ratio: 1 / 1; margin-inline: -20px; }
+    #deck .dk-hint { left: 20px; }
+    #deck .dk-mode { right: 20px; top: 0; bottom: auto; }
+    /* The show empties the log and refills it (0 to 4 rows) every 26 s, which moved the whole legend below it
+       by up to 150px each cycle. The mechanism is a floor under the list's height, sized to the TALLEST four
+       rows measured over a full show: 150px at 360-430 (142px from 600 up), 167px at 320 where rows wrap to
+       three lines. The floors below add ~30px for a slower font (Linux sets text ~3% wider). Rows keep their
+       full text at 0.75rem; nothing is truncated. check-home.mjs "deck-stability" measures zero movement. */
+    #deck .dk-log ol { height: auto; min-height: 184px; }
+    #deck .dk-log li { grid-template-columns: 30px 34px 1fr; gap: 0 6px; padding: 5px 10px; height: auto; min-height: 37px; align-items: start; overflow: visible; }
+    #deck .dk-log li .m { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+    #deck .dk-r { grid-template-columns: minmax(0, 108px) minmax(0, 1fr) auto; gap: 0 8px; padding: 4px 6px; min-height: 30px; }
+    #deck .dk-r .d { white-space: normal; overflow: visible; text-overflow: clip; }
+    #deck .dk-r .n { overflow: visible; text-overflow: clip; }
+    #deck .dk-r.dial { grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+    #deck .dk-r.dial .bs { grid-column: 1 / -1; grid-row: 2; margin: 2px 0 4px; width: 100%; }
+    #deck .dk-r.dial .d { grid-column: 2; grid-row: 1; text-align: right; }
+    #deck .dk-r.dial .n { grid-column: 1; }
+    #deck .dk-r .bs button { min-height: 32px; min-width: 44px; flex: 1; }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    #deck .dk-grid { gap: 1rem; }
+    #deck .dk-side { gap: 0.75rem; }
+    #deck .dk-log li { padding-block: 3px; min-height: 32px; }
+    #deck .dk-head .sec-lede { font-size: 1.0625rem; }
+  }
+
+  @media (max-width: 359px) {
+    #deck .dk-log ol { min-height: 200px; }
+  }
+  /* The legend's own height also moves a little as the show changes row text (a description wraps in one
+     state and not in another): measured over a full show, 524-533px at 390, 650-696px at 320. The floors are
+     the tallest state plus ~25px, per width band. From 521px up (where the log has its fixed height and rows no
+     longer wrap) it never moves: measured 397-424px, constant, at 521, 540, 599, 650, 700 and 767, so there is no floor there. */
+  @media (max-width: 359px) { #deck .dk-acts { min-height: 720px; } }
+  @media (min-width: 360px) and (max-width: 389px) { #deck .dk-acts { min-height: 600px; } }
+  @media (min-width: 390px) and (max-width: 429px) { #deck .dk-acts { min-height: 560px; } }
+  @media (min-width: 430px) and (max-width: 520px) { #deck .dk-acts { min-height: 550px; } }
+</style>

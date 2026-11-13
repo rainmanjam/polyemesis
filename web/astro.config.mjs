@@ -32,7 +32,7 @@ import { hastMermaid } from "./src/lib/hast-mermaid.mjs";
  * changing lastmod in unison for a change none of them contains. The markdown
  * file is the thing whose content the date is a claim about. */
 /** @type {Record<string, string>} */
-const pageSource = {
+export const pageSource = {
   "/": "src/pages/index.astro",
   "/features": "src/pages/features.astro",
   "/calculator": "src/pages/calculator.astro",

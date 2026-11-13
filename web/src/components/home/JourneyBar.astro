@@ -1,0 +1,123 @@
+---
+/* The sticky journey bar: where the visitor is in the page (Learn, Understand,
+ * Why polyemesis, Install, Use) and a way to jump between stages.
+ *
+ * It sticks directly under the site nav, at the nav's own height (--nav-h in
+ * global.css). journey.ts sets aria-current on the current stage's link from
+ * the sections' data-journey-stage attributes. Without JS the links are plain
+ * anchors and nothing is marked. On a phone the list scrolls sideways inside
+ * the bar, never the page. No animation, so nothing here needs the motion gate.
+ *
+ * Put it as a direct child of <main>, above the first stage section: sticky
+ * only holds while its parent is on screen. */
+const STAGES = [
+  { href: "#how", label: "Learn", stage: "learn" },
+  { href: "#matrix", label: "Understand", stage: "understand" },
+  { href: "#why", label: "Why polyemesis", stage: "why" },
+  { href: "#install", label: "Install", stage: "install" },
+  { href: "#use", label: "Use", stage: "use" },
+];
+---
+
+<nav class="journey" data-journey aria-label="Page journey">
+  <div class="wrap journey-in">
+    <ol>
+      {
+        STAGES.map((s) => (
+          <li>
+            <a href={s.href} data-journey-link={s.stage}>
+              {s.label}
+            </a>
+          </li>
+        ))
+      }
+    </ol>
+  </div>
+</nav>
+
+<style>
+  .journey {
+    position: sticky;
+    top: var(--nav-h);
+    box-sizing: border-box;
+    /* Its own height, not var(--journey-h): that variable is 0 unless
+       :root:has([data-journey]) matches, so a browser without :has() would
+       collapse the bar to its rule and spill its links onto the next section.
+       global.css keeps --journey-h (45px) for the offsets of everything else;
+       the two are the same number. Includes the 1px rule below. */
+    height: 45px;
+    z-index: 30; /* under the nav (z-40), over the page */
+    background: var(--color-ink);
+    border-bottom: 1px solid var(--color-line);
+  }
+  .journey-in {
+    height: 100%;
+  }
+  ol {
+    display: flex;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  ol::-webkit-scrollbar {
+    display: none;
+  }
+  li {
+    display: flex;
+    flex: none;
+    align-items: center;
+  }
+  li + li::before {
+    content: "\00b7";
+    padding-inline: 12px;
+    color: var(--color-faint); /* a decorative separator only */
+  }
+  a {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    color: var(--color-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px; /* the underline sits on the bar's own rule */
+    padding-top: 2px;
+    transition: color var(--motion-quick, 120ms);
+  }
+  a:hover {
+    color: var(--color-fg);
+  }
+  a[aria-current="true"] {
+    color: var(--color-fg);
+    border-bottom-color: var(--color-accent);
+  }
+  @media (max-width: 640px) {
+    li + li::before {
+      padding-inline: 8px;
+    }
+  }
+  /* Five stages in 390 and 360 px: the bar's side padding is 12px, the separator a 1px rule with 5px each side,
+     and the mono text 0.02em tighter (still 12px). That is 317px of 336 at 360; at 320 it does not fit and the
+     list scrolls (no scrollbar), journey.ts bringing the active link into view. */
+  @media (max-width: 420px) {
+    .journey-in {
+      padding-inline: 12px;
+    }
+    ol {
+      letter-spacing: -0.02em;
+    }
+    li + li::before {
+      content: "";
+      width: 1px;
+      height: 12px;
+      margin-inline: 5px;
+      padding-inline: 0;
+      background: var(--color-line-strong);
+    }
+  }
+</style>

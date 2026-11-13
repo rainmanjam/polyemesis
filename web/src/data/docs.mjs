@@ -222,7 +222,7 @@ const DOCS_BY_SECTION = {
     ["SCHEDULED-BROADCAST.md", "Broadcasting from a file, on a schedule",
       "Go live from a recorded file at a time you choose, with no encoder attached. A file:// pull ingest plus a schedule, and a failover playlist as filler."],
     ["STREAM-DECK.md", "Stream Deck plugin: keys and dials for polyemesis",
-      "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck+ dial."],
+      "Pair an Elgato Stream Deck with a read or admin token. Go live, stop, record, presets, failover, and live track mute and gain on a Stream Deck + dial."],
     ["BROADCAST-DELAY.md", "Broadcast delay: hold one destination back up to 15 minutes",
       "Delay one platform's copy of the stream to cut something before it airs. Stop plays the tail out; Stop now, Stop all and delete cut it. RAM and disk are bounded."],
     ["STORAGE.md", "S3-compatible offload: mirror recordings to a bucket",
@@ -330,7 +330,7 @@ const WITHHELD_ROWS = [
   ],
   [
     "STREAMDECK-HARDWARE-CHECK.md",
-    "The maintainer's checklist for trying the packaged Stream Deck plugin on a real Stream Deck and Stream Deck+ before a release: install, pair, hold-to-confirm, dials, reconnect. It is a release step for whoever holds the tag-push, like RELEASE-RUNBOOK.md, and STREAM-DECK.md is the half a reader of this site needs.",
+    "The maintainer's checklist for trying the packaged Stream Deck plugin on a real Stream Deck and Stream Deck + before a release: install, pair, hold-to-confirm, dials, reconnect. It is a release step for whoever holds the tag-push, like RELEASE-RUNBOOK.md, and STREAM-DECK.md is the half a reader of this site needs.",
   ],
   ["README.md", "A directory of the others; /docs is that page here."],
 ];
