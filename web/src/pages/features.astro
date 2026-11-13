@@ -66,7 +66,7 @@ const [, ...inputRows] = INPUTS;
     <h2 id="h-audio">{leadBefore}<em class="it">{leadWord}</em>{leadAfter}</h2>
     {LEAD.body.map((t) => <p class="fe-body">{t}</p>)}
     <p class="fe-body">
-      Twitch can also take a second audio track for its VOD. <a href="/twitch-vod-track">Read how the Twitch VOD track works</a>.
+      Twitch can also take a second audio track for its VOD; Twitch requires a GPU, and a host that reports none is refused the negotiation outright. <a href="/twitch-vod-track">Read how the Twitch VOD track works</a>.
     </p>
     <p class="fe-links">
       <a class="more" href="/#matrix">Play with the routing matrix</a>
@@ -111,13 +111,13 @@ const [, ...inputRows] = INPUTS;
         <p class="fe-links"><a class="more" href="/docs/srtla">Read about bonded links</a></p>
       </div>
       <div class="fe-ports panel">
-        <svg viewBox="0 0 280 160" role="img" aria-label="Ports: SRT on 6000 UDP, RTMP on 1935, SRTLA on 5000 UDP and the console on 8080 all reach polyemesis">
+        <svg viewBox="0 0 280 160" role="img" aria-label="Ports: SRT on 6000 UDP, RTMP on 1935, SRTLA on 5000 UDP when enabled, and the console on 8080 all reach polyemesis">
           <rect class="fe-hub" x="170" y="14" width="100" height="132" />
           <text class="fe-p" x="220" y="84" text-anchor="middle">polyemesis</text>
           <path d="M112 30H170M112 62H170M112 94H170M112 126H170" />
           <text class="fe-p" x="6" y="34">SRT</text><text x="66" y="34">6000/udp</text>
           <text class="fe-p" x="6" y="66">RTMP</text><text x="66" y="66">1935</text>
-          <text class="fe-p" x="6" y="98">SRTLA</text><text x="66" y="98">5000/udp</text>
+          <text class="fe-p" x="6" y="98">SRTLA</text><text x="66" y="98">5000/udp</text><text x="66" y="112">when enabled</text>
           <text class="fe-p" x="6" y="130">console</text><text x="66" y="130">8080</text>
         </svg>
       </div>

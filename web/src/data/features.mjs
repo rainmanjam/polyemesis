@@ -148,7 +148,7 @@ export const CHAT_FACTS = [
   },
   {
     label: "Moderate",
-    text: "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick.",
+    text: "Delete on every platform but Rumble, hide on Facebook, ban and timeout on YouTube, Twitch and Kick. Facebook is read and moderate only; Rumble is read only.",
   },
   {
     label: "Moderator card",
@@ -235,7 +235,7 @@ export const ALSO = [
     items: [
       {
         name: "Platform sign-in",
-        text: "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the stream key itself, then pushes your title, category and description at go-live. Nothing proxies your video.",
+        text: "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the stream key itself, then pushes your title, category and description at go-live. Nothing proxies your video. X sign-in, go-live and chat are built and on by default (set POLYEMESIS_X_LIVESTREAM=0 to switch them off).",
         doc: "connecting-platforms",
       },
       {

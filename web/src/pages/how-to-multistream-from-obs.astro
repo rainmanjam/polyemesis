@@ -157,7 +157,8 @@ const gotchas = [
             obs-multi-rtmp is actively maintained; v0.7.4.3 was the current
             release on {CHECKED}. Aitum ships this plugin at no cost. The
             separate Aitum desktop suite, Nexus, is $5.49/mo and is not
-            required to run it.
+            required to run it. The $5.49 figure was re-checked on 16 September
+            2026.
           </p>
         </div>
       </article>
@@ -240,7 +241,7 @@ const gotchas = [
     <p class="eyebrow">Walkthrough</p>
     <h2>Multistreaming from OBS to a server you run</h2>
     <p>
-      Six steps, about ten minutes. The one that catches nearly everybody is
+      Six steps. The one that catches nearly everybody is
       step four, and it is worth reading before you start: the multitrack path
       does not go through the Stream tab.
     </p>
@@ -368,8 +369,9 @@ ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
     <p class="lf-note">
       One more, for completeness: OBS 30.2 and newer can carry several audio
       tracks over Enhanced RTMP, and every FFmpeg polyemesis supports demuxes
-      it, but a run with OBS itself as the publisher is still unconfirmed
-      here. SRT is the path that is operated and tested. Use it.
+      it, but measured against a real polyemesis, OBS 30.2.3 sends one
+      track, because no service in its services.json enables multitrack (0 of
+      91). SRT is the path that is operated and tested. Use it.
     </p>
   </section>
 </InnerPage>

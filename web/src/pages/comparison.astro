@@ -70,7 +70,7 @@ const shared = [
   // but upload bandwidth and CPU are real: measured at roughly 4% of one core
   // per destination, a 4-core box runs out somewhere near 96. Claiming
   // "unlimited" invites the one support thread nobody can answer.
-  ["Simultaneous destinations", "No configured cap", "not assessed", "2–5 by plan (checked 15 Aug 2026)"],
+  ["Simultaneous destinations", "No configured cap", "not assessed", "2–5 by plan tier (checked 15 Aug 2026)"],
   ["Cost", "Your hardware", "Your hardware", "Subscription"],
 ];
 
@@ -143,7 +143,7 @@ const release = latestRelease();
 const losses = [
   {
     who: "the OBS plugins",
-    what: "obs-multi-rtmp and Aitum Multistream: free, GPL-2.0, installed in two minutes and already on the machine.",
+    what: "obs-multi-rtmp and Aitum Multistream: free, GPL-2.0 and already on the machine.",
     rows: [
       ["No server at all", "A plugin in OBS: no host to provision, no port to open. Here you run a server, or there is nothing to run."],
       ["Nothing new to learn", "The destinations sit in OBS beside the ones already there. Here it is a second UI and a second set of concepts."],
