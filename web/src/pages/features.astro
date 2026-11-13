@@ -66,7 +66,7 @@ const [, ...inputRows] = INPUTS;
     <h2 id="h-audio">{leadBefore}<em class="it">{leadWord}</em>{leadAfter}</h2>
     {LEAD.body.map((t) => <p class="fe-body">{t}</p>)}
     <p class="fe-body">
-      A separate audio track for your Twitch VOD is its own route; read <a href="/twitch-vod-track">how the Twitch VOD track works</a>.
+      Twitch can also take a second audio track for its VOD. <a href="/twitch-vod-track">Read how the Twitch VOD track works</a>.
     </p>
     <p class="fe-links">
       <a class="more" href="/#matrix">Play with the routing matrix</a>
@@ -103,9 +103,25 @@ const [, ...inputRows] = INPUTS;
   <section id="inputs" class="fe" data-layout="table-diagram" aria-labelledby="h-inputs">
     <p class="eyebrow">Inputs</p>
     <h2 id="h-inputs">One port per protocol, many programmes.</h2>
-    <p class="fe-body">
-      Sources are told apart by a publish token, supplied in OBS's Stream Key field on RTMP and as the streamid on SRT, so a second programme never means opening a second port.
-    </p>
+    <div class="fe-split">
+      <div>
+        <p class="fe-body">
+          Sources are told apart by a publish token, supplied in OBS's Stream Key field on RTMP and as the streamid on SRT, so a second programme never means opening a second port.
+        </p>
+        <p class="fe-links"><a class="more" href="/docs/srtla">Read about bonded links</a></p>
+      </div>
+      <div class="fe-ports panel">
+        <svg viewBox="0 0 280 160" role="img" aria-label="Ports: SRT on 6000 UDP, RTMP on 1935, SRTLA on 5000 UDP and the console on 8080 all reach polyemesis">
+          <rect class="fe-hub" x="170" y="14" width="100" height="132" />
+          <text class="fe-p" x="220" y="84" text-anchor="middle">polyemesis</text>
+          <path d="M112 30H170M112 62H170M112 94H170M112 126H170" />
+          <text class="fe-p" x="6" y="34">SRT</text><text x="66" y="34">6000/udp</text>
+          <text class="fe-p" x="6" y="66">RTMP</text><text x="66" y="66">1935</text>
+          <text class="fe-p" x="6" y="98">SRTLA</text><text x="66" y="98">5000/udp</text>
+          <text class="fe-p" x="6" y="130">console</text><text x="66" y="130">8080</text>
+        </svg>
+      </div>
+    </div>
     <div class="fe-table">
       <CompareTable
         caption="What each input carries into per-destination audio"
@@ -117,33 +133,23 @@ const [, ...inputRows] = INPUTS;
         rows={inputRows}
       />
     </div>
-    <div class="fe-inputs">
-      <div class="fe-ports panel">
-        <svg viewBox="0 0 280 150" role="img" aria-label="Ports: SRT on 6000 UDP, RTMP on 1935, SRTLA on 5000 UDP and the console on 8080 all reach polyemesis">
-          <rect class="fe-hub" x="170" y="20" width="100" height="110" />
-          <text class="fe-p" x="220" y="80" text-anchor="middle">polyemesis</text>
-          <path d="M120 30H170M120 62H170M120 94H170M120 126H170" />
-          <text class="fe-p" x="6" y="34">SRT</text><text x="62" y="34">6000/udp</text>
-          <text class="fe-p" x="6" y="66">RTMP</text><text x="62" y="66">1935</text>
-          <text class="fe-p" x="6" y="98">SRTLA</text><text x="62" y="98">5000/udp</text>
-          <text class="fe-p" x="6" y="130">console</text><text x="62" y="130">8080</text>
-        </svg>
-      </div>
-      <div class="fe-shot">
-        <Shot shot={shot("inputs").shot} alt={shot("inputs").alt} caption={shot("inputs").caption} chrome="Sources" />
-      </div>
+    <div class="fe-shot">
+      <Shot shot={shot("inputs").shot} alt={shot("inputs").alt} caption={shot("inputs").caption} chrome="Sources" />
     </div>
-    <p class="fe-links"><a class="more" href="/docs/srtla">Read about bonded links</a></p>
   </section>
 
   <section id="failover" class="fe" data-layout="ladder" aria-labelledby="h-failover">
     <p class="eyebrow">Failover</p>
     <h2 id="h-failover">When the encoder dies, the destinations stay up.</h2>
-    <FailoverLadder />
-    <ul class="fe-facts rows">
-      {FAILOVER_FACTS.map((t) => <li>{t}</li>)}
-    </ul>
-    <p class="fe-links"><a class="more" href="/docs/link-health">Read about failover</a></p>
+    <div class="fe-fail">
+      <FailoverLadder />
+      <div>
+        <ul class="fe-facts rows">
+          {FAILOVER_FACTS.map((t) => <li>{t}</li>)}
+        </ul>
+        <p class="fe-links"><a class="more" href="/docs/link-health">Read about failover</a></p>
+      </div>
+    </div>
   </section>
 
   <section id="chat" class="fe" data-layout="shot-left" aria-labelledby="h-chat">
