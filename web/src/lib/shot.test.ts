@@ -25,13 +25,17 @@ describe("Shot.astro", () => {
     expect(shot).toMatch(/lazy\s*=\s*true/);
   });
 
-  it("never loads a screenshot eagerly", () => {
+  it("never hard-codes eager loading", () => {
     expect(shot).not.toContain('loading="eager"');
   });
 
+  it("says eager out loud when asked, because Astro turns an undefined loading into lazy", () => {
+    expect(shot).toContain('lazy ? "lazy" : "eager"');
+  });
+
   it("uses the shared frame classes, not a stylesheet of its own", () => {
-    expect(shot).toContain("frame");
-    expect(shot).toContain("frame-bar");
+    expect(shot).toContain('<figure class="frame">');
+    expect(shot).toContain('<div class="frame-bar">');
     expect(shot).not.toMatch(/<style/);
   });
 

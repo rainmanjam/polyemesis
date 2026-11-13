@@ -26,7 +26,7 @@ interface Props {
   caption?: string;
   /** Title in the frame's bar. */
   chrome?: string;
-  /** The `sizes` attribute; the default is the width of a half-page column. */
+  /** The `sizes` attribute. The default is 690px from 1024px up and the viewport width minus 2.5rem below. */
   sizes?: string;
   /** Lazy unless the screenshot is above the fold. */
   lazy?: boolean;
@@ -79,7 +79,7 @@ const placeholder = await lqipStyle(image);
       widths={WIDTHS}
       sizes={sizes}
       alt={alt}
-      loading={lazy ? "lazy" : undefined}
+      loading={lazy ? "lazy" : "eager"}
       decoding="async"
       style={placeholder}
       pictureAttributes={{ class: "block" }}
