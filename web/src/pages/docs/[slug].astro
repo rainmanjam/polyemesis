@@ -1,6 +1,7 @@
 ---
 import { getCollection, render } from "astro:content";
 import DocPage from "../../layouts/DocPage.astro";
+import { extractHeadings } from "../../lib/doc-headings";
 import { BY_SLUG } from "../../data/docs.mjs";
 
 /* The 23 documentation pages. One route, because the pages differ only in
@@ -34,6 +35,6 @@ if (!doc) {
 const { Content } = await render(entry);
 ---
 
-<DocPage doc={doc}>
+<DocPage doc={doc} headings={extractHeadings(entry.body ?? "")}>
   <Content />
 </DocPage>

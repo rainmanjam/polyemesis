@@ -1,0 +1,34 @@
+---
+/* The docs navigation: the five groups and every document in them, with the
+ * current one marked. Rendered twice by DocPage (the phone menu and the left
+ * column), so it holds no id. 44 documents is small enough to show at once:
+ * a reader who arrived from a search should see what else is covered. */
+import { SECTIONS, docsIn, hrefOf } from "../../data/docs.mjs";
+
+interface Props {
+  /** The slug of the document being read. */
+  current: string;
+}
+
+const { current } = Astro.props;
+---
+
+<nav aria-label="Documentation">
+  <a href="/docs" class="docnav-all">All documentation</a>
+  {
+    SECTIONS.map((s) => (
+      <div class="docnav-group">
+        <p class="docnav-title">{s.title}</p>
+        <ul>
+          {docsIn(s.id).map((d) => (
+            <li>
+              <a href={hrefOf(d)} aria-current={d.slug === current ? "page" : undefined}>
+                {d.title}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))
+  }
+</nav>

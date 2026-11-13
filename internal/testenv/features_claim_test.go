@@ -12,7 +12,8 @@ package testenv
 // Nothing went red, and nothing could have. settings-reachability.test.tsx
 // ties settings leaves to controls and features-shots.test.ts ties the site's
 // images to docs/media, but no artefact tied the site's CLAIMS to the product.
-// A features page is exactly where an aspirational sentence survives longest,
+// The receipts now live in web/src/data/feature-claims.mjs, tied to the page by
+// web/src/lib/feature-claims.test.ts. A features page is exactly where an aspirational sentence survives longest,
 // because the person writing copy and the person wiring the button are working
 // a month apart and neither is reading the other's file.
 //
@@ -46,7 +47,7 @@ import (
 	"testing"
 )
 
-const featuresPage = "web/src/pages/features.astro"
+const featuresPage = "web/src/data/feature-claims.mjs"
 
 type featureSection struct {
 	id        string
@@ -54,7 +55,7 @@ type featureSection struct {
 	behaviour string // the stated reason, or ""
 }
 
-// readFeatureSections pulls one entry per `id:` in the page, with whichever
+// readFeatureSections pulls one entry per `id:` in the claims file, with whichever
 // receipt follows it.
 func readFeatureSections(t *testing.T, root string) []featureSection {
 	t.Helper()
@@ -97,7 +98,7 @@ func TestEveryFeatureClaimNamesSomethingThatExists(t *testing.T) {
 	// regex yields no sections, and every assertion below is then satisfied by
 	// a loop that runs zero times.
 	if len(sections) < 8 {
-		t.Fatalf("found %d feature sections in %s; the page has moved or been "+
+		t.Fatalf("found %d feature claims in %s; the file has moved or been "+
 			"restructured, so this test is asserting nothing about its claims",
 			len(sections), featuresPage)
 	}

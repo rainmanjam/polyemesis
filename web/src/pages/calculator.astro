@@ -1,5 +1,5 @@
 ---
-import Base from "../layouts/Base.astro";
+import InnerPage from "../layouts/InnerPage.astro";
 import { HEADROOM_PCT, OVERHEAD_PCT } from "../lib/calc";
 
 /* A BANDWIDTH CALCULATOR THAT MODELS THIS PRODUCT, NOT MULTISTREAMING IN GENERAL.
@@ -59,32 +59,31 @@ const PLATFORMS = [
 ];
 
 const CHECKED = "2026-08-06";
+
+const LEDE =
+  "Two different connections carry two different loads. Your encoder's upstream carries one stream. The server's uplink carries one per destination, but because polyemesis copies the video rather than re-encoding it, the video half is the same bitstream repeated, and it has to satisfy the strictest platform you send it to.";
+
+/* The page's closing sentence, carried into the closing band. */
+const CLOSING = `Platform figures are the bitrates each platform recommends, transcribed from the server's own preset table and checked ${CHECKED}. They are advisory there too: polyemesis never refuses a value for being above one, and some platforms accept more than they recommend. Protocol overhead is an estimate and varies with resolution, keyframe interval and network path.`;
 ---
 
-<Base
+<InnerPage
   title="Bandwidth calculator for multistreaming — polyemesis"
   description="Work out the upstream and server bandwidth a multistream actually needs, and the data it moves per day, week and month. Models stream-copied video, so the numbers match what a self-hosted restreamer really sends."
   path="/calculator"
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: "calculator" }]}
+  heading="What a multistream actually costs your connection"
+  lede={LEDE}
+  band={{ heading: "Platform figures are advisory.", lede: CLOSING, primary: { label: "Install polyemesis", href: "/download" } }}
 >
-  <section class="wrap py-14 sm:py-18">
-    <p class="eyebrow rise">Bandwidth</p>
-    <h1 class="rise rise-1 mt-2 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      What a multistream actually costs your connection
-    </h1>
-    <p class="rise rise-2 mt-4 max-w-2xl leading-relaxed text-subtle">
-      Two different connections carry two different loads. Your encoder's upstream
-      carries <em>one</em> stream. The server's uplink carries one per destination,
-      but because polyemesis copies the video rather than re-encoding it, the video
-      half is the same bitstream repeated, and it has to satisfy the strictest
-      platform you send it to.
-    </p>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
 
-    <!-- MODE -->
-    <div class="rise rise-3 mt-8 flex flex-wrap items-center gap-2">
-      <button id="mode-simple" type="button" class="btn btn-primary text-sm" aria-pressed="true">
+    {/* MODE */}
+    <div class="mode-switch flex flex-wrap items-center gap-2">
+      <button id="mode-simple" type="button" class="btn btn-ghost mode-btn text-sm" aria-pressed="true">
         Simple
       </button>
-      <button id="mode-verbose" type="button" class="btn btn-ghost text-sm" aria-pressed="false">
+      <button id="mode-verbose" type="button" class="btn btn-ghost mode-btn text-sm" aria-pressed="false">
         Verbose
       </button>
       <span class="ml-1 text-xs text-muted">
@@ -92,10 +91,10 @@ const CHECKED = "2026-08-06";
       </span>
     </div>
 
-    <div class="mt-8 grid gap-6 lg:grid-cols-[1fr_22rem] lg:items-start">
-      <!-- ------------------------------------------------------- INPUTS -->
+    <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_22rem] lg:items-start">
+      {/* ------------------------------------------------------- INPUTS */}
       <div class="flex flex-col gap-6">
-        <div class="card p-5">
+        <div class="panel p-5">
           <h2 class="text-sm font-semibold text-fg">How often/much do you stream</h2>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <label class="flex flex-col gap-1">
@@ -123,7 +122,7 @@ const CHECKED = "2026-08-06";
           </div>
         </div>
 
-        <div class="card p-5">
+        <div class="panel p-5">
           <h2 class="text-sm font-semibold text-fg">Destinations</h2>
           <p class="mt-1 text-xs text-muted">
             These are the bitrates each platform <em>recommends</em>, checked {CHECKED}.
@@ -150,7 +149,7 @@ const CHECKED = "2026-08-06";
                   <label class="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
                     <input
                       type="checkbox"
-                      class="dest-on accent-[var(--color-primary)]"
+                      class="dest-on accent-[var(--color-fg)]"
                       data-id={p.id}
                       data-min={p.min}
                       data-max={p.max}
@@ -158,7 +157,7 @@ const CHECKED = "2026-08-06";
                     />
                     <span class="flex-1">
                       <span class="text-fg">{p.name}</span>
-                      <span class="ml-2 font-mono text-[11px] text-muted">
+                      <span class="ml-2 font-mono text-xs text-muted">
                         {p.min === p.max ? `${p.min}` : `${p.min}–${p.max}`} kbps
                       </span>
                     </span>
@@ -169,9 +168,9 @@ const CHECKED = "2026-08-06";
             }
           </div>
 
-          <!-- CUSTOM ENDPOINTS. The presets are a floor, not a ceiling: anything
+          {/* CUSTOM ENDPOINTS. The presets are a floor, not a ceiling: anything
                speaking RTMP or SRT is a destination, so a calculator that only
-               counts the ten it knows about understates every real setup. -->
+               counts only the presets it knows about understates every real setup. */}
           <div class="mt-5 border-t border-line pt-4">
             <h3 class="text-xs font-semibold text-fg">Other RTMP or SRT endpoints</h3>
             <p class="mt-1 text-xs text-muted">
@@ -180,7 +179,7 @@ const CHECKED = "2026-08-06";
             <div id="custom-list" class="mt-3 flex flex-col gap-2"></div>
             <div class="mt-3 flex flex-wrap items-end gap-2">
               <label class="flex flex-col gap-1">
-                <span class="text-[11px] text-muted">Name</span>
+                <span class="text-xs text-muted">Name</span>
                 <input
                   id="custom-name"
                   type="text"
@@ -189,7 +188,7 @@ const CHECKED = "2026-08-06";
                 />
               </label>
               <label class="flex flex-col gap-1">
-                <span class="text-[11px] text-muted">Limit (kbps)</span>
+                <span class="text-xs text-muted">Limit (kbps)</span>
                 <input
                   id="custom-kbps"
                   type="number"
@@ -204,7 +203,7 @@ const CHECKED = "2026-08-06";
           </div>
         </div>
 
-        <div class="card p-5">
+        <div class="panel p-5">
           <h2 class="text-sm font-semibold text-fg">What you are sending</h2>
           <div class="mt-4 grid gap-4 sm:grid-cols-2">
             <label class="flex flex-col gap-1">
@@ -217,7 +216,7 @@ const CHECKED = "2026-08-06";
                 value="6000"
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
-              <span id="video-hint" class="text-[11px] text-muted"></span>
+              <span id="video-hint" class="text-xs text-muted"></span>
             </label>
             <label class="flex flex-col gap-1">
               <span class="text-xs text-muted">Audio per destination (kbps)</span>
@@ -243,7 +242,7 @@ const CHECKED = "2026-08-06";
                 value="1"
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
-              <span class="text-[11px] text-muted">
+              <span class="text-xs text-muted">
                 Six is what OBS sends. Each one rides the ingest leg only.
               </span>
             </label>
@@ -258,7 +257,7 @@ const CHECKED = "2026-08-06";
                 value={OVERHEAD_PCT}
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
-              <span class="text-[11px] text-muted">
+              <span class="text-xs text-muted">
                 RTMP framing plus TCP/IP. An estimate, not a measurement.
               </span>
             </label>
@@ -273,7 +272,7 @@ const CHECKED = "2026-08-06";
                 value={HEADROOM_PCT}
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
-              <span class="text-[11px] text-muted">
+              <span class="text-xs text-muted">
                 A link run at its rated speed drops frames on the first burst.
               </span>
             </label>
@@ -282,20 +281,20 @@ const CHECKED = "2026-08-06";
 
       </div>
 
-      <!-- ------------------------------------------------------ RESULTS -->
-      <aside class="card p-5 lg:sticky lg:top-24">
+      {/* ------------------------------------------------------ RESULTS */}
+      <aside class="panel p-5 lg:sticky lg:top-24">
         <h2 class="text-sm font-semibold text-fg">What you need</h2>
 
         <div class="mt-4">
           <p class="text-xs text-muted">Encoder upstream (your home or studio)</p>
           <p id="r-ingest" class="mt-1 font-mono text-2xl text-fg">—</p>
-          <p id="r-ingest-note" class="mt-1 text-[11px] text-muted"></p>
+          <p id="r-ingest-note" class="mt-1 text-xs text-muted"></p>
         </div>
 
         <div class="mt-5 border-t border-line pt-4">
           <p class="text-xs text-muted">Server uplink (where polyemesis runs)</p>
           <p id="r-egress" class="mt-1 font-mono text-2xl text-fg">—</p>
-          <p id="r-egress-note" class="mt-1 text-[11px] text-muted"></p>
+          <p id="r-egress-note" class="mt-1 text-xs text-muted"></p>
         </div>
 
         <div class="mt-5 border-t border-line pt-4">
@@ -308,7 +307,7 @@ const CHECKED = "2026-08-06";
             <dt class="text-muted">Per month</dt>
             <dd id="r-month" class="text-right font-mono text-fg">—</dd>
           </dl>
-          <p class="mt-2 text-[11px] text-muted">
+          <p class="mt-2 text-xs text-muted">
             A month is 4.35 weeks. Check it against your host's transfer allowance:
             that is the number a VPS bills on, not the bitrate.
           </p>
@@ -318,9 +317,9 @@ const CHECKED = "2026-08-06";
       </aside>
     </div>
 
-    <!-- The arithmetic, written out. A calculator that will not show its
-         working is asking to be trusted about someone's uplink bill. -->
-    <div class="rise mt-10 max-w-3xl">
+    {/* The arithmetic, written out. A calculator that will not show its
+         working is asking to be trusted about someone's uplink bill. */}
+    <div class="mt-10 max-w-3xl">
       <h2 class="text-sm font-semibold text-fg">How this is worked out</h2>
       <ul class="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-subtle">
         <li>
@@ -354,16 +353,8 @@ const CHECKED = "2026-08-06";
           not bytes you send.
         </li>
       </ul>
-      <p class="mt-4 text-xs text-muted">
-        Platform figures are the bitrates each platform recommends, transcribed from the
-        server's own preset table and checked {CHECKED}. They are advisory there too:
-        polyemesis never refuses a value for being above one, and some platforms accept
-        more than they recommend. Protocol overhead is an estimate and varies with
-        resolution, keyframe interval and network path.
-      </p>
     </div>
-  </section>
-</Base>
+</InnerPage>
 
 <script>
   import {
@@ -423,7 +414,7 @@ const CHECKED = "2026-08-06";
     if (!box) return;
     const el = document.createElement("p");
     el.className =
-      "rounded-md border px-3 py-2 text-[11px] leading-relaxed " +
+      "rounded-md border px-3 py-2 text-xs leading-relaxed " +
       (kind === "hard"
         ? "border-[var(--color-down)] text-[var(--color-down)]"
         : "border-line text-muted");
@@ -452,7 +443,7 @@ const CHECKED = "2026-08-06";
     wrap.className = "flex flex-wrap items-center gap-x-3 gap-y-2";
 
     const vLabel = document.createElement("span");
-    vLabel.className = "text-[11px] text-muted";
+    vLabel.className = "text-xs text-muted";
     vLabel.textContent = "video";
 
     const vSel = document.createElement("select");
@@ -467,7 +458,7 @@ const CHECKED = "2026-08-06";
     vNum.hidden = true;
 
     const aLabel = document.createElement("span");
-    aLabel.className = "ml-1 text-[11px] text-muted";
+    aLabel.className = "ml-1 text-xs text-muted";
     aLabel.textContent = "audio";
 
     const aNum = document.createElement("input");
@@ -648,8 +639,8 @@ const CHECKED = "2026-08-06";
     row.className = "flex items-center gap-3 rounded-md border border-line px-3 py-2 text-sm";
     row.innerHTML =
       `<span class="flex-1 text-fg"></span>` +
-      `<span class="font-mono text-[11px] text-muted"></span>` +
-      `<button type="button" class="text-[11px] text-muted hover:text-fg">Remove</button>`;
+      `<span class="font-mono text-xs text-muted"></span>` +
+      `<button type="button" class="text-xs text-muted hover:text-fg">Remove</button>`;
     // textContent, not interpolation: the name is whatever was typed.
     row.children[0].textContent = name;
     row.children[1].textContent = `${max} kbps`;
@@ -688,10 +679,6 @@ const CHECKED = "2026-08-06";
     const b = $("mode-verbose");
     s?.setAttribute("aria-pressed", String(!v));
     b?.setAttribute("aria-pressed", String(v));
-    s?.classList.toggle("btn-primary", !v);
-    s?.classList.toggle("btn-ghost", v);
-    b?.classList.toggle("btn-primary", v);
-    b?.classList.toggle("btn-ghost", !v);
     render();
   }
 

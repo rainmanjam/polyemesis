@@ -1,0 +1,59 @@
+---
+/* The failover demo for /features: the same four-stage illustration the
+ * homepage tour runs, rendered to the markup contract in
+ * scripts/home/failover.ts (root [data-failover]; inner.ts starts it).
+ *
+ * The server-rendered state is "live", a complete picture on its own: with
+ * scripts off or motion reduced nothing moves, and the controls stay hidden
+ * until the script shows them. The log is illustrative, so it has no
+ * timestamps and says so. Status colours are the console tokens; coral is not
+ * used here. Its rules live under the features banner of styles/inner.css. */
+import { STAGES } from "../../scripts/home/failover";
+
+const DESTS = ["Twitch", "YouTube", "Kick"];
+---
+
+<div class="fx" data-failover>
+  <div class="fx-head">
+    <div class="fx-ctl" data-fo-controls hidden>
+      <ol class="fx-steps" aria-label="Failover stages">
+        {
+          STAGES.map((s, i) => (
+            <li>
+              <button type="button" class="fx-btn" data-stage={i}>{s.label}</button>
+            </li>
+          ))
+        }
+      </ol>
+      <div class="fx-acts">
+        <button type="button" class="fx-btn fx-play" data-play>Pull the cable</button>
+        <button type="button" class="fx-btn" data-pause aria-pressed="false">Pause motion</button>
+      </div>
+    </div>
+  </div>
+  <div class="fx-frame" data-frame data-state="live">
+    <div class="fx-row enc">
+      <b>Encoder</b>
+      <div class="fx-bar" aria-hidden="true"><i></i></div>
+      <span class="fx-st"><i class="fx-dot lamp" aria-hidden="true"></i><span data-enc>{STAGES[0].encoder}</span></span>
+    </div>
+    <div class="fx-row slate">
+      <b>Slate</b>
+      <div class="fx-bar" aria-hidden="true"><i></i></div>
+      <span class="fx-st"><span data-s="slate">on air</span><span data-s="live drop recovered">ready</span></span>
+    </div>
+    <ul class="fx-dest" aria-label="Destination status">
+      {
+        DESTS.map((d) => (
+          <li>
+            <b>{d}</b>
+            <span><i class="fx-dot" aria-hidden="true"></i><span data-dest>live</span></span>
+          </li>
+        ))
+      }
+    </ul>
+    <ol class="fx-log" data-log aria-live="off" aria-label="Event log, illustrative">
+      <li>{STAGES[0].log}</li>
+    </ol>
+  </div>
+</div>

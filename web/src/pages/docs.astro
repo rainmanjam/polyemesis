@@ -1,6 +1,8 @@
 ---
-import Base from "../layouts/Base.astro";
-import { SECTIONS, docsIn, hrefOf, GITHUB_BLOB } from "../data/docs.mjs";
+import InnerPage from "../layouts/InnerPage.astro";
+import { SECTIONS, START_HERE, BY_FILE, docsIn, hrefOf, GITHUB_BLOB } from "../data/docs.mjs";
+import type { IndexItem } from "../lib/page-index";
+import { REPO } from "../data/install.mjs";
 
 /* A DIRECTORY THAT NOW POINTS AT PAGES, not at github.com.
  *
@@ -18,98 +20,88 @@ import { SECTIONS, docsIn, hrefOf, GITHUB_BLOB } from "../data/docs.mjs";
  * docs.mjs is the allowlist and the written metadata; content.config.ts loads
  * the originals.
  */
+
+const startHere = START_HERE.map((f) => {
+  const doc = BY_FILE.get(f);
+  if (!doc) throw new Error(`docs index: START_HERE lists ${f}, which is not a published doc`);
+  return doc;
+});
+const index: IndexItem[] = [
+  { id: "start-here", label: "Start here" },
+  ...SECTIONS.map((s) => ({ id: s.id, label: s.title })),
+];
 ---
 
-<Base
+<InnerPage
   title="polyemesis docs — OBS setup, audio routing, API"
   description="Setup, per-destination audio routing, operations and API reference for polyemesis, the self-hosted SRT restreaming server. Versioned with the code."
   path="/docs"
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: "docs" }]}
+  heading="The docs live with the code."
+  lede="Every page below is rendered from a file in docs/ in the repository, so it is versioned alongside the software rather than maintained as a second copy that disagrees with it."
+  index={index}
+  band={{
+    heading: "Something wrong or missing?",
+    lede: "The docs are in the same repository as the code, under docs/. Corrections are a pull request, and the ones that say “this was wrong and here is why” are the most useful kind.",
+    secondary: { label: "Open an issue", href: `${REPO}/issues` },
+  }}
 >
-  <section class="wrap py-16 sm:py-20">
-    <p class="eyebrow">Documentation</p>
-    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      The docs live with the code.
-    </h1>
-    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
-      Every page below is rendered from a file in{" "}
-      <span class="font-mono text-base">docs/</span> in the repository, so it is
-      versioned alongside the software rather than maintained as a second copy
-      that disagrees with it. They track{" "}
-      <span class="font-mono text-base">main</span>, which runs ahead of the
-      latest release. If you are running one, read the copies in your own
-      checkout.
-    </p>
+  <Fragment slot="actions">
+    <a href="/download" class="btn btn-primary">Install polyemesis</a>
+  </Fragment>
+  <Fragment slot="meta">
+    They track <span class="mono">main</span>, which runs ahead of the latest release. If you are running one, read the copies in your own checkout.
+  </Fragment>
+
+  {/* The written title and description: the same two strings the page's own
+      <title> and <meta name=description> carry. One pair rather than two, so
+      an index blurb and a search snippet cannot disagree. */}
+  <section id="start-here" class="docs-start">
+    <h2>Start here</h2>
+    <ul class="rows dl">
+      {startHere.map((d) => (
+        <li>
+          <a href={hrefOf(d)}>
+            <span class="dl-t">
+              <b>{d.title}</b>
+              <i>{d.file}</i>
+            </span>
+            <span class="dl-d">{d.description}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
   </section>
 
-  <div class="wrap grid gap-10 pb-20 lg:grid-cols-[13rem_1fr] lg:gap-16">
-    <nav class="lg:sticky lg:top-20 lg:self-start" aria-label="Documentation sections">
-      <ul class="space-y-1">
-        {
-          SECTIONS.map((s) => (
-            <li>
-              <a
-                href={`#${s.id}`}
-                class="block rounded px-2 py-1.5 text-sm text-muted transition-colors hover:bg-surface hover:text-fg"
-              >
-                {s.title}
-              </a>
-            </li>
-          ))
-        }
-      </ul>
-    </nav>
+  {
+    SECTIONS.map((s) => {
+      const docs = docsIn(s.id);
+      return (
+        <details class="grp" id={s.id} open>
+          <summary>
+            <h2>{s.title}</h2>
+            <span class="blurb">{s.blurb}</span>
+            <span class="cnt">{docs.length} docs</span>
+          </summary>
+          <ul class="rows dl">
+            {docs.map((d) => (
+              <li>
+                <a href={hrefOf(d)}>
+                  <span class="dl-t">
+                    <b>{d.title}</b>
+                    <i>{d.file}</i>
+                  </span>
+                  <span class="dl-d">{d.description}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </details>
+      );
+    })
+  }
 
-    <div class="space-y-12">
-      {
-        SECTIONS.map((s) => (
-          <section id={s.id}>
-            <h2 class="text-xl font-medium">{s.title}</h2>
-            <p class="mt-1.5 max-w-2xl text-sm leading-relaxed text-subtle">{s.blurb}</p>
-            <ul class="mt-4 divide-y divide-line border-y border-line">
-              {docsIn(s.id).map((d) => (
-                <li>
-                  {/* The written title and description, the same two strings the
-                      page's own <title> and <meta name=description> carry. One
-                      pair rather than two: an index blurb and a search snippet
-                      answer the same question, and keeping two versions of the
-                      answer is how they end up disagreeing. */}
-                  <a href={hrefOf(d)} class="group flex flex-col gap-1 py-4 transition-colors">
-                    <span class="flex flex-wrap items-baseline gap-x-3">
-                      <span class="text-[15px] font-medium text-fg group-hover:text-primary-bright">
-                        {d.title}
-                      </span>
-                      <span class="font-mono text-[11px] text-subtle">{d.file}</span>
-                    </span>
-                    <span class="text-sm leading-relaxed text-muted">{d.description}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))
-      }
-    </div>
-  </div>
-
-  <section class="border-t border-line bg-surface/30 py-16">
-    <div class="wrap max-w-3xl text-center">
-      <h2 class="text-2xl font-medium">Something wrong or missing?</h2>
-      <p class="mt-3 leading-relaxed text-muted">
-        The docs are in the same repository as the code, under{" "}
-        <a href={`${GITHUB_BLOB}/docs`} rel="noopener" class="font-mono text-[15px] text-primary-bright underline"
-          >docs/</a
-        >. Corrections are a pull request, and the ones that say “this was wrong
-        and here is why” are the most useful kind.
-      </p>
-      <div class="mt-7 flex flex-wrap justify-center gap-3">
-        <a href="https://github.com/rainmanjam/polyemesis/issues" rel="noopener" class="btn btn-ghost">
-          Open an issue
-        </a>
-        {/* "Install it" said nothing about where it went. The install page is
-            the one conversion this site has, and the link to it from the docs
-            index is the one a reader follows after deciding. */}
-        <a href="/download" class="btn btn-primary">Install polyemesis</a>
-      </div>
-    </div>
-  </section>
-</Base>
+  <p class="docs-more">
+    <a class="more" href={`${GITHUB_BLOB}/docs`} rel="noopener">Browse docs/ on GitHub</a>
+  </p>
+</InnerPage>

@@ -37,6 +37,15 @@ describe("Nav", () => {
     expect(nav.match(/Install polyemesis/g)?.length).toBe(2);
   });
 
+  it("marks text links nav-link and the Install button nav-install, with the current-page rules in inner.css", () => {
+    expect(nav.match(/nav-link/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(nav.match(/nav-install/g)?.length).toBe(2);
+    expect(nav).toContain("aria-current");
+    const css = src("styles/inner.css");
+    expect(css).toMatch(/\.nav-link\[aria-current="page"\]\s*\{[^}]*var\(--color-fg\)/);
+    expect(css).toMatch(/\.nav-install\[aria-current="page"\]\s*\{[^}]*inset 0 -2px 0 var\(--color-accent\)/);
+  });
+
   it("has no border under it", () => {
     const header = nav.slice(nav.indexOf("<header"), nav.indexOf(">", nav.indexOf("<header")));
     expect(header).not.toMatch(/border-b/);

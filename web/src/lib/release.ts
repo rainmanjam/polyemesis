@@ -30,3 +30,14 @@ export function latestRelease(): Release | null {
     return null;
   }
 }
+
+/* `v0.18.0, released 2026-11-11`: how a page states maturity, factually. */
+export function releaseLine(r: Release | null): string | null {
+  return r ? `v${r.version}, released ${r.date}` : null;
+}
+
+/* Replace every `{release}` token in page copy with the release line, or with
+ * a neutral phrase when the changelog could not be read. */
+export function fillRelease(text: string, r: Release | null): string {
+  return text.replaceAll("{release}", releaseLine(r) ?? "the current release");
+}

@@ -13,7 +13,8 @@
  * four viewport widths (rule 1 also for every bordered `.scroll-hint` table):
  *
  *   1. EDGES. The grid's left and right edges sit on the content column's
- *      edges, within 1px. The column is the `.wrap` content box, or the
+ *      edges, within 1px. The column is the content box of the nearest
+ *      `[data-column]` (rail layouts), else the `.wrap` content box, or the
  *      article on a documentation page. This is the rule a `max-w-5xl` on one
  *      grid broke on five pages: the row stopped 216px short of the grid above
  *      it on the same page.
@@ -54,22 +55,28 @@ const TOLERANCE = 1;
  * another. Change a number alongside the markup change that adds or removes a
  * grid. */
 const REQUIRED = {
-  // 0 is falsy, so the count check at `REQUIRED[route] && ...` is SKIPPED for the homepage: it is still visited
-  // and every other layout check runs on it, but "exactly zero .card-grid" is not asserted. (The 2026-11
-  // homepage has its own section layouts and no .card-grid; this is ruling-backed, not an assertion of zero.)
+  // 0 is enforced (`!== undefined`): "/" has no .card-grid, and a page that gains one must say so here.
   "/": 0,
-  "/features": 1,
-  "/comparison": 3,
-  "/download": 1,
-  "/multistream": 1,
-  "/how-to-multistream-from-obs": 1,
-  "/free-restream-service": 1,
-  "/vs/aitum-multistream": 3,
-  "/vs/obs-multi-rtmp": 2,
-  "/vs/restreamer": 3,
-  "/vs/streamelements": 3,
-  "/vs/streamlabs": 1,
+  "/docs": 0,
+  "/features": 0,
+  "/comparison": 0,
+  "/download": 0,
+  "/multistream": 0,
+  "/how-to-multistream-from-obs": 0,
+  "/free-restream-service": 0,
+  "/twitch-vod-track": 0,
+  "/vs/aitum-multistream": 0,
+  "/vs/obs-multi-rtmp": 0,
+  "/vs/restreamer": 0,
+  "/vs/streamelements": 0,
+  "/vs/streamlabs": 0,
   "/docs/install": 1,
+  "/docs/tls": 1,
+  "/docs/platforms": 1,
+  "/docs/configuration": 1,
+  "/docs/connecting-platforms": 1,
+  "/calculator": 0,
+  "/404": 0,
 };
 
 /* How many cards the FIRST row of each variant holds at a viewport width --
@@ -140,6 +147,17 @@ function serve() {
 function measure() {
   const px = (v) => parseFloat(v) || 0;
   const columnOf = (grid) => {
+    // A rail layout names its main column; tables and grids are held to its content box.
+    const column = grid.closest("[data-column]");
+    if (column) {
+      const b = column.getBoundingClientRect();
+      const cs = getComputedStyle(column);
+      return {
+        left: b.left + px(cs.paddingLeft) + px(cs.borderLeftWidth),
+        right: b.right - px(cs.paddingRight) - px(cs.borderRightWidth),
+        host: "column",
+      };
+    }
     const article = grid.closest("[data-doc-column]")?.querySelector("article.doc-prose");
     if (article) {
       const b = article.getBoundingClientRect();
@@ -158,8 +176,20 @@ function measure() {
   const grids = [...document.querySelectorAll(".card-grid, .scroll-hint")].filter(
     (g) => g.getClientRects().length > 0 && !(g.classList.contains("scroll-hint") && g.closest("li")),
   );
+  /* A page with no rail (data-lay="single") has one column, and it IS the content box: if it shrinks (a max-width), every
+     grid lines up with the shrunken column and passes. So the column itself is measured against the .wrap's content box. */
+  const lay = document.querySelector('.wrap[data-lay="single"]');
+  const col = lay?.querySelector("[data-column]");
+  let single = null;
+  if (lay && col && !lay.querySelector(".rail")) {
+    const w = lay.getBoundingClientRect();
+    const wcs = getComputedStyle(lay);
+    const c = col.getBoundingClientRect();
+    single = { left: c.left - (w.left + px(wcs.borderLeftWidth) + px(wcs.paddingLeft)), right: w.right - px(wcs.borderRightWidth) - px(wcs.paddingRight) - c.right };
+  }
   return {
     overflow: document.documentElement.scrollWidth - window.innerWidth,
+    single,
     grids: grids.map((g) => {
       const b = g.getBoundingClientRect();
       const cs = getComputedStyle(g);
@@ -229,8 +259,11 @@ try {
       const at = `${route} @${width}`;
 
       if (m.overflow > 0) fail.push(`${at}: the page scrolls sideways by ${m.overflow}px`);
+      if (m.single && (Math.abs(m.single.left) > TOLERANCE || Math.abs(m.single.right) > TOLERANCE)) {
+        fail.push(`${at}: the single column is ${m.single.left.toFixed(1)}px / ${m.single.right.toFixed(1)}px off the .wrap content box (left / right), so grids that line up with it prove nothing`);
+      }
       const cardGrids = m.grids.filter((g) => g.isCardGrid).length;
-      if (REQUIRED[route] && cardGrids !== REQUIRED[route]) {
+      if (REQUIRED[route] !== undefined && cardGrids !== REQUIRED[route]) {
         fail.push(`${at}: ${cardGrids} .card-grid found, expected ${REQUIRED[route]} -- update REQUIRED with the markup change`);
       }
 

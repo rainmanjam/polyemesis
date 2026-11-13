@@ -1,0 +1,32 @@
+---
+/* The visible trail plus the BreadcrumbList that describes it. The JSON-LD
+ * sits in the body on purpose (valid anywhere, and Base has no slot for it).
+ * The last crumb is the current page: plain text with aria-current, even if
+ * it carries an href, which the structured data still keeps. */
+import { breadcrumbLdJson, type Crumb } from "../../lib/breadcrumbs";
+
+interface Props {
+  crumbs: Crumb[];
+}
+
+const { crumbs } = Astro.props;
+const last = crumbs.length - 1;
+---
+
+<nav aria-label="Breadcrumb">
+  <ol class="crumb">
+    {
+      crumbs.map((c, i) => (
+        <li>
+          {i < last && c.href ? (
+            <a href={c.href}>{c.label}</a>
+          ) : (
+            <span aria-current={i === last ? "page" : undefined}>{c.label}</span>
+          )}
+        </li>
+      ))
+    }
+  </ol>
+</nav>
+
+<script type="application/ld+json" is:inline set:html={breadcrumbLdJson(crumbs)} />

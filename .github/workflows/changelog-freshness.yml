@@ -47,7 +47,7 @@
 # WHAT HAPPENS ON FAILURE. This workflow does not open an issue or page
 # anyone -- it fails a scheduled run, and GitHub's default notification for a
 # failed scheduled workflow goes to the repository's watchers. That is a
-# blunt instrument on a busier repository; here, with one maintainer, it is
+# blunt instrument on a busier repository; here, on a repository this small, it is
 # sufficient and it is honest about being Warning rather than Control.
 name: changelog freshness
 

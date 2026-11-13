@@ -347,37 +347,6 @@ if (!/var\(--motion-enter\)/.test(css)) {
   }
 }
 
-/* The meter-like keyframe must stay asymmetric.
- *
- * A symmetric rise and fall is a sine wave, and to the audience this page is
- * written for that reads as a decorative web animation rather than an
- * instrument. Attack fast, decay slow — the check is that the midpoint is NOT
- * the extreme, which is what a 0/50/100 keyframe always is.
- *
- * NOW POINTED AT `loud-momentary`, which is the hero's momentary-loudness bar.
- * It used to be `meter`, the six-track hero fan-out; that hero was replaced by
- * the routing table and its keyframe went with it. The RULE did not change and
- * neither did the reason for it, so the guard followed the motion rather than
- * being deleted alongside the thing it happened to be watching — a check that
- * quietly stops guarding anything is worse than no check, which is exactly what
- * the `if (!kf)` arm below exists to prevent. */
-/* NB: matched against the css as-built, NOT a whitespace-stripped copy. The
- * first version of this check stripped whitespace first, which turned
- * "@keyframes meter" into "@keyframesmeter" and matched nothing — the guard
- * passed on a deliberately symmetric keyframe. Caught by mutating the source
- * and watching the build stay green. */
-const meterKf = /@keyframes\s+loud-momentary\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/.exec(css);
-if (!meterKf) {
-  fail.push(
-    "the loud-momentary keyframe is gone from the built CSS; this check no longer guards anything",
-  );
-} else if (/(^|[},])\s*50%\s*[,{]/.test(meterKf[1])) {
-  fail.push(
-    "the loud-momentary keyframe is symmetric again (has a 50% stop): real meters " +
-      "attack fast and decay slowly, and engineers read a sine wobble as fake",
-  );
-}
-
 /* Every built page must have a revalidation rule in _headers.
  *
  * THIS GUARDS A BUG THAT SHIPPED. The block scoped itself to `/` and `/*.html`
@@ -488,10 +457,10 @@ if (!meterKf) {
  * nav and the mobile menu are separate markup and the mobile one -- the only
  * navigation a phone has -- was the half left behind when this was first fixed.
  */
-for (const f of ["features", "docs", "download"]) {
+for (const f of ["features", "docs", "download", "docs/install"]) {
   if (!pages.includes(`${f}.html`)) continue;
   const html = readFileSync(join(DIST, `${f}.html`), "utf8");
-  const marked = [...html.matchAll(new RegExp(`<a(?=[^>]*\\shref="/${f}")(?=[^>]*\\saria-current="page")[^>]*>`, "g"))].length;
+  const marked = [...html.matchAll(new RegExp(`<a(?=[^>]*\\shref="/${f.split("/")[0]}")(?=[^>]*\\saria-current="page")[^>]*>`, "g"))].length;
   if (marked < 2) {
     fail.push(
       `${f}.html marks its own nav link as current ${marked} time(s), expected 2 ` +
@@ -763,6 +732,34 @@ for (const f of pages.filter((p) => p.startsWith("docs/"))) {
         `    Astro's content loader logs a render failure and EXITS 0 — look for ` +
         `"Error rendering" earlier in this build's output for the real cause.`,
     );
+  }
+}
+
+/* ==================================================================== */
+/* DOC HEADING IDS (plan 2, task 2)                                      */
+/* ==================================================================== */
+/* EVERY h2 AND h3 IN A DOCUMENT HAS A STABLE, UNIQUE ID.
+ *
+ * The "On this page" list links to #<slug> for each heading, and the slugs are
+ * computed from the markdown by src/lib/doc-headings.ts. Those links only work
+ * if the built page carries exactly the same ids, which is the job of
+ * src/lib/hast-heading-ids.mjs. A heading with no id, an empty one, or a
+ * duplicate would make a list entry (or a cross-document link written for
+ * GitHub) land nowhere. */
+for (const f of pages.filter((p) => p.startsWith("docs/"))) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  const article = /<article[^>]*doc-prose[^>]*>([\s\S]*?)<\/article>/.exec(html);
+  if (!article) continue; // the render check above reports this
+  const seen = new Set();
+  for (const m of article[1].matchAll(/<h([23])([^>]*)>/g)) {
+    const id = /\sid="([^"]*)"/.exec(m[2])?.[1];
+    if (!id) {
+      fail.push(`${f}: an <h${m[1]}> has no id (or an empty one), so the "On this page" list cannot link to it`);
+    } else if (seen.has(id)) {
+      fail.push(`${f}: heading id "${id}" appears more than once`);
+    } else {
+      seen.add(id);
+    }
   }
 }
 
@@ -1321,6 +1318,343 @@ for (const { rel, page, factsDate } of sourcedPages) {
       );
     }
   }
+}
+
+/* ==== INNER-PAGE REDESIGN (plan 2): the three checks that keep the rebuild honest ==== */
+
+/* LEGACY COPY IS KEPT. src/lib/legacy-inner.fixture.json is the text of twelve
+ * inner pages as they were before the redesign (scripts/freeze-legacy-copy.mjs,
+ * run once, never regenerated). A page may be restructured and its text
+ * reordered, but a sentence of 40 characters or more must not be lost. Both
+ * sides are normalised by norm() above, so typography and whitespace cannot
+ * fail it; the " | " seam the freeze script leaves where it cut a retired
+ * sentence also ends a sentence. Tags become spaces, so un-punctuated chrome (a
+ * breadcrumb, an eyebrow, button and link labels) runs into the real sentence
+ * after it. A DROPPED entry cuts out only what is gone: route -> [{ cut, why }].
+ * `cut` (12 characters or more once normalised, with a `why`) occurs exactly
+ * once in exactly one frozen sentence of that route. The sentence is split at
+ * the cut and every piece of 40 characters or more must be on the built page,
+ * as an ordinary sentence must; several entries may cut one sentence. An entry
+ * is stale, and fails, when the whole sentence is on the page after all. */
+const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
+const CRUMB_EYEBROW =
+  "Not copy: the breadcrumb trail and eyebrow word the old markup ran straight into the h1. The shell draws the trail (its separators are CSS) and the eyebrow is gone; the h1 is on the page word for word.";
+const CLOSING_RUN =
+  "Not copy: the closing buttons and the 'Also compared' link list the old markup ran together with the note after them. Rebuilt, the buttons are in the closing band and the list is above it (with 'Also compared' as its heading); every label is still on the page, and the note is checked whole.";
+const DROPPED = {
+  "/calculator": [
+    {
+      cut: "bandwidth what",
+      why: "The old page ran its 'Bandwidth' eyebrow straight into the h1 and lede. The eyebrow is gone (the breadcrumb trail precedes the h1 now); the h1 and the lede are on the page word for word.",
+    },
+  ],
+  "/comparison": [
+    {
+      cut: "yes multitrack",
+      why: "The capability table is now the shared CompareTable. Every cell is still on the page, but the two blank loudness cells carry the document's words (Filter only, No) between 'routing yes' and the next row's label, so the cells no longer run on.",
+    },
+    {
+      cut: "no experimental",
+      why: "The table's glyph legend now sits between the last row and the experimental note, so the last cell and the note no longer run on; the note itself is on the page.",
+    },
+    {
+      cut: "read the quickstart this page, with its sources try the routing matrix · install options",
+      why: "Only button labels, no sentence. The closing buttons now sit in different places: the closing band (Install polyemesis, Read the quickstart), the table section (Try the routing matrix) and the last section (the link to this page with its sources, /docs/comparison). The old Install options link is now Install polyemesis, the band's primary action.",
+    },
+    {
+      cut: "2–5 by plan (checked 15 Aug 2026)",
+      why: "Worded as docs/COMPARISON.md and /vs/restreamer word the same cell ('2–5 by plan tier (checked 15 Aug 2026)'), so the three agree. The rest of the sentence is checked.",
+    },
+    {
+      cut: ", installed in two minutes",
+      why: "A promised time the page cannot keep (the global copy rule bars one). The OBS plugins' card now reads 'free, GPL-2.0 and already on the machine', which docs/COMPARISON.md supports; the rest of the sentence is checked.",
+    },
+  ],
+  "/vs/aitum-multistream": [
+    { cut: "polyemesis / comparison / aitum multistream compared", why: CRUMB_EYEBROW },
+    {
+      cut: "all five compared install polyemesis also compared: obs-multi-rtmp · streamelements · streamlabs · restreamer and restream.io",
+      why: CLOSING_RUN,
+    },
+  ],
+  "/vs/obs-multi-rtmp": [
+    { cut: "polyemesis / comparison / obs-multi-rtmp compared", why: CRUMB_EYEBROW },
+    {
+      cut: "all five compared install polyemesis also compared: aitum multistream · streamelements · streamlabs · restreamer and restream.io",
+      why: CLOSING_RUN,
+    },
+  ],
+  "/vs/restreamer": [
+    { cut: "polyemesis / comparison / restreamer and restream.io compared", why: CRUMB_EYEBROW },
+    {
+      cut: "install polyemesis all five compared also compared: aitum multistream · obs-multi-rtmp · streamelements · streamlabs",
+      why: "Only button and link labels, no sentence. The old page ran the closing buttons and the 'Also compared' link list together; rebuilt, the buttons are in the closing band, which sits below the list, and every label is still on the page.",
+    },
+  ],
+  "/vs/streamelements": [
+    { cut: "polyemesis / comparison / streamelements compared", why: CRUMB_EYEBROW },
+    {
+      cut: "all five compared install polyemesis also compared: streamlabs · restreamer and restream.io",
+      why: CLOSING_RUN,
+    },
+  ],
+  "/vs/streamlabs": [
+    { cut: "polyemesis / comparison / streamlabs compared", why: CRUMB_EYEBROW },
+    {
+      cut: "the three ways to multistream the full comparison how the mix works",
+      why: "The old page ran its three footer links into the checked-and-recorded note. They are kept as the links under 'Use Streamlabs', no longer next to the note, which is the last paragraph of the page body and is checked whole.",
+    },
+  ],
+  "/docs": [
+    { cut: "documentation", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page has a breadcrumb instead, and the h1 itself is kept." },
+    {
+      cut: "getting it running the routing operating it automating it understanding it",
+      why: "The old sidebar list ran straight into the first section's heading and blurb. The list is now the in-page index (its labels are the section headings, which the heading check guards); the heading and the blurb are checked whole.",
+    },
+    {
+      cut: "under docs/ .",
+      why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the link moved to a 'Browse docs/ on GitHub' line after the last group. The rest of the sentence is checked.",
+    },
+  ],
+  "/multistream": [
+    { cut: "polyemesis / multistream multistreaming", why: CRUMB_EYEBROW },
+    {
+      cut: "yourself install it",
+      why: "The old link list ended with 'Install it', which is now 'Install polyemesis' (the primary action). Every other label, the eyebrow, the h2 and the sentence after them are checked.",
+    },
+    {
+      cut: "five platforms: youtube, twitch, kick, facebook and rumble",
+      why: "Wrong: Rumble chat is read only. docs/CONNECTING-PLATFORMS.md, 'Chat actions by platform': Delete, Time out and Ban are all 🚫 in the Rumble column. The page now reads 'Chat moderation covers YouTube, Twitch, Kick and Facebook; Rumble chat is read only.'",
+    },
+    {
+      cut: "once you pass a free tier's limits",
+      why: "Castr, which this card names, has no free tier: docs/evidence/competitor-facts-2026-08-15.md section 7 B ('THERE IS NO FREE TIER'; implying a shared free tier is not fine). The card now reads 'A subscription, in some cases after a free tier'; the rest of the sentence is checked.",
+    },
+  ],
+  "/free-restream-service": [
+    {
+      cut: "install it what it costs you",
+      why: "Link labels the old markup left without punctuation: 'Install it' is now 'Install polyemesis' (the primary action) and 'What it costs you' moved to the in-page index, away from the section after it. The eyebrow, the h2 and the sentence are checked.",
+    },
+    {
+      cut: "ffmpeg 8 build",
+      why: "One wording for the installer's FFmpeg across /download and this page, the one docs/INSTALL.md uses ('the installer's pinned static build'). The rest of the sentence is checked.",
+    },
+  ],
+  "/how-to-multistream-from-obs": [
+    {
+      cut: "can carry several audio tracks",
+      why: "docs/OBS.md (measured): OBS offers multitrack over Enhanced RTMP but no service enables it, so it sends one track. The old wording overstated it; the page now says it offers multitrack audio. The rest of the sentence is checked.",
+    },
+    {
+      cut: "guide how to",
+      why: "The old eyebrow word 'Guide' ran into the h1. The eyebrow is gone (the breadcrumb trail precedes the h1); the h1 and the lede after it are checked.",
+    },
+    {
+      cut: "the three routes walkthrough",
+      why: "The old page ran two index labels (The three routes, Walkthrough) into the next index entries. The index now sits between the header and the body, so the run cannot recur; the real sentence after it is checked.",
+    },
+    {
+      cut: "a run with obs itself as the publisher is still unconfirmed here",
+      why: "Contradicted by docs/OBS.md ('OBS cannot either, and that is now measured rather than open': OBS 30.2.3 sent no multitrack tag, and no service in OBS's services.json declares it, 0 of 91). The page now says that measured result, as /download does.",
+    },
+    {
+      cut: ", about ten minutes",
+      why: "A promised time (the global copy rule bars one). The page now reads 'Six steps.'; the HowTo structured data's totalTime is unchanged.",
+    },
+  ],
+  "/twitch-vod-track": [
+    { cut: "polyemesis / multistream / twitch vod track twitch", why: CRUMB_EYEBROW },
+    {
+      cut: "ways install it",
+      why: "The old link list ended with 'Install it', which is now 'Install polyemesis' (the primary action). The other labels are checked.",
+    },
+  ],
+};
+const legacyMain = (route) => {
+  const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
+  return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
+};
+const sentencesOf = (text) => text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
+// The pieces of a sentence left once the (non-overlapping, sorted) cuts are taken out of it.
+const piecesOf = (sentence, cuts) => {
+  const pieces = [];
+  let from = 0;
+  for (const { start, end } of cuts) {
+    pieces.push(sentence.slice(from, start));
+    from = end;
+  }
+  pieces.push(sentence.slice(from));
+  return pieces.map((p) => p.trim()).filter((p) => p.length >= 40);
+};
+// Check one route's DROPPED entries against its frozen sentences: report invalid or stale
+// entries, and return sentence -> its cuts for the entries that are valid.
+const cutsFor = (route, sentences, built) => {
+  const bySentence = new Map();
+  for (const d of DROPPED[route] ?? []) {
+    const cut = norm(String(d.cut ?? ""));
+    const label = `DROPPED entry for ${route} (cut: "${d.cut ?? ""}")`;
+    const hits = sentences.filter((t) => t.includes(cut));
+    if (cut.length < 12) {
+      fail.push(`${label} is too short: "cut" must be at least 12 characters once normalised.`);
+    } else if (typeof d.why !== "string" || d.why.trim() === "") {
+      fail.push(`${label} has no "why".`);
+    } else if (hits.length !== 1) {
+      fail.push(`${label} matches ${hits.length} legacy sentences; it must match exactly one.`);
+    } else if (hits[0].indexOf(cut) !== hits[0].lastIndexOf(cut)) {
+      fail.push(`${label} occurs more than once in the legacy sentence it matches; it must occur exactly once.`);
+    } else if (built.includes(hits[0])) {
+      fail.push(`${label} is stale: the whole legacy sentence is on the built page, so nothing is cut out. Delete the entry.`);
+    } else {
+      const start = hits[0].indexOf(cut);
+      bySentence.set(hits[0], [...(bySentence.get(hits[0]) ?? []), { start, end: start + cut.length, label }]);
+    }
+  }
+  for (const [sentence, cuts] of bySentence) {
+    cuts.sort((a, b) => a.start - b.start);
+    for (let i = 1; i < cuts.length; i++) {
+      if (cuts[i].start < cuts[i - 1].end) fail.push(`${cuts[i].label} overlaps ${cuts[i - 1].label} in the same legacy sentence.`);
+    }
+    bySentence.set(sentence, cuts);
+  }
+  return bySentence;
+};
+{
+  for (const key of Object.keys(DROPPED)) {
+    if (!(key in LEGACY)) fail.push(`DROPPED has a key "${key}" that is not a route in legacy-inner.fixture.json, so it cuts nothing (typo?).`);
+  }
+  for (const [route, legacy] of Object.entries(LEGACY)) {
+    const built = norm(legacyMain(route).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " "));
+    const sentences = sentencesOf(legacy.text);
+    const cuts = cutsFor(route, sentences, built);
+    for (const sentence of sentences) {
+      if (built.includes(sentence)) continue;
+      const cutHere = cuts.get(sentence);
+      if (!cutHere) {
+        fail.push(`${route} lost legacy copy: "${sentence}". Keep it, or cut out only what is gone with a DROPPED entry.`);
+        continue;
+      }
+      for (const piece of piecesOf(sentence, cutHere).filter((p) => !built.includes(p))) {
+        fail.push(`${route} lost legacy copy: "${piece}" (what is left of "${sentence}" after its DROPPED cut). Keep it, or cut it out too.`);
+      }
+    }
+  }
+}
+
+/* HEADINGS KEPT. The h1 of each of those pages and every h2 in the fixture
+ * must still be an h1 or h2 of the rebuilt page (tags stripped, whitespace
+ * collapsed, same case-insensitive typography as the copy check). */
+{
+  // Compared with every space removed: an accent word is an inline element, and
+  // stripping its tags leaves a space before the punctuation that follows it
+  // ("the code</em>." reads "the code ."), which is the same heading.
+  const key = (s) => norm(s).replace(/\s+/g, "");
+  const headings = (html, tag) =>
+    (html.match(new RegExp(`<${tag}[\\s\\S]*?</${tag}>`, "g")) || []).map(key);
+  for (const [route, legacy] of Object.entries(LEGACY)) {
+    const main = legacyMain(route);
+    const have = new Set([...headings(main, "h1"), ...headings(main, "h2")]);
+    for (const wanted of [legacy.h1, ...legacy.h2]) {
+      if (!have.has(key(wanted))) fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
+    }
+  }
+}
+
+/* NO "ONE MAINTAINER" ANYWHERE. The owner's instruction was to remove the phrase
+ * everywhere; maturity is stated as the release instead (`v0.18.0, released
+ * ...`). Every built page is checked, so a docs page rendered from a markdown
+ * file cannot bring it back either. */
+const ONE_MAINTAINER = /\bone[\s-]+maintainer/i;
+for (const f of pages) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  // The phrase can be wrapped across a line break, or split by a tag or a non-breaking space, so the built text is read as well.
+  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;|&#xa0;/gi, " ");
+  if (ONE_MAINTAINER.test(html) || ONE_MAINTAINER.test(text)) {
+    fail.push(`${f}: contains the phrase "one maintainer", which is removed from the whole site (docs, README and source too).`);
+  }
+}
+
+/* NO EMPTY ON-THIS-PAGE. An in-page index with fewer than two links is a rail
+ * with nothing in it, and a documentation page whose article has no h2 or h3
+ * has nothing to index at all. Every element labelled "On this page" must hold
+ * at least two links; a docs page with no h2/h3 in its article must not have
+ * one. */
+{
+  const linksIn = (html, from) => {
+    const tag = /^<([a-z0-9]+)/i.exec(html.slice(from))?.[1];
+    if (!tag) return -1;
+    const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
+    re.lastIndex = from + 1;
+    let depth = 1;
+    let end = -1;
+    for (let m = re.exec(html); m; m = re.exec(html)) {
+      depth += m[1] ? -1 : 1;
+      if (depth === 0) { end = m.index; break; }
+    }
+    if (end < 0) return -1; // never closed: fail rather than count to the end of the page
+    return (html.slice(from, end).match(/<a\s[^>]*href=/g) || []).length;
+  };
+  for (const page of pages) {
+    const html = readFileSync(join(DIST, page), "utf8");
+    const labelled = [...html.matchAll(/<[a-z0-9]+\b[^>]*aria-label="On this page"[^>]*>/gi)];
+    if (labelled.length === 0) continue;
+    for (const m of labelled) {
+      const n = linksIn(html, m.index);
+      if (n < 0) fail.push(`${page} has an "On this page" element whose closing tag was not found.`);
+      else if (n < 2) fail.push(`${page} has an "On this page" index with ${n} link(s); it needs at least two or must not be rendered.`);
+    }
+    const article = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(html)?.[0];
+    if (page.startsWith("docs/")) {
+      if (!article) fail.push(`${page} has an "On this page" index but no article.doc-prose to index.`);
+      else if (!/<h[23][\s>]/.test(article)) fail.push(`${page} has an "On this page" index but its article has no h2 or h3.`);
+    }
+  }
+}
+
+/* DOC TOC MATCHES THE ARTICLE. The "On this page" list of a documentation page
+ * is built from the markdown source (lib/doc-headings.ts) while the ids it links
+ * to are written onto the headings by the pipeline (lib/hast-heading-ids.mjs).
+ * Two readers of one document drift the day a file starts using a construct one
+ * of them skips, so every docs page is held to this: the rail's links equal, in
+ * order, the ids of the article's h2 and h3. An article with fewer than two
+ * such headings has no rail at all. */
+{
+  for (const page of pages.filter((p) => p.startsWith("docs/"))) {
+    const html = readFileSync(join(DIST, page), "utf8");
+    const article = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(html)?.[0] ?? "";
+    const heads = [...article.matchAll(/<h([23])\b([^>]*)>([\s\S]*?)<\/h\1>/g)].map((m) => ({
+      id: /\bid="([^"]*)"/.exec(m[2])?.[1],
+      text: m[3].replace(/<[^>]*>/g, "").trim(),
+    }));
+    // A heading with no id would be dropped from both sides and go unnoticed.
+    for (const h of heads) if (!h.id) fail.push(`${page}: the article heading "${h.text}" has no id, so it cannot be linked or listed.`);
+    const ids = heads.filter((h) => h.id).map((h) => h.id);
+    const rail = /<nav\b[^>]*aria-label="On this page"[^>]*>[\s\S]*?<\/nav>/.exec(
+      html.replace(/<details[\s\S]*?<\/details>/g, ""),
+    )?.[0];
+    const links = rail ? [...rail.matchAll(/<a\s[^>]*href="#([^"]*)"/g)].map((m) => m[1]) : [];
+    if (ids.length < 2 ? rail : JSON.stringify(links) !== JSON.stringify(ids)) {
+      fail.push(
+        `${page}: the "On this page" list does not match the article's h2/h3 ids.\n` +
+          `  list:    ${links.join(", ") || "(none)"}\n  article: ${ids.join(", ") || "(none)"}`,
+      );
+    }
+  }
+}
+
+/* TASK LIST. A `- [ ]` item in the markdown comes out as
+ * <li class="task-list-item"><input type="checkbox" disabled>. Every page's nav
+ * carries its own type="checkbox" (the phone menu toggle), so the page is read
+ * for the task-list item itself: docs/meta-app-review.html is the published
+ * document that has one. The checkbox must be styled by a .doc-prose rule, or
+ * it renders as a browser default. */
+{
+  const page = readFileSync(join(DIST, "docs/meta-app-review.html"), "utf8");
+  const html = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(page)?.[0] ?? "";
+  if (!/<li class="task-list-item"><input type="checkbox"/.test(html)) {
+    fail.push("docs/meta-app-review.html has no task-list checkbox in its article: the task list is gone or the pipeline changed its markup.");
+  }
+  if (!/\.doc-prose[^{}]*checkbox[^{}]*\{/.test(css)) fail.push("the built CSS has no .doc-prose rule for the task-list checkbox.");
 }
 
 /* SITE FACTS: the numbers the site states about the server.

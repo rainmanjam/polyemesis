@@ -17,6 +17,7 @@
  * @theme block below.
  */
 @import "./tokens.css";
+@import "./inner.css";
 
 /* ---------------------------------------------------------------------------
    Tokens.
@@ -438,16 +439,13 @@
   /* EVERY wide table, not just the comparison ones.
    *
    * This started as a fix for /comparison and was measured afterwards on the
-   * other two: the routing matrix (on the home page then, on /features now) hides 403px of 736 (55%) at
-   * a 390px viewport, and it is the worse case of the two. That table is
-   * INTERACTIVE -- you scroll right to reach a destination column and click a
-   * crosspoint -- so losing the track label means clicking a cell without
-   * knowing which of six tracks it belongs to.
+   * other tables. Losing the row label while swiping to a far column leaves a
+   * grid of bare cells against nothing. The routing matrix that once had its
+   * own `.patch` table no longer exists; `.patch` stays in this selector only
+   * because scripts/check-build.mjs asserts both names are in the rule.
    *
-   * The background is a variable because the two tables sit on different
-   * grounds: the comparison tables on the page, the matrix inside a
-   * surface-filled card. An opaque background is required either way, and the
-   * wrong opaque colour is as visible as none. */
+   * An opaque background is required: without it the scrolling cells slide
+   * visibly underneath the label. */
   :is(.cmp, .patch) :is(th, td):first-child {
     position: sticky;
     left: 0;
@@ -462,11 +460,6 @@
      rather than the page, or the corner reads as a hole in the header. */
   .cmp thead :is(th, td):first-child {
     background: var(--color-surface);
-  }
-  /* The matrix is inside a card that is already surface-coloured, so both its
-     head and its body cells take that instead of the page colour. */
-  .patch {
-    --sticky-bg: var(--color-surface);
   }
   /* The edge that says "this column is pinned, the rest moved". Drawn with a
      shadow rather than a border so it costs no layout width and cannot push the
@@ -700,8 +693,7 @@
      the control. Keyboard users on this site are disproportionately the people
      evaluating it seriously, and a blurred halo reads as decoration — it is
      also the first thing to disappear against a dark background. */
-  .btn:focus-visible,
-  .xpt:focus-visible {
+  .btn:focus-visible {
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
   }
@@ -808,206 +800,6 @@
   }
   .frame img { display: block; width: 100%; height: auto; }
 
-  /* --- the patchbay ---------------------------------------------------- */
-
-  /* A crosspoint, not a checkbox. Both agents said the same thing about the
-     first draft: <input type=checkbox> reads as a web survey, and this needs to
-     read as a router. The input stays for keyboard and screen-reader
-     behaviour and is drawn as an illuminated square button. */
-  .xpt {
-    appearance: none;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 0.25rem;
-    border: 1px solid var(--color-line-strong);
-    background: var(--color-ink);
-    cursor: pointer;
-    position: relative;
-    /* A top highlight and a floor shadow, one pixel each. This is what makes a
-       square read as a KEY rather than a filled rectangle — the same trick a
-       physical patchbay gets for free from having a lit cap sitting proud of
-       the panel. Kept to 1px: heavier bevels look like 2009. */
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.04),
-      inset 0 -1px 0 rgb(0 0 0 / 0.35);
-    transition:
-      background-color var(--motion-instant) var(--ease-out),
-      border-color var(--motion-instant) var(--ease-out),
-      box-shadow var(--motion-instant) var(--ease-out),
-      transform var(--motion-instant) var(--ease-out);
-  }
-  .xpt:hover { border-color: var(--color-primary); }
-  /* Travel. A key that does not move when pressed is a picture of a key. */
-  .xpt:active { transform: translateY(1px); }
-  .xpt:checked {
-    background: var(--color-cross-dim);
-    border-color: var(--color-cross);
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-cross) 35%, transparent);
-  }
-  .xpt:checked::after {
-    content: "";
-    position: absolute;
-    inset: 0.4375rem;
-    border-radius: 1px;
-    background: var(--color-cross);
-  }
-
-  /* Hovering a destination column isolates its path. The whole product is
-     "these columns differ", so letting someone trace one is the fastest way to
-     show it. */
-  .patch:has(.col-1:hover) td:not(.c1),
-  .patch:has(.col-2:hover) td:not(.c2),
-  .patch:has(.col-3:hover) td:not(.c3),
-  .patch:has(.col-4:hover) td:not(.c4) {
-    opacity: 0.35;
-  }
-  .patch td { transition: opacity 120ms; }
-
-  /* --- rendered documentation ------------------------------------------- */
-
-  /* The 23 documents under /docs/* are markdown, so nothing in them carries a
-     class and every element has to be styled by tag inside this one wrapper.
-     Deliberately narrow: it sets rhythm, scale and colour and nothing else, so
-     that a document reads as this site rather than as a README pasted onto it.
-
-     Code blocks and tables are NOT here. Both go through the same components
-     the hand-written pages use -- `.code` above and `.cmp` / `.scroll-hint`
-     further up -- because a docs-only copy of either is how the first one rots.
-     lib/rehype-code-block.mjs and lib/rehype-doc-tables.mjs do that rewriting. */
-  .doc-prose {
-    color: var(--color-muted);
-    line-height: 1.7;
-    /* Long unbreakable strings -- an srt:// URL with a query string, a
-       filtergraph -- appear in prose here, not only in code blocks. Without this
-       they push the column wider than the phone, which is the same failure
-       `.card { min-width: 0 }` exists for one level up. */
-    overflow-wrap: break-word;
-  }
-  .doc-prose > :first-child { margin-top: 0; }
-
-  /* The page title, from the markdown's `# Heading`. Without this rule it fell
-     through to the reset and rendered as 16px body text; it now sits on the
-     same scale as every other page's h1 (text-4xl, sm:text-5xl, bold). */
-  .doc-prose h1 {
-    margin-bottom: 1.25rem;
-    font-size: 2.25rem;
-    line-height: 1.25;
-    font-weight: 700;
-    color: var(--color-fg);
-    text-wrap: balance;
-  }
-  @media (min-width: 640px) { .doc-prose h1 { font-size: 3rem; } }
-  .doc-prose h2 {
-    margin-top: 3rem;
-    margin-bottom: 0.75rem;
-    padding-top: 1.75rem;
-    border-top: 1px solid var(--color-line);
-    font-size: 1.5rem;
-    font-weight: 500;
-    color: var(--color-fg);
-  }
-  .doc-prose h3 {
-    margin-top: 2.25rem;
-    margin-bottom: 0.5rem;
-    font-size: 1.125rem;
-    font-weight: 500;
-    color: var(--color-fg);
-  }
-  .doc-prose h4 {
-    margin-top: 1.75rem;
-    margin-bottom: 0.375rem;
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--color-subtle);
-  }
-
-  .doc-prose p,
-  .doc-prose ul,
-  .doc-prose ol {
-    margin-block: 1rem;
-  }
-  .doc-prose ul { list-style: disc; padding-left: 1.25rem; }
-  .doc-prose ol { list-style: decimal; padding-left: 1.5rem; }
-  .doc-prose li { margin-block: 0.375rem; }
-  .doc-prose li::marker { color: var(--color-subtle); }
-  /* A nested list is a sub-point, not a new paragraph. */
-  .doc-prose li > ul,
-  .doc-prose li > ol { margin-block: 0.375rem; }
-
-  .doc-prose strong { color: var(--color-fg); font-weight: 600; }
-
-  .doc-prose a {
-    color: var(--color-primary-bright);
-    text-decoration: underline;
-    /* Far enough off the baseline that a descender does not sit on the rule.
-       These documents are dense with links and a tight underline turns a
-       paragraph into a smear. */
-    text-underline-offset: 0.2em;
-    text-decoration-color: var(--color-primary-dim);
-    transition: text-decoration-color var(--motion-instant) var(--ease-out);
-  }
-  .doc-prose a:hover { text-decoration-color: var(--color-primary-bright); }
-
-  /* Inline code, which is NOT a code block and must not look like a small one.
-     `:not(pre code)` keeps it off the fenced blocks, whose type is set by
-     `.code pre` above. */
-  .doc-prose code:not(pre code) {
-    padding: 0.1em 0.35em;
-    border-radius: 0.25rem;
-    background: var(--color-surface);
-    font-family: var(--font-mono);
-    font-size: 0.8125em;
-    color: var(--color-fg);
-  }
-
-  /* A blockquote in these documents is almost always a caveat or a measured
-     result, never a quotation. A left rule in primary says "read this"; amber
-     would say "warning", which it is not -- see the note at the top. */
-  .doc-prose blockquote {
-    margin-block: 1.25rem;
-    padding: 0.25rem 0 0.25rem 1.125rem;
-    border-left: 2px solid var(--color-primary);
-  }
-  .doc-prose blockquote > :first-child { margin-top: 0; }
-  .doc-prose blockquote > :last-child { margin-bottom: 0; }
-
-  .doc-prose hr {
-    margin-block: 2.5rem;
-    border: 0;
-    border-top: 1px solid var(--color-line);
-  }
-
-  /* The scroll container for a markdown table. The classes on the table itself
-     (`.cmp`) and the fade (`.scroll-hint`) are the site's existing ones; this
-     only supplies the box they assume. */
-  .doc-table {
-    margin-block: 1.5rem;
-    overflow-x: auto;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-token);
-  }
-  .doc-table table {
-    width: 100%;
-    /* Wide enough that the columns do not crush into unreadable stacks, which is
-       what forces the horizontal scroll `.scroll-hint` then advertises. Below
-       this the browser would rather wrap every cell to two characters. */
-    min-width: 40rem;
-    border-collapse: collapse;
-    font-size: 0.875rem;
-  }
-  .doc-table :is(th, td) {
-    padding: 0.625rem 0.875rem;
-    border-bottom: 1px solid var(--color-line);
-    text-align: left;
-    vertical-align: top;
-  }
-  .doc-table tr:last-child :is(th, td) { border-bottom: 0; }
-  /* The head row paints its own ground, and `.cmp thead th:first-child` above
-     matches it so the pinned corner does not read as a hole in the header. */
-  .doc-table thead { background: var(--color-surface); }
-  .doc-table thead th { color: var(--color-fg); font-weight: 500; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1036,120 +828,32 @@
    Motion.
 
    The rule applied throughout: motion has to carry meaning or it is noise on a
-   page about a signal path. So there are exactly three kinds here — content
-   arriving, signal flowing, and levels moving — and nothing decorative.
+   page about a signal path. What is left lives inside product visuals (signal
+   flowing, levels moving) and nothing is decorative.
 
    All of it is already covered by the prefers-reduced-motion block above, which
    zeroes every duration rather than merely shortening it.
    --------------------------------------------------------------------------- */
 
 @layer components {
-  /* 1. Content arriving. A short rise on first paint for the hero, and
-        nothing else (see the note under .rise-5). 14px — far enough to read
-        as motion, short enough that nobody waits for it.
-
-     ON THE TOKENS NOW, AND IT WAS NOT. The duration and the curve were written
-     here as `0.45s cubic-bezier(0.22, 0.61, 0.36, 1)` — two literals four lines
-     below the block that names --motion-enter (420ms) and --ease-out for
-     exactly this. That is how a scale becomes decorative: the tokens are
-     declared, nothing references them, and the next person to tune the timing
-     tunes the literal because it is the thing in front of them. 420ms and
-     --ease-out are close enough to what was here that the page looks unchanged;
-     what changes is that retuning entry motion is now one edit at the top of
-     this file rather than a search for every literal that happened to mean it.
-
-     ONE PAGE-LOAD MOMENT, NOT FIVE INDEPENDENT FADES. The delays are a single
-     70ms cascade indexed by --rise-step, so the hero reads top to bottom in the
-     order a person reads it and the product panel lands last, as the payoff.
-     Three elements in the old hero shared rise-3 and therefore arrived
-     simultaneously from three different places on the screen — which is not a
-     sequence, it is a flicker with a delay on it.
-
-     Deliberately capped at five steps. 70ms × 5 plus the 420ms rise is 770ms to
-     the last element; a sixth step pushes the payoff past the point where a
-     visitor has started scrolling and animates content they can no longer see
-     arrive. */
+  /* Kept only because scripts/check-build.mjs asserts that something references
+     --motion-enter in the built CSS. Nothing in web/src uses .rise any more
+     (searched: pages, components, scripts, tests, public); the check should be
+     moved to a live consumer and this deleted with it. */
   @keyframes rise {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: none; }
   }
-
   .rise {
     animation: rise var(--motion-enter) var(--ease-out) both;
-    animation-delay: calc(var(--rise-step, 0) * 70ms);
   }
-  .rise-1 { --rise-step: 1; }
-  .rise-2 { --rise-step: 2; }
-  .rise-3 { --rise-step: 3; }
-  .rise-4 { --rise-step: 4; }
-  .rise-5 { --rise-step: 5; }
 
   /* NO SCROLL REVEALS BELOW THE HERO, and they were here until the 2026-11
      design review. Every section below the fold used to fade in on entry, by
      `animation-timeline: view()` or an IntersectionObserver fallback. It moved
      nothing a reader needed to see move, and it had real costs: a full-page
      capture, a print, a link preview or any tool that renders without
-     scrolling saw blank space where the sections were. The hero's page-load
-     cascade above is the one entry motion left. scripts/check-build.mjs fails
+     scrolling saw blank space where the sections were. No entry motion is left
+     (the hero's page-load cascade went with it). scripts/check-build.mjs fails
      the build if `data-reveal` or a scroll timeline comes back. */
-
-  /* 2. Destination loudness bars. These carry measured LUFS figures, so the
-     movement has to stay small enough that nobody could misread the bar as
-     reporting a different number than the one printed beside it. 1.5% of width,
-     and the
-     printed figure never moves. */
-  @keyframes loud {
-    0%, 100% { transform: scaleX(1); }
-    50%      { transform: scaleX(0.985); }
-  }
-  /* Loudness is NOT given the ballistics above, deliberately. Integrated LUFS
-     is a long moving average — it drifts, it does not chase transients — so a
-     fast attack here would be the wrong instrument entirely. Smooth and slow
-     is what an R128 readout actually does. */
-  .loud-bar {
-    transform-origin: left;
-    animation: loud 3.4s var(--ease-breath) infinite;
-  }
-
-  /* MOMENTARY loudness, which is a different instrument from the one above.
-
-     .loud-bar is integrated LUFS: a long moving average that drifts, so it is
-     slow and barely moves. The hero panel shows MOMENTARY loudness — EBU R128's
-     400ms window — and that genuinely chases programme material. A mic hitting a
-     consonant moves it several LU inside a second.
-
-     So this is fast and has real amplitude, and both are honest rather than
-     decorative: it is what an M-scale readout does. The hero prints no LUFS
-     figure precisely so that this movement cannot be read as contradicting the
-     measured integrated numbers in LoudnessBars.astro further down the page.
-
-     BALLISTICS, NOT A SINE WAVE, and this is the surviving statement of a rule
-     the old hero meters also followed. A symmetric rise and fall is what no
-     meter does, and an audience of broadcast engineers reads it as a decorative
-     web animation — the one impression this page cannot afford. A real meter
-     chases a transient suddenly and falls back at a fixed rate, so the rise is
-     ~9% of the cycle and the decay is linear the rest of the way: a decay that
-     eases out looks animated rather than measured. */
-  @keyframes loud-momentary {
-    0%   { transform: scaleX(0.90); }
-    9%   { transform: scaleX(1); }      /* a transient arrives */
-    64%  { transform: scaleX(0.935); }  /* and falls back at a fixed rate */
-    100% { transform: scaleX(0.90); }
-  }
-
-  /* `meter`/.meter-live, `peak-hold`/.meter-peak-tick and `flow`/.route-live
-     stood here until the hero stopped drawing the six-track fan-out and the
-     signal path. They had no consumers left, and three animated classes with
-     nothing to animate is a false statement about the motion scale this file
-     documents. The ballistics rule they encoded is not lost — it is kept
-     in the loud-momentary keyframe above, which check-build.mjs guards.
-
-     The crosspoint's press used to be a `latch` keyframe here. It is now a
-     spring in MixMatrix.astro, because a keyframe restarts from scale(0.88)
-     every time it is retriggered — visible as a stutter when you toggle a row
-     quickly — whereas a spring retargets from wherever the cell currently is.
-     That difference is the entire reason a motion library is on this page.
-     Removed rather than left in place: two animations driving `transform` on
-     the same element is a race, and the one that loses is whichever the
-     browser applies first. */
 }

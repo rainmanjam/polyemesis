@@ -1,0 +1,51 @@
+---
+/* The shell every inner page sits on: Base, the page header, an optional index
+ * rail beside the body, an optional closing band. Base already renders the
+ * main landmark, so this renders a div. `div[data-column]` is the column the
+ * layout check measures against. */
+import Base from "./Base.astro";
+import PageHeader from "../components/inner/PageHeader.astro";
+import PageIndex from "../components/inner/PageIndex.astro";
+import CloseBand from "../components/inner/CloseBand.astro";
+import Lightbox from "../components/Lightbox.astro";
+import type { Crumb } from "../lib/breadcrumbs";
+import type { IndexItem } from "../lib/page-index";
+
+type BandProps = Parameters<typeof CloseBand>[0];
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+  crumbs: Crumb[];
+  heading: string;
+  accent?: string;
+  lede: string;
+  index?: IndexItem[];
+  band?: BandProps;
+  longform?: boolean;
+  lightbox?: boolean;
+  noindex?: boolean;
+}
+
+const { title, description, path, crumbs, heading, accent, lede, index, band, longform = false, lightbox = false, noindex = false } = Astro.props;
+---
+
+<Base title={title} description={description} path={path} noindex={noindex}>
+  <PageHeader crumbs={crumbs} heading={heading} accent={accent} lede={lede}>
+    {Astro.slots.has("actions") && <slot name="actions" slot="actions" />}
+    {Astro.slots.has("meta") && <slot name="meta" slot="meta" />}
+  </PageHeader>
+  <div class="wrap lay" data-lay={index?.length ? "rail" : "single"}>
+    {index?.length ? <PageIndex items={index} /> : null}
+    <div data-column class:list={["inner-main", longform && "longform"]}>
+      <slot />
+    </div>
+  </div>
+  {band && <CloseBand {...band} />}
+  {lightbox && <Lightbox />}
+  <script>
+    import { bootInner } from "../scripts/inner";
+    bootInner(document);
+  </script>
+</Base>

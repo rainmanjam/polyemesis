@@ -1,969 +1,249 @@
 ---
-import Base from "../layouts/Base.astro";
-import Lightbox from "../components/Lightbox.astro";
-import { Picture, getImage } from "astro:assets";
-import type { ImageMetadata } from "astro";
-import { lqipStyle } from "../lib/lqip";
-import MixMatrix from "../components/MixMatrix.astro";
-import SpecStrip from "../components/SpecStrip.astro";
-import LoudnessBars from "../components/LoudnessBars.astro";
-import meters from "../assets/shots/04-meters.png";
-import { TRACK_LAYOUT, MUSIC_TRACK } from "../data/tracks.mjs";
-
-/* THE SCREENSHOTS MOVED OUT OF public/ TO GET RESPONSIVE VARIANTS AT ALL.
+/* /features, rebuilt on the inner-page shell from src/data/features.mjs.
  *
- * Astro copies public/ verbatim and processes nothing in it, so an <img src>
- * pointing there can only ever be the one file every visitor downloads. These
- * captures are 2880x1800; the figure renders at about 690 CSS px on a wide
- * screen and 335 on a phone, so the smallest viewport was paying for the
- * largest image. Nothing about the markup could fix that -- the file had to be
- * somewhere the build can see it.
- *
- * Globbed rather than imported one by one because the section list below is the
- * source of truth for which captures exist, and a second hand-written list of
- * imports beside it is a list that drifts.
- *
- * MISSING FILES ARE NOW A BUILD FAILURE, and that is the point of shotOf's
- * throw rather than a fallback. Three of these -- 05-sources, 13-automation and
- * 10-playout -- were referenced here while living only in docs/media, so the
- * page had been serving three 404s: a broken image renders as empty space and
- * says nothing, which is why it survived. Under public/ that was undetectable
- * at build time. It is not any more. */
-const shotFiles = import.meta.glob<{ default: ImageMetadata }>(
-  "../assets/shots/*.png",
-  { eager: true },
-);
-const shotOf = (name: string): ImageMetadata => {
-  const mod = shotFiles[`../assets/shots/${name}`];
-  if (!mod) {
-    throw new Error(
-      `features.astro references ../assets/shots/${name}, which does not exist. ` +
-        `A screenshot named in the section list must be in src/assets/shots.`,
-    );
-  }
-  return mod.default;
-};
-
-/* WHAT THE BROWSER IS TOLD THE IMAGE WILL BE, which is the half of srcset that
- * is easy to get wrong. The grid is .wrap (80rem, 1.25rem padding either side)
- * split 0.85fr/1.15fr with a 2.5rem gap, so the figure column is about 690px
- * once past the lg breakpoint and full width below it. Quoting a number larger
- * than the real box would hand every visitor a file bigger than they can show,
- * which is the bug this whole change exists to remove. */
-const SHOT_SIZES = "(min-width: 1024px) 690px, calc(100vw - 2.5rem)";
-
-/* THE FALLBACK IS WEBP, NOT THE ORIGINAL PNG, and that is a deliberate
- * narrowing. <picture> falls back only for a browser that understands neither
- * avif nor webp, and every browser that understands <picture> at all
- * understands webp -- but the bigger reason is that the PNG fallback measured
- * WORSE than the file it replaced: re-encoding a 189kB palette-optimised
- * capture produced 397kB, because the optimisation that made the original small
- * does not survive a resize. Shipping it would hand the narrowest, oldest
- * audience a file twice the size of what they got before this change, which is
- * the opposite of the point. It also keeps ~6MB of unused variants out of the
- * deployed artefact.
- *
- * The candidate widths stop at 1440: 690 CSS px on a 2x display is 1380 device
- * px, and a variant nothing can select is bytes spent at build time to serve
- * nobody. The full 2880 is generated separately, for the lightbox, which is the
- * one place the whole capture is genuinely wanted. */
-const SHOT_WIDTHS = [420, 690, 960, 1440];
-
-
-/* Each section pairs a claim with the screenshot that evidences it. The
- * dashboard was left out for a long time, for two successive state-reporting
- * defects: its ingest card read "Offline" while audio flowed, and then, on an
- * install with several programmes, showed whichever programme had reported
- * last rather than the one selected in the header. Both are fixed in the
- * product (lib/dashboardFacts programmeSnapshot), which was the UX Council's S5
- * condition for showing it, so it now opens the page.
- *
- * `note` is the EXPERIMENTAL convention from the product, carried onto the
- * site. It exists because this page — not a Go doc comment, not a card in the
- * routing editor — is where most people meet a feature for the first time, and
- * a caveat that appears only after install is a caveat that arrived too late.
- * Same rule as ui/src/components/Experimental.tsx: it NAMES the specific claim
- * without evidence rather than saying "beta", and it labels rather than gates —
- * nothing here is turned off, and the surrounding copy stays a description of
- * what the feature does. */
-
-/* Painted under the lazy meters capture so its frame is never empty while the
- * file loads. See lib/lqip.ts. */
-const metersPlaceholder = await lqipStyle(meters);
+ * Seven sections in a fixed order, the five in-depth ones each laid out
+ * differently (data-layout): the audio lead, an inputs table with a ports
+ * diagram, the failover demo, chat beside its capture, and four recording
+ * verbs above theirs. Section ids are literal on purpose: the order test reads
+ * this file. Every screenshot goes through Shot, which fails the build for a
+ * missing capture. The deck still is an Image because it is a photograph-style
+ * render, not a console screenshot. */
+import { Image } from "astro:assets";
+import InnerPage from "../layouts/InnerPage.astro";
+import Shot from "../components/inner/Shot.astro";
+import CompareTable from "../components/inner/CompareTable.astro";
+import FailoverLadder from "../components/features/FailoverLadder.astro";
+import deckStill from "../assets/home/deck-still.jpg";
+import { TRACK_LAYOUT } from "../data/tracks.mjs";
+import { SCREENS, LEAD, ROOMS, INPUTS, FAILOVER_FACTS, CHAT_FACTS, RECORDING_VERBS, DECK_FACTS, ALSO } from "../data/features.mjs";
+import { splitAccent } from "../lib/accent";
 
 /* "track 1 is the host mic, track 2 is the co-host mic, ... and track 4 is the
  * room." Built from the shared layout so the sentence cannot name a track the
- * patchbay and the capture do not have. */
+ * capture does not have. */
 const LAYOUT_SENTENCE =
   TRACK_LAYOUT.map(
     (t, i) => `${i === TRACK_LAYOUT.length - 1 ? "and " : ""}track ${t.id} is the ${t.name.toLowerCase()}`,
   ).join(", ") + ".";
 
-const serverFeatures = [
-  {
-    t: "Video is copied, not re-encoded, unless you ask for a rendition",
-    d: "Without a rendition every destination gets -c:v copy, so CPU cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC.",
-  },
-  {
-    t: "Shared renditions for the platforms that refuse your source",
-    d: "One encode feeds every destination that selects it, ref-counted so an unused tier costs nothing. It re-encodes video only, so audio still routes per destination.",
-  },
-  {
-    t: "One port per protocol, many programmes",
-    d: "Sources are told apart by a publish token (supplied in OBS's Stream Key field on RTMP, and as the streamid on SRT), so a second programme never means opening a second port either way. RTMP is still the single-track fallback: one stereo pair on classic RTMP, more over Enhanced RTMP.",
-  },
-  {
-    t: "Live meters on every channel of every track",
-    d: "How you verify the clean track really is clean before you go live, rather than after the VOD is published.",
-  },
-  {
-    t: "Chat moderation across five platforms",
-    d: "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick, plus a moderator card showing what one person said across every platform at once.",
-  },
-  {
-    t: "Failover with a standby ingest and a slate",
-    d: "A source selector that switches without restarting a single destination. Off by default: with it off the pipeline is byte-for-byte what it was before.",
-  },
-  {
-    t: "A YouTube broadcast made for you, on the key you already have",
-    d: "A destination linked to your channel gets its own broadcast when it goes live, bound to your stored stream key, which is never changed. It ends when you switch the destination off, and YouTube Studio's upcoming events show in the schedule calendar.",
-  },
-  {
-    t: "Stop on ingest loss, for any encoder",
-    d: "Opt in, and if neither your primary nor backup ingest arrives for the wait you set, the live destinations stop instead of airing dead video. It covers OBS, hardware encoders and IRL backpacks over SRTLA, and is off until you turn it on.",
-  },
-  {
-    t: "Live captions, the way each platform takes them",
-    d: "Transcribed on your own machine, then sent inside the Twitch stream, to YouTube's caption ingestion (provisional), and as a Captions track on your own player, with your spellings applied everywhere.",
-  },
-  {
-    t: "Clips and vertical shorts from the archive",
-    d: "Highlight suggestions from chat bursts and loudness peaks, 9:16 shorts with burned-in captions, posted to YouTube Shorts or TikTok after you review them and click Publish. TikTok posts stay private until TikTok audits the app.",
-  },
-  {
-    t: "Your audience, across every platform",
-    d: "Viewer counts from YouTube, Twitch, Kick and your own player on the Dashboard while you are live, and a report per stream afterwards.",
-  },
+const shot = (id: string) => SCREENS.find((s) => s.id === id)!;
+const [leadBefore, leadWord, leadAfter] = splitAccent(LEAD.heading, LEAD.accent);
+
+const index = [
+  { id: "audio", label: "Per-destination audio" },
+  { id: "inputs", label: "Inputs and bonding" },
+  { id: "failover", label: "Failover" },
+  { id: "chat", label: "Chat and moderation" },
+  { id: "recordings", label: "Recordings and clips" },
+  { id: "deck", label: "Stream Deck plugin" },
+  { id: "also", label: "Also included" },
 ];
 
-const sections = [
-  {
-    id: "dashboard",
-    provenBy: "startDestination",
-    eyebrow: "Dashboard",
-    title: "The show, on one screen",
-    body: [
-      "The programme you picked in the header: its ingest (bitrate, uptime, how many audio tracks arrived, and the address to publish to), the live picture, the pipeline behind it, and every destination it feeds, each with the tracks it carries and a button to start or stop it.",
-      "On an install with several programmes, the ingest and pipeline cards belong to the one selected in the header and switch when you switch it, and the destinations are grouped under the programme each one carries.",
-    ],
-    shot: "01-dashboard.png",
-    caption: "The programme selected in the header, on air: the on-air strip with five destinations live and Stop all, its ingest live at about 7 Mbps with four audio tracks, the chat pane, the audience panel counting the public player, and the pipeline with its three-rung rendition ladder. The destinations and the live picture are further down the page.",
-    alt: "polyemesis dashboard: the on-air strip reading ON AIR with five destinations live, the selected programme's ingest card reading live, the chat pane, the Audience panel, and the pipeline with three renditions",
-  },
-  {
-    id: "routing",
-    provenBy: "compileRouting",
-    eyebrow: "Audio routing",
-    title: "Choose the tracks, per destination",
-    body: [
-      "The clean feed to one platform, the full mix to the next, from the same ingest. Checkbox-per-track in simple mode, or a full channel-to-output mix matrix with a gain per cell when you need one input channel in one output channel at a specific level.",
-      "Nothing is filtered until a destination asks for it. Track annotations describe the ingest (what track 3 actually is) and save on their own, independent of any destination.",
-    ],
-    shot: "02-routing.png",
-    caption: "Every destination on the install, each with its own track selection. YouTube, selected, takes tracks 1, 2 and 4 and leaves the music bed out.",
-    alt: "polyemesis routing page: per-destination track selection with music policy and loudness target",
-  },
-  {
-    id: "vod",
-    claimIsBehaviour: "the second audio track is built by the server from one ingest; the operator selects tracks through the routing editor, which section \"routing\" already proves",
-    eyebrow: "Two mixes, one connection",
-    title: "The broadcast carries the music. The VOD track does not.",
-    body: [
-      "Twitch Enhanced Broadcasting negotiates a second audio track alongside the live one. polyemesis builds both from the same ingest, in one filter graph, and sends them over one connection: the live mix with the music bed, and a VOD track without it. No second upload, no second encode of the picture.",
-      "A single video rendition is enough. Multitrack video is not a precondition for the second audio track, which is the part most people expect to be required. The feature is named for it and does not need it.",
-      "It needs a GPU, and it needs you to say so. Twitch refuses the negotiation outright if the request reports no GPU, so this is the one thing here a headless server cannot use. polyemesis does not guess at your hardware: you declare it in Settings, because Twitch validates the inventory it is sent rather than the card doing the encoding, and a fabricated one is refused by name. Leave it blank and the destination publishes to the ordinary Twitch ingest and tells you once, which is the right behaviour on the majority of installs rather than an error.",
-      "Every other destination still receives its own single mix, exactly as before. The picture is still copied rather than re-encoded; the second track is a second AAC encode, which is cheap and is not free.",
-    ],
-    note: "The negotiation itself is proven: polyemesis's tests reach ingest.twitch.tv on every run, and Twitch accepts a supported-GPU inventory, grants the VOD audio track and mints a key. What nobody has watched yet is a broadcast published through that key: the last step, and the one this feature is for. Nothing is gated on that: a negotiation that does not succeed falls back to the ordinary Twitch ingest, which is what every install used before this existed.",
-    shot: "18-destinations.png",
-    caption: "The archive mix is per destination, and off unless asked for.",
-    alt: "polyemesis destination cards: each destination showing which ingest tracks it carries, one with the music bed and one without",
-  },
-  {
-    id: "matrix",
-    provenBy: "putSettings",
-    eyebrow: "Mix matrix",
-    title: "Channel-level control when the checkboxes are not enough",
-    body: [
-      "A grid of input channels against output channels, each cell a gain. This is what a 5.1 downmix, a mid-side fold, or a mono guest feed into one side needs.",
-      "The resolved FFmpeg filtergraph is shown before you apply it, so nothing about the mix is hidden behind the UI.",
-    ],
-    shot: "08-mix-matrix.png",
-    caption: "Output channels down, ingest tracks across, a gain in any cell that carries one. This Twitch mix takes both mics, the room at 0.4, and no music.",
-    alt: "polyemesis mix matrix: input channels against output channels with a gain in each cell",
-  },
-  {
-    id: "renditions",
-    provenBy: "createRendition",
-    eyebrow: "Renditions",
-    title: "One shared encode feeds every destination that selects it",
-    body: [
-      "For the platforms that will not take your source, such as a 4K60 ingest that Twitch or Kick refuses. One encode, ref-counted, so an unused tier costs nothing.",
-      "It re-encodes video only. Audio still routes per destination underneath it, which is the whole point.",
-    ],
-    note: "Hardware encoding is offered on NVENC, QSV, VA-API, AMF and VideoToolbox, and polyemesis test-encodes a frame with each one at startup so an encoder that is listed but unusable is caught before a broadcast is. The command-line flags it hands the NVENC, QSV, VA-API and AMF encoders (rate control, preset, profile) are the part still without evidence: they were read out of FFmpeg's own option tables rather than measured on silicon. VideoToolbox is not in that set; a real encode with its own flags is run per build.",
-    shot: "06-renditions.png",
-    caption: "One shared encode, ref-counted across the destinations that selected it. Audio still routes per destination underneath.",
-    alt: "polyemesis renditions page: shared video encodes with overlays and hardware encoder selection",
-  },
-  {
-    id: "failover",
-    provenBy: "switchSource",
-    eyebrow: "Failover",
-    title: "When the encoder dies, the destinations stay up",
-    body: [
-      "A ladder, not a switch. polyemesis picks the highest source that is actually delivering (your primary ingest, then a standby ingest, then scheduled programming from a file, then a generated slate), and it changes the source underneath a destination without restarting it. The platform sees one continuous connection while the thing feeding it changes.",
-      "That order is a decision rather than an accident: a scheduled file sits below a live encoder because it is a fallback for nobody streaming, and above the slate because it is still programming. A test pins the ladder so it cannot be reordered by accident.",
-      "You can also drive it by hand: pin the source to primary, backup or slate, or hand it back with auto. That is what you want during a rehearsal, or when you know the good feed is the one the automation is not choosing.",
-    ],
-    shot: "05-sources.png",
-    caption: "Three programmes on one SRT port: the end of the first programme's card and the whole of the second, each publishing to port 6000 with its own token (masked here), and the third programme below. Failover is off by default; it is turned on in Settings → Pipeline → Failover.",
-    alt: "polyemesis sources page: two programmes each showing signal detected, an SRT address on port 6000 and a masked publishing token, with a third programme's header below",
-  },
-  {
-    id: "platforms",
-    provenBy: "connectUrl",
-    eyebrow: "Platform sign-in",
-    title: "Stop pasting stream keys",
-    body: [
-      "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the stream key itself, then pushes your title, category and description at go-live. On YouTube and Kick it takes the ingest URL too; on Facebook it creates the broadcast and splits out the RTMPS ingest and key; on Kick it also reads viewer stats back.",
-      "On YouTube the broadcast is made for you: a destination linked to your channel gets its own broadcast when it goes live, opened before video flows and bound to the stream that holds your stored key, which polyemesis never changes. It ends the broadcast when you switch the destination off, reads chat from it, and lists YouTube Studio's upcoming events in the schedule calendar so you can point a destination at one. Prefer Studio's Stream now? Turn this off per destination. On Facebook a destination fetches a fresh live video every time it starts, so a stop and start needs no key refresh.",
-      "No subscription gates any of it, and nothing proxies your video: the OAuth connection carries metadata and chat, while the stream goes straight from your box to the platform's ingest. There is no intermediary to rate-limit your bitrate or count your destinations.",
-      "It is not all-or-nothing, and the UI says which is which per platform rather than implying parity. A pasted key is a fully supported destination, not a degraded one: twenty-three other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
-    ],
-    note: "Instagram Live streams over RTMPS with a key pasted from instagram.com, and a persistent key keeps the destination ready from one live video to the next; you click Go live in Instagram, and Instagram ends a live video after an hour. Rumble is a key-paste platform, and its chat needs a key from your account page because that API has no sign-in. X sign-in, go-live and chat are built and on by default (set POLYEMESIS_X_LIVESTREAM=0 to switch them off); when that is off, or when the account cannot use the API, an X destination takes a pasted key.",
-    shot: "22-platforms-connected.png",
-    caption: "Settings, Platform credentials, after the one-time setup: YouTube, Twitch and Facebook each connected, with the platforms not yet set up listed below. The accounts are demo data served to the real page; nothing here is anybody's channel.",
-    alt: "polyemesis Platform credentials settings: Connected channels listing YouTube, Twitch and Facebook, each marked Connected with one demo account, above an Add a platform list",
-    setup: {
-      shot: "21-platforms.png",
-      caption: "Before that: a new install with no channel connected, and YouTube opened to its one-time setup, where your own developer app's Client ID and secret go.",
-      alt: "polyemesis Platform credentials settings on a new install: an Optional banner, an empty Connected channels card, and YouTube's setup open with empty Client ID and Client secret fields",
-    },
-  },
-  {
-    id: "player",
-    provenBy: "playoutPublic",
-    eyebrow: "Your own player",
-    title: "A page you can send someone, with no platform in the middle",
-    body: [
-      "Publish the stream to a player page polyemesis serves itself. Send the link and it plays: no account, no app, and nothing about who watches leaving your box.",
-      "Who may watch is a setting, not an afterthought: leave it public, or protect it with a playback token that rides in the URL, a header, a cookie or an HTTP password. An unpublished stream is a 404 for everyone except the signed-in console and an admin token, and a read token is treated exactly as an anonymous caller, because live media is content rather than metadata.",
-      "It runs beside the fan-out rather than instead of it. The same ingest still reaches Twitch and YouTube with their own mixes; this is one more destination, for the audience that does not have an account anywhere.",
-    ],
-    shot: "10-playout.png",
-    caption: "Playout on and private: the player page, HLS playlist and embed code to share, who may watch, and the audience counting the viewers pulling segments.",
-    alt: "polyemesis playout page: player page and HLS playlist links with an embed code, playback protected by a secret link and not yet public, and an audience panel counting viewers",
-  },
-  {
-    id: "monitoring",
-    claimIsBehaviour: "a read-only surface: the page reports what the supervisor is doing and offers no action to prove",
-    eyebrow: "Monitoring",
-    title: "Every process, with its own FFmpeg output",
-    body: [
-      "Host CPU, memory, relay throughput, ingest loss, and the live stderr of each child process: the thing you actually need at 3am when one destination is unhappy and the others are fine.",
-      "Prometheus metrics and in-process alert rules with webhook delivery, so a stream that stops can page you rather than wait to be noticed.",
-    ],
-    shot: "07-monitoring.png",
-    caption: "Each process with its uptime and restart count, beside the FFmpeg log filtered to one of them: the preview's join-time decoder warm-up, logged as information, with errors and warnings at zero. Host CPU, memory, relay throughput and ingest loss sit above, on the same page.",
-    alt: "polyemesis monitoring page: the process list with uptimes beside the FFmpeg log filtered to the preview process, showing zero errors and zero warnings",
-  },
-  {
-    id: "recording",
-    provenBy: "submitRecordingJob",
-    eyebrow: "Recording and post",
-    title: "The full multitrack archive, stream-copied",
-    body: [
-      "Segmented recording that preserves every one of the split audio tracks your encoder sent, with retention by age, total size, and a free-space floor that accounts for files polyemesis did not write.",
-      "That archive is where your own VOD track comes from. Every track is kept unmixed, so the upload you cut afterwards need not carry the music that went out live.",
-      "Then a job queue that yields to the live stream: Whisper transcription with full-text search, proxies, thumbnails, and a clip editor that suggests highlights, cuts vertical shorts with burned-in captions, and posts to YouTube Shorts or TikTok when you click Publish (TikTok posts stay private until TikTok audits the app). A dropped frame is unrecoverable; a transcript arriving an hour later costs only the wait.",
-    ],
-    shot: "15-recordings.png",
-    caption: "Segments with every ingest track preserved, next to retention by age and size and the free-space floor.",
-    alt: "polyemesis recordings page: segment list with tracks, stems, retention settings and disk usage",
-  },
-  {
-    id: "chat",
-    provenBy: "deleteChatMessage",
-    eyebrow: "Chat",
-    title: "Five platforms in one timeline",
-    body: [
-      "One merged feed reading YouTube, Twitch, Kick, Facebook and Rumble. The send box posts to YouTube, Twitch and Kick, by default only to the platforms that are live, with a chip per platform to add one that is not, and per-platform verdicts when half the send fails, because partial delivery is the normal case. Facebook is read and moderate only; Rumble is read only, and polls, because its API offers no socket.",
-      "Delete everywhere, hide on Facebook, ban and timeout on YouTube, Twitch and Kick, plus a moderator card showing what one person has said across every platform at once.",
-    ],
-    shot: "09-chat.png",
-    caption: "One timeline across four connected platforms with a toggle for each, long messages wrapping under the name, polyemesis's own poll result marked with a megaphone, and a send box that goes to the live platforms by default, with a chip to add any other.",
-    alt: "polyemesis chat timeline merging YouTube, Twitch, Kick and Facebook messages, with platform toggles above, a poll result marked as sent by polyemesis, and a send box whose chips show YouTube and Twitch selected and Kick not",
-  },
-  {
-    id: "automod",
-    provenBy: "setAutomodKey",
-    eyebrow: "Automatic moderation",
-    title: "Rules you write, and a model only if you want one",
-    body: [
-      "Patterns and rate detectors run in the process, on the messages already arriving for the chat pane: a regex with an action, a window with a message count, a repeat and link ceiling. Nothing is sent anywhere to make those decisions, and they are the ones that catch the traffic a live chat actually gets.",
-      "A model is the second tier, and it is off until you turn it on. Point it at any OpenAI-compatible endpoint, including one running on the same machine, write the instruction in your own words, and set a confidence floor and a calls-per-hour ceiling so the bill has a lid. While it is off, no message leaves the server, and that is the default, not the fallback.",
-      "What either tier may DO is granted per platform, per action, in a matrix that starts empty. A checker that nobody has configured cannot be armed, and an irreversible action says so before you arm it: a ban needs a human to lift it and a deleted message is gone from the platform. Every cell a platform cannot honour is greyed with the reason, because Facebook has no chat ban API and a switch that silently does nothing is worse than one that is missing.",
-    ],
-    shot: "20-automod.png",
-    alt: "polyemesis automatic moderation settings: the Pattern rules card with no rules yet beside the Model checker card, marked Off, with its instruction, provider, endpoint, confidence floor and calls-per-hour ceiling",
-    caption:
-      "Pattern rules, none written yet, beside the model checker, off by default: your instruction, the provider and endpoint, a confidence floor and a calls-per-hour ceiling. The per-platform matrix that grants each action is further down the same tab.",
-  },
-];
-
-/* The expanded view is plain <img src> assigned from a data attribute, so it
- * needs a URL rather than a component. Resolved here, once per distinct
- * capture, because a section list may name the same screenshot twice -- and it
- * does: #routing and #matrix share 02-routing.png. */
-const fullShot = new Map<string, string>();
-for (const name of new Set(sections.flatMap((s) => [s.shot, ...("setup" in s && s.setup ? [s.setup.shot] : [])]))) {
-  fullShot.set(
-    name,
-    (await getImage({ src: shotOf(name), format: "webp", width: 2880 })).src,
-  );
-}
-
-/* A placeholder per distinct capture, painted under each lazy screenshot so a
- * reader scrolling ahead of the network sees the screen's layout rather than an
- * empty frame. See lib/lqip.ts. */
-const placeholder = new Map<string, string>();
-// Every capture loads lazily: the spec strip, the four-track problem, the
-// patchbay and the proof sit above the rooms, so not even the first room's
-// screenshot is near the fold, and an eager high-priority fetch there would
-// compete with the page's real LCP for nothing.
-const lazyShots = new Set(
-  sections.flatMap((s) => [s.shot, ...("setup" in s && s.setup ? [s.setup.shot] : [])]),
-);
-for (const name of lazyShots) {
-  placeholder.set(name, await lqipStyle(shotOf(name)));
-}
-
-/* THE ROOMS, AS DATA (S6). Each has the same shape: what it is, and a small
- * table of which track goes where. The tables are the picture; the prose only
- * says why the room exists. Track numbers are the source's own, per room, so
- * no two rooms have to share a layout. */
-const rooms = [
-  {
-    title: "Two languages, one camera",
-    body: "The floor mic on one track, the interpreter on another. Each language channel takes its own track, and both get the same video from one upload. A third language is a checkbox and another destination, not another encoder.",
-    routes: [
-      ["track 1 · floor mic", "English channel"],
-      ["track 2 · interpreter", "Spanish channel"],
-    ],
-    note: "Churches, conferences and any event with more than one language on one stream.",
-  },
-  {
-    title: "An archive that differs from the broadcast",
-    body: "The live broadcast carries the music bed. A second mix, built from the same ingest, leaves it out for the recording or a file destination. One upload, one video encode.",
-    routes: [
-      ["the mix with the music bed", "live broadcast"],
-      ["the mix without it", "archive, or the Twitch VOD track"],
-    ],
-    note: "The Twitch route needs a GPU and is Twitch-only.",
-    link: { href: "/twitch-vod-track", text: "What that involves" },
-  },
-  {
-    title: "Vertical and horizontal, at once",
-    body: "A 16:9 composition and a 9:16 one are two programmes, not one cropped from the other. Run both from one install, each with its own ingest, destinations and mix.",
-    routes: [
-      ["16:9 programme", "horizontal destinations"],
-      ["9:16 programme", "vertical destinations"],
-    ],
-  },
-  {
-    title: "Home and away, one ingest",
-    body: "Home commentary on one track, away commentary on another, the game's own audio on a third. The home feed takes the game with home commentary, the away feed takes it with away commentary, and the clean league feed takes the game alone.",
-    routes: [
-      ["tracks 1 + 3 · home commentary + game", "home feed"],
-      ["tracks 2 + 3 · away commentary + game", "away feed"],
-      ["track 3 · game audio", "clean league feed"],
-    ],
-  },
-  {
-    title: "Esports, game and casters",
-    body: "The game on one track and the casters on another. The main broadcast gets both, and a platform that wants no commentary gets the game alone, from the same ingest.",
-    routes: [
-      ["track 1 · game audio", "clean game feed"],
-      ["track 2 · casters", "casters channel"],
-      ["tracks 1 + 2", "main broadcast"],
-    ],
-  },
-];
+const [, ...inputRows] = INPUTS;
 ---
 
-<Base
+<InnerPage
   title="Multistreaming features — a different audio mix per platform"
   description="Route your OBS split audio tracks per destination: a channel-level mix matrix, shared renditions and multitrack recording. Self-hosted."
   path="/features"
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: "features" }]}
+  heading="A server built around one feature."
+  accent="feature"
+  lede="Every destination gets its own audio mix, from the same video."
+  index={index}
+  lightbox
+  band={{
+    heading: "One broadcast. Every audience.",
+    accent: "Every",
+    secondary: { label: "How it compares", href: "/comparison" },
+  }}
 >
-  <section class="wrap py-16 sm:py-20">
-    <p class="eyebrow">Features</p>
-    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      A broadcast server built around one feature.
-    </h1>
-    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
-      The routing is the reason it exists. Everything below is what a server has
-      to do as well, if the routing is going to be usable in a real broadcast.
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="#audio">See the audio routing</a>
+
+  <section id="audio" class="fe" data-layout="lead" aria-labelledby="h-audio">
+    <p class="eyebrow"><b>{LEAD.eyebrow}</b></p>
+    <h2 id="h-audio">{leadBefore}<em class="it">{leadWord}</em>{leadAfter}</h2>
+    {LEAD.body.map((t) => <p class="fe-body">{t}</p>)}
+    <p class="fe-body">
+      Twitch can also take a second audio track for its VOD; Twitch requires a GPU, and a host that reports none is refused the negotiation outright. <a href="/twitch-vod-track">Read how the Twitch VOD track works</a>.
     </p>
-    <nav class="mt-8 flex flex-wrap gap-2" aria-label="Sections">
+    <p class="fe-links">
+      <a class="more" href="/#matrix">Play with the routing matrix</a>
+      <a class="more" href="/docs/audio-routing">Read about audio routing</a>
+    </p>
+    <div class="fe-shot">
+      <Shot shot={shot("audio").shot} alt={shot("audio").alt} caption={`Track layout in this capture: ${LAYOUT_SENTENCE}`} chrome="Routing" />
+    </div>
+    <div class="fe-rooms">
       {
-        sections.map((s) => (
-          <a href={`#${s.id}`} class="chip transition-colors hover:border-primary hover:text-fg">
-            {s.eyebrow}
-          </a>
-        ))
-      }
-    </nav>
-  </section>
-
-  <SpecStrip />
-
-  {/* ------------------------------------------------------------- problem */}
-  <section class="wrap py-20 sm:py-24">
-    <div class="grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
-      <div>
-        <h2 class="text-balance text-3xl font-medium">
-          You send four tracks. Every platform will take one stereo pair.
-        </h2>
-      </div>
-      {/* ONE TRACK LAYOUT FOR THE WHOLE PAGE (S7). These four tracks are the
-          ones the patchbay below lets you route and the ones the Proof capture
-          was photographed with -- all three read src/data/tracks.mjs, which is
-          the seeded install's own layout. */}
-      <div class="space-y-4 text-pretty leading-relaxed text-muted">
-        <p>
-          You run OBS with split audio tracks: {LAYOUT_SENTENCE}
-        </p>
-        <p>
-          Every live platform accepts exactly one stereo pair. So
-          normally you must choose one mix for everyone, and risk a claim on
-          YouTube or a muted VOD on Twitch, or send both a
-          broadcast with no music. The alternative is to multistream from the
-          stream PC: several encoders and several uploads off one machine and
-          one connection.
-        </p>
-        <p class="text-fg">
-          polyemesis ingests once and lets you pick, per destination, which
-          tracks get summed into the stereo feed that destination receives.
-          YouTube gets everything but track {MUSIC_TRACK}. Your local archive
-          keeps all four. Your podcast feed keeps only the two voices.
-        </p>
-        <p class="text-sm leading-relaxed text-subtle">
-          Twitch can also carry the music bed while a separate archive track
-          leaves it out, from the same upload. That route is Twitch-only and has
-          its own requirements, covered on the{" "}
-          <a href="/twitch-vod-track" class="text-fg underline decoration-line underline-offset-4 hover:text-primary-bright">Twitch track page</a>.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <MixMatrix />
-
-  {/* --------------------------------------------------------------- proof */}
-  <section class="border-y border-line bg-surface/30 py-20 sm:py-24">
-    <div class="wrap">
-      <div class="max-w-2xl">
-        <h2 class="text-balance text-3xl font-medium">
-          Loudness measured per destination, after routing, from one ingest.
-        </h2>
-        {/* THE FIGURES ARE READ OFF 04-meters.png, and LoudnessBars carries the
-            same three. Two are equal on purpose: the archive and the compliance
-            log carry the same four tracks, so they must read the same, and the
-            podcast feed -- the two voices only, normalised -- reads where its
-            target is. A meter that showed three different numbers for two
-            identical mixes would be the thing to distrust. */}
-        <p class="mt-4 text-pretty leading-relaxed text-muted">
-          The archive and the compliance log carry all four tracks and both read{" "}
-          <span class="font-mono text-fg">−25.9&nbsp;LUFS</span>. The podcast
-          feed carries only the two voices, is normalised to its −16 target,
-          and reads <span class="font-mono text-fg">−16.1</span>. Each figure
-          is measured on the programme that destination actually receives, not
-          on the ingest.
-        </p>
-        <p class="mt-3 text-sm text-subtle">
-          Track layout in this capture, the same four tracks as above:{" "}
-          {TRACK_LAYOUT.map((t) => `${t.id} ${t.name.toLowerCase()}`).join(", ")}.
-        </p>
-      </div>
-
-      <div class="mt-10 grid gap-6 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-        <LoudnessBars />
-        <figure>
-          {/* Imported rather than referenced by URL: public/ is copied
-              verbatim, so a path there cannot produce the smaller variants a
-              phone should be getting. The widths and sizes match features.astro
-              -- this figure sits in the same .wrap grid at the same ratio. */}
-          <Picture
-            src={meters}
-            formats={["avif", "webp"]}
-            fallbackFormat="webp"
-            widths={[420, 690, 960, 1440]}
-            sizes="(min-width: 1024px) 690px, calc(100vw - 2.5rem)"
-            alt="polyemesis audio meters: loudness compliance for three file destinations from one ingest, the archive and compliance log at −25.9 LUFS integrated and the podcast mix at −16.1, above live meters for each of the four ingest tracks"
-            loading="lazy"
-            decoding="async"
-            class="w-full rounded-token border border-line"
-            style={metersPlaceholder}
-          />
-          <figcaption class="mt-3 font-mono text-[11px] text-subtle">
-            A capture from a running install. The bars on the left carry the same
-            measured figures; their movement is illustrative, the numbers are not.
-          </figcaption>
-        </figure>
-      </div>
-    </div>
-  </section>
-
-  {
-    sections.map((s, i) => (
-      <section
-        id={s.id}
-        class:list={["border-t border-line py-16 sm:py-20", i % 2 === 1 && "bg-surface/30"]}
-      >
-        {/* THE SIDE ALTERNATES, because six of these in a row did not.
-
-            Measured before this: #routing #matrix #renditions #monitoring
-            #recording and #chat were 593px tall EACH -- six identical blocks,
-            zero variance, every one a 510px text column beside a 690px figure
-            in the same order. That is a conveyor belt, and it tells a reader
-            that all six capabilities weigh the same, which is the opposite of
-            what this page is arguing.
-
-            The ratio swaps WITH the order so the screenshot keeps the wider
-            track either way; the figure is what a reader is here to look at,
-            and shrinking it on alternate rows to get variety would be paying
-            for rhythm with legibility.
-
-            DOM order is unchanged -- heading, prose, then figure -- so reading
-            order and tab order still match the argument. Only the visual
-            columns swap, via `order`, which is what `order` is for. */}
-        <div
-          class:list={[
-            "wrap grid gap-10 lg:items-start",
-            i % 2 === 0 ? "lg:grid-cols-[0.85fr_1.15fr]" : "lg:grid-cols-[1.15fr_0.85fr]",
-          ]}
-        >
-          <div class:list={["lg:sticky lg:top-20", i % 2 === 1 && "lg:order-last"]}>
-            {/* NO EYEBROW OVER THE TITLE (2026-11 design review). It repeated
-                the h2 in smaller capitals ("Failover" over "When the encoder
-                dies, the destinations stay up"). `eyebrow` stays in the data:
-                it is the short label the section index above links by. */}
-            <h2 class="text-balance text-2xl font-medium sm:text-3xl">{s.title}</h2>
-            <div class="mt-4 space-y-3">
-              {s.body.map((p) => (
-                <p class="text-pretty leading-relaxed text-muted">{p}</p>
-              ))}
-            </div>
-            {/* Neutral border, not a signal colour, for the reason the product
-                gives: "unverified" is a property of the feature, not a state
-                anything is in. It sits AFTER the description so the feature is
-                described before it is qualified — a caveat first reads as a
-                warning not to bother. */}
-            {s.note && (
-              <div class="mt-5 rounded-token border border-line bg-surface/60 p-4">
-                <span class="chip">experimental</span>
-                <p class="mt-2 text-pretty text-sm leading-relaxed text-subtle">{s.note}</p>
-              </div>
-            )}
-          </div>
-          <figure>
-            {/* The button wraps the image rather than sitting beside it, so the
-                whole screenshot is the target -- a 12px magnifier icon on a
-                2880-wide image would be a worse hit area than the image itself.
-                Styled to look like nothing, so the page is unchanged until
-                clicked. */}
-            <button
-              type="button"
-              class="shot-open"
-              data-shot={fullShot.get(s.shot)}
-              data-shot-alt={s.alt}
-              aria-label={`Expand screenshot: ${s.alt}`}
-            >
-              {/* <picture> is inline by default, and an inline box in a
-                  block button picks up a line-height gap under it -- which
-                  would show as a hairline between the screenshot and its
-                  border. Blocked explicitly rather than left to inherit. */}
-              <Picture
-                src={shotOf(s.shot)}
-                formats={["avif", "webp"]}
-                fallbackFormat="webp"
-                widths={SHOT_WIDTHS}
-                sizes={SHOT_SIZES}
-                alt={s.alt}
-                loading="lazy"
-                decoding="async"
-                class="w-full rounded-token border border-line"
-                style={placeholder.get(s.shot)}
-                pictureAttributes={{ class: "block" }}
-              />
-            </button>
-            {/* A CAPTION SAYS WHAT TO NOTICE. None of the six had one, while
-                the single figure on the old home page did.
-
-                Deliberately NOT a restatement of `alt`: both are exposed to
-                assistive technology, so duplicating one in the other makes a
-                screen reader read the same sentence twice. `alt` describes the
-                picture for someone who cannot see it; this points a reader who
-                CAN see it at the part that matters. */}
-            <figcaption class="mt-3 text-sm leading-relaxed text-subtle">
-              {s.caption}
-            </figcaption>
-            {/* THE SECONDARY "ONE-TIME SETUP" PICTURE (S5). Only the platforms
-                section has one: its main picture is the connected end state,
-                and the empty credential form a new install starts in is shown
-                smaller beneath it, because it is a step you take once rather
-                than the screen you live with. */}
-            {"setup" in s && s.setup && (
-              <div class="mt-6 sm:w-3/5">
-                <button
-                  type="button"
-                  class="shot-open"
-                  data-shot={fullShot.get(s.setup.shot)}
-                  data-shot-alt={s.setup.alt}
-                  aria-label={`Expand screenshot: ${s.setup.alt}`}
-                >
-                  <Picture
-                    src={shotOf(s.setup.shot)}
-                    formats={["avif", "webp"]}
-                    fallbackFormat="webp"
-                    widths={[420, 690]}
-                    sizes="(min-width: 1024px) 414px, calc(60vw - 1.5rem)"
-                    alt={s.setup.alt}
-                    loading="lazy"
-                    decoding="async"
-                    class="w-full rounded-token border border-dashed border-line"
-                    style={placeholder.get(s.setup.shot)}
-                    pictureAttributes={{ class: "block" }}
-                  />
-                </button>
-                <p class="mt-2 text-xs leading-relaxed text-subtle">{s.setup.caption}</p>
-              </div>
-            )}
-          </figure>
-        </div>
-      </section>
-    ))
-  }
-
-  {/* ------------------------------------------------------- who it is for -- */}
-  {/* PROSE, NOT PAGES, AND THAT IS A DELIBERATE CHOICE BACKED BY DATA.
-
-      Each of these three is a real workflow the audio routing already supports,
-      and each was checked for search demand before being written (DataForSEO,
-      16 August 2026). All three returned NOTHING above 20 searches a month:
-      multi-language and interpretation streaming, live stream transcription,
-      captions and accessibility, corporate and conference streaming. The
-      "church live streaming" cluster looks bigger at 22,430/month and is worse
-      -- it is almost entirely people looking for one named church's own Sunday
-      service, not for software.
-
-      So there is no SEO case for a page each, and building four would be four
-      thin pages chasing an audience that is not searching those words. There IS
-      a case for saying them out loud HERE, where a reader who already arrived is
-      deciding whether this product is for them. These earn their place by
-      recognition, not by traffic, and this comment exists so nobody later
-      "promotes" them to pages on the assumption that nobody checked.
-
-      THE SEARCH CHECK ABOVE COVERS THE THREE ORIGINAL ROOMS ONLY. The sports and
-      esports rooms were added afterwards as routing cases and have NOT been
-      checked for search demand, so do not cite that check as covering them. */}
-  <section class="border-t border-line py-16 sm:py-20">
-    <div class="wrap">
-      <p class="eyebrow">Who it is for</p>
-      <h2 class="mt-3 text-balance text-3xl font-medium">
-        Five rooms where one mix is the thing that does not work.
-      </h2>
-      {/* data-foot="optional": only two rooms carry a note, so the foot is not
-          a recurring element and check-layout.mjs does not demand one per card. */}
-      <div class="card-grid card-grid--5 mt-8" data-foot="optional">
-        {
-          rooms.map((r) => (
-            <article class="card p-6">
-              <h3 class="font-medium">{r.title}</h3>
-              <p class="mt-3 text-sm leading-relaxed text-muted">{r.body}</p>
-              <ul
-                data-room-routing
-                aria-label={`Routing for ${r.title}`}
-                class="mt-5 divide-y divide-line rounded-token border border-line font-mono text-[12px]"
-              >
-                {r.routes.map(([track, dest]) => (
-                  <li class="flex flex-wrap justify-between gap-x-3 px-3 py-2">
-                    <span class="text-fg">{track}</span>
-                    <span class="text-muted">→ {dest}</span>
-                  </li>
+        ROOMS.map((r) => (
+          <article class="fe-room panel">
+            <h3>{r.title}</h3>
+            <p>{r.body}</p>
+            <table class="fe-route" data-room-routing>
+              <caption class="sr-only">{`Routing for ${r.title}: track, then destination`}</caption>
+              <tbody>
+                {r.routes.map(([from, to]) => (
+                  <tr>
+                    <th scope="row">{from}</th>
+                    <td>{to}</td>
+                  </tr>
                 ))}
-              </ul>
-              {/* The note and link sit at the foot of the card, so in a row
-                  they share a bottom line and the slack falls between the
-                  table and the note rather than above the table. */}
-              {(r.note || r.link) && (
-                <div class="card-foot">
-                  {r.note && <p class="text-sm text-subtle">{r.note}</p>}
-                  {r.link && (
-                    <p class="mt-2 text-sm">
-                      <a href={r.link.href} class="tap text-primary-bright underline-offset-4 hover:underline">{r.link.text}</a>
-                    </p>
-                  )}
-                </div>
-              )}
-            </article>
-          ))
-        }
-      </div>
-    </div>
-  </section>
-
-  {/* ------------------------------------------------------------- and also -- */}
-  {/* ONE LINE EACH, EACH LINKING ITS DOC, and that restraint is the point. Twelve
-      real capabilities that do not each deserve a section: giving them one would
-      triple the page and bury the audio routing people come for. Giving them
-      none leaves the product looking smaller than it is, which is the complaint
-      that prompted this block.
-
-      GROUPED IN THREES rather than listed flat -- on air, then content, then
-      integrations, then operations -- because a flat list reads as a grab-bag of whatever the
-      maintainer built last, which is the specific way this pattern fails.
-
-      Every line traces to a shipped package AND a published document. The audit
-      council rejected a proposed "Production-Ready Infrastructure" grid for
-      advertising phrases that appear nowhere in docs/; the transcription line
-      here first linked /docs/testing, which exists but does not document
-      transcription, and was moved to /docs/architecture. If a line cannot be
-      followed to a doc that supports it, it does not belong. */}
-  <section class="border-t border-line py-16 sm:py-20">
-    <div class="wrap">
-      <p class="eyebrow">And also</p>
-      <h2 class="mt-3 text-balance text-3xl font-medium">
-        The parts that stop it being a toy.
-      </h2>
-      <div class="mt-8 grid gap-x-10 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
-        {[
-          { h: "Live captions", p: "One audio track of a programme is transcribed on your own machine and sent the way each platform takes captions: inside the Twitch stream, to YouTube's caption ingestion (provisional), and as a Captions track on your own player. Your spellings and masked words apply to every one.", href: "/docs/captions" },
-          { h: "Broadcast delay", p: "Hold one destination back by up to 15 minutes so you can cut something before it airs there. Every other destination stays live, and video is still copied.", href: "/docs/broadcast-delay" },
-          { h: "Audience across platforms", p: "Viewer counts from YouTube, Twitch, Kick and your own player, live on the Dashboard and as a report per stream, with CSV, Prometheus and MQTT exports. A count a platform does not report reads as not reported, never 0.", href: "/docs/monitoring" },
-          { h: "Transcription and search", p: "Whisper runs over the archive on a queue that yields to the live stream, and the transcript is searchable, so you can find the moment somebody said it.", href: "/docs/architecture" },
-          { h: "Automated moderation", p: "Rules that act across all five chat platforms, and a moderator card showing what one person has said on every one of them at once.", href: "/docs/platforms" },
-          { h: "Stop on ingest loss", p: "If neither the primary nor the backup ingest arrives for a wait you set, the programme's live destinations stop instead of airing dead video. It watches the video arriving, so it covers any encoder, IRL backpacks over SRTLA included. Off until you turn it on.", href: "/docs/obs-bridge" },
-          { h: "OBS bridge", p: "OBS starting and stopping a stream starts and stops the destinations you picked, and a scene change applies a routing preset, over obs-websocket or a script inside OBS.", href: "/docs/obs-bridge" },
-          { h: "Broadcast from a file", p: "A file on a loop as the ingest, turned on by a schedule, so a programme can go out when nobody is at the desk.", href: "/docs/scheduled-broadcast" },
-          { h: "Home Assistant", p: "Retained MQTT telemetry with discovery, so the stream shows up as entities in a dashboard you already run. An on-air light is an automation, not a project.", href: "/docs/mqtt" },
-          { h: "Signed lifecycle webhooks", p: "One POST the moment a stream starts or a destination fails, in order, so a script can act on it. Alerts coalesce for a human; these deliberately do not.", href: "/docs/hooks" },
-          { h: "Alerts that page a human", p: "In-process rules with webhook delivery, so a destination that drops wakes somebody instead of waiting to be noticed.", href: "/docs/monitoring" },
-          { h: "TLS that configures itself", p: "Let's Encrypt when the box has a public name, a local CA when it does not, and out of the way when a proxy already terminates it.", href: "/docs/tls" },
-          { h: "Changes that do not drop the stream", p: "Most settings apply to the running process. The dividing line is mechanical, and saving tells you which side you landed on.", href: "/docs/hot-reload" },
-          { h: "Prometheus metrics", p: "Scraped like anything else you run, with the per-destination detail the dashboards show.", href: "/docs/monitoring" },
-        ].map((x) => (
-          <div>
-            <h3 class="text-sm font-medium text-fg">{x.h}</h3>
-            <p class="mt-2 text-sm leading-relaxed text-muted">{x.p}</p>
-            <p class="mt-2">
-              <a href={x.href} aria-label={`Docs: ${x.h}`} class="tap inline-block text-sm text-primary-bright underline-offset-4 hover:underline">Docs</a>
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  {/* ------------------------------------------------------------ features */}
-  <section class="wrap py-20 sm:py-24">
-    <div class="max-w-2xl">
-      <h2 class="text-balance text-3xl font-medium">
-        The rest of it is a broadcast server.
-      </h2>
-    </div>
-    <div class="mt-10 grid gap-px overflow-hidden rounded-token border border-line bg-line sm:grid-cols-2 lg:grid-cols-3">
-      {
-        serverFeatures.map((f) => (
-          <div class="bg-surface p-6">
-            <h3 class="text-pretty text-[15px] font-medium leading-snug text-fg">{f.t}</h3>
-            <p class="mt-2.5 text-sm leading-relaxed text-muted">{f.d}</p>
-          </div>
+              </tbody>
+            </table>
+            {r.note && <p class="fe-note">{r.note}</p>}
+            {r.link && <a class="more" href={r.link.href}>{r.link.text}</a>}
+          </article>
         ))
       }
     </div>
   </section>
 
-  {/* ---------------------------------------------------- how it is built */}
-  <section class="border-t border-line bg-surface/30 py-20 sm:py-24">
-    <div class="wrap grid gap-12 lg:grid-cols-[0.9fr_1.1fr]">
+  <section id="inputs" class="fe" data-layout="table-diagram" aria-labelledby="h-inputs">
+    <p class="eyebrow">Inputs</p>
+    <h2 id="h-inputs">One port per protocol, many programmes.</h2>
+    <div class="fe-split">
       <div>
-        <h2 class="text-balance text-3xl font-medium">Decisions you can rely on.</h2>
-        <p class="mt-4 text-sm leading-relaxed text-subtle">
-          Four choices that shape everything else. Each one was made on purpose
-          and is held to release after release.
+        <p class="fe-body">
+          Sources are told apart by a publish token, supplied in OBS's Stream Key field on RTMP and as the streamid on SRT, so a second programme never means opening a second port.
+        </p>
+        <p class="fe-links"><a class="more" href="/docs/srtla">Read about bonded links</a></p>
+      </div>
+      <div class="fe-ports panel">
+        <svg viewBox="0 0 280 160" role="img" aria-label="Ports: SRT on 6000 UDP, RTMP on 1935, SRTLA on 5000 UDP when enabled, and the console on 8080 all reach polyemesis">
+          <rect class="fe-hub" x="170" y="14" width="100" height="132" />
+          <text class="fe-p" x="220" y="84" text-anchor="middle">polyemesis</text>
+          <path d="M112 30H170M112 62H170M112 94H170M112 126H170" />
+          <text class="fe-p" x="6" y="34">SRT</text><text x="66" y="34">6000/udp</text>
+          <text class="fe-p" x="6" y="66">RTMP</text><text x="66" y="66">1935</text>
+          <text class="fe-p" x="6" y="98">SRTLA</text><text x="66" y="98">5000/udp</text><text x="66" y="112">when enabled</text>
+          <text class="fe-p" x="6" y="130">console</text><text x="66" y="130">8080</text>
+        </svg>
+      </div>
+    </div>
+    <div class="fe-table">
+      <CompareTable
+        caption="What each input carries into per-destination audio"
+        firstHeader={INPUTS[0][0]}
+        cols={[
+          { key: "tracks", name: INPUTS[0][1] },
+          { key: "good", name: INPUTS[0][2] },
+        ]}
+        rows={inputRows}
+      />
+    </div>
+    <div class="fe-shot">
+      <Shot shot={shot("inputs").shot} alt={shot("inputs").alt} caption={shot("inputs").caption} chrome="Sources" />
+    </div>
+  </section>
+
+  <section id="failover" class="fe" data-layout="ladder" aria-labelledby="h-failover">
+    <p class="eyebrow">Failover</p>
+    <h2 id="h-failover">When the encoder dies, the destinations stay up.</h2>
+    <div class="fe-fail">
+      <FailoverLadder />
+      <div>
+        <ul class="fe-facts rows">
+          {FAILOVER_FACTS.map((t) => <li>{t}</li>)}
+        </ul>
+        <p class="fe-links"><a class="more" href="/docs/link-health">Read about failover</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section id="chat" class="fe" data-layout="shot-left" aria-labelledby="h-chat">
+    <p class="eyebrow">Chat</p>
+    <h2 id="h-chat">Five platforms in one timeline.</h2>
+    <div class="fe-chat">
+      <div class="fe-shot">
+        <Shot shot={shot("chat").shot} alt={shot("chat").alt} caption={shot("chat").caption} chrome="Chat" />
+      </div>
+      <div>
+        <dl class="fe-dl rows">
+          {
+            CHAT_FACTS.map((f) => (
+              <div>
+                <dt>{f.label}</dt>
+                <dd>{f.text}</dd>
+              </div>
+            ))
+          }
+        </dl>
+        <p class="fe-links">
+          <a class="more" href="/docs/automod">Read about automatic moderation</a>
+          <a class="more" href="/docs/platforms">Platforms and what each allows</a>
         </p>
       </div>
-      <dl class="divide-y divide-line border-y border-line">
-        {
-          [
-            ["SRT carries every audio track", "One ingest accepting up to 32 tracks (six is what OBS sends), and each destination takes the mix you route to it. It works on any FFmpeg above the floor and it is the path that is operated daily, so the feature this product exists for is the one with the most road behind it. RTMP sits alongside it as the single-track fallback; Enhanced RTMP carries more on every supported FFmpeg, though an OBS-as-publisher run has not been confirmed."],
-            ["Routing audio never touches your picture", "Video is stream-copied end to end, so the frames a platform receives are the frames your encoder made, and the cost of routing scales with audio rather than resolution. Shared renditions re-encode video only when you ask for one, and the cost of that encode is shown before it starts."],
-            ["One binary, one config file", "No database to run, no broker, no container required. It installs as a systemd service on hardware you control, with no hosted service behind it and no per-destination pricing. The only connections it makes are the ones you configure."],
-            ["Built for the operator at the desk", "One account and full control: no permission model to configure and none to get wrong. Live ingest, destination and process state are on one screen, and the routing you compiled is shown as the FFmpeg filter graph it became."],
-          ].map(([t, d]) => (
-            <div class="py-4">
-              <dt class="text-[15px] font-medium text-fg">{t}</dt>
-              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
+    </div>
+  </section>
+
+  <section id="recordings" class="fe" data-layout="verbs" aria-labelledby="h-recordings">
+    <p class="eyebrow">Recordings</p>
+    <h2 id="h-recordings">The full multitrack archive, stream-copied.</h2>
+    <ul class="fe-verbs">
+      {
+        RECORDING_VERBS.map((v) => (
+          <li>
+            <h3>{v.verb}</h3>
+            <p>{v.text}</p>
+          </li>
+        ))
+      }
+    </ul>
+    <div class="fe-shot">
+      <Shot shot={shot("recordings").shot} alt={shot("recordings").alt} caption={shot("recordings").caption} chrome="Recordings" />
+    </div>
+  </section>
+
+  <section id="deck" class="fe" data-layout="deck" aria-labelledby="h-deck">
+    <p class="eyebrow">Stream Deck</p>
+    <h2 id="h-deck">Control the stream from a Stream Deck.</h2>
+    <div class="fe-deck">
+      <Image
+        src={deckStill}
+        alt="A Stream Deck + running the polyemesis plugin: eight keys, Go live, Stop all and Routing preset, then five destinations each with its platform mark, all live, with the touch strip and four dials below."
+        widths={[640, 1025]}
+        sizes="(min-width: 1024px) 520px, calc(100vw - 2.5rem)"
+        loading="lazy"
+      />
+      <ul>
+        {DECK_FACTS.map((t) => <li>{t}</li>)}
+      </ul>
+    </div>
+    <p class="fe-links">
+      <a class="more" href="/#deck">See it on the homepage</a>
+      <a class="more" href="/docs/stream-deck">Read the plugin guide</a>
+    </p>
+    <p class="fe-fine">Stream Deck + model: Elgato · <a class="more" href="/models/NOTICE.txt">model notice</a></p>
+    <p class="fe-fine">
+      polyemesis is not affiliated with or endorsed by YouTube, Twitch, Kick, Rumble, Facebook, Meta, X or Elgato; their names and logos are trademarks of their owners.
+    </p>
+  </section>
+
+  <section id="also" class="fe" data-layout="also" aria-labelledby="h-also">
+    <p class="eyebrow">And more</p>
+    <h2 id="h-also">Also included.</h2>
+    <div class="fe-also rows">
+      {
+        ALSO.map((g) => (
+          <section>
+            <div>
+              <h3>{g.group}</h3>
+              <p>{g.blurb}</p>
             </div>
-          ))
-        }
-      </dl>
+            <ul>
+              {g.items.map((i) => (
+                <li>
+                  <b>{i.name}</b>
+                  <p>{i.text}</p>
+                  <a class="more" href={`/docs/${i.doc}`} aria-label={`${i.name}: docs`}>Docs</a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
+      }
     </div>
   </section>
-
-  {/* ------------------------------------------------------- plan comparison */}
-  {/* WHAT A FREE SELF-HOSTED TOOL SAVES, AND WHAT IT COSTS YOU (S3, approved).
-      Hosted restreamers lead with a price ladder, and a visitor comparing them
-      has nothing to set beside the ladder. This strip gives the one comparison
-      only this product can make: the same number of destinations, priced and
-      limited differently.
-
-      EVERY FIGURE HERE COMES FROM docs/evidence/competitor-facts-2026-08-15.md,
-      re-read on the date shown below. The file is the rule: a figure it does
-      not state is not printed, which is why the two Restream qualifiers it
-      records as unsupported (personal profiles only; Facebook Pages excluded)
-      are absent, and so is the word "watermark" -- the pricing page's own word
-      is "Restream branding". The Business tier is on the page and in the file's
-      re-check, so it is printed; the file's tier table is not a complete list.
-
-      THE COST OF SELF-HOSTING IS STATED, NOT HIDDEN: the software is free, and
-      the server it runs on is not. A server is named in the first row.
-
-      AFTER THE PROBLEM AND THE PATCHBAY, not before them (2026-11 design
-      review). A visitor should be able to try the routing before being asked
-      to compare prices for it; the price table answers "what does this cost"
-      for someone who already wants it. */}
-  <section class="wrap py-16 sm:py-20">
-    <div class="max-w-2xl">
-      <h2 class="text-balance text-3xl font-medium">
-        Hosted restreamers charge by destination. This one charges for a server.
-      </h2>
-    </div>
-    <div class="mt-10 overflow-x-auto rounded-token border border-line">
-      <table class="w-full min-w-[36rem] border-collapse text-left text-sm">
-        <caption class="sr-only">polyemesis compared with Restream's hosted plans</caption>
-        <thead class="bg-surface">
-          <tr>
-            <th scope="col" class="px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-subtle">&nbsp;</th>
-            <th scope="col" class="px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-fg">polyemesis</th>
-            <th scope="col" class="px-5 py-3 font-mono text-[11px] uppercase tracking-wider text-subtle">Restream, hosted</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-line">
-          <tr>
-            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Price</th>
-            <td class="px-5 py-4 align-top text-muted">$0 for the software, plus a server you run it on.</td>
-            <td class="px-5 py-4 align-top text-muted">Free $0 · Standard $19/mo · Professional $49/mo · Business $239/mo.</td>
-          </tr>
-          <tr>
-            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Destinations</th>
-            <td class="px-5 py-4 align-top text-muted">No plan limit. Each one costs uplink, which the <a href="/calculator" class="underline decoration-line underline-offset-4 hover:text-fg">bandwidth calculator</a> works out.</td>
-            <td class="px-5 py-4 align-top text-muted">2 channels on Free, 3 on Standard, 5 on Professional, 8 on Business.</td>
-          </tr>
-          <tr>
-            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Audio per destination</th>
-            <td class="px-5 py-4 align-top text-muted">A different mix for each, summed from the tracks you send.</td>
-            <td class="px-5 py-4 align-top text-muted">One stereo track, sent to every destination.</td>
-          </tr>
-          <tr>
-            <th scope="row" class="px-5 py-4 align-top font-medium text-fg">Who runs it</th>
-            <td class="px-5 py-4 align-top text-muted">You, on hardware you control.</td>
-            <td class="px-5 py-4 align-top text-muted">Restream.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="mt-4 text-sm leading-relaxed text-muted">
-      Castr, the other hosted option most people compare, has no free tier. Its
-      Starter plan is $19.99 a month.
-    </p>
-    <p class="mt-3 text-sm text-subtle">
-      Checked 16 September 2026 against restream.io/pricing and castr.com/pricing.
-      Prices move, so confirm them on those pages before you decide.
-    </p>
-  </section>
-
-  {/* ------------------------------------------------- how it compares ---- */}
-  {/* On the features page on purpose: a reader deciding between these three is
-      doing it while reading the capability list, not after. Every row is a
-      thing polyemesis does that the other two do not — checkable against your
-      own install rather than asserted. */}
-  <section class="border-t border-line bg-surface/30 py-16 sm:py-20">
-    <div class="wrap">
-      <p class="eyebrow">How it compares</p>
-      <h2 class="mt-3 text-balance text-3xl font-medium">
-        What only polyemesis does.
-      </h2>
-      <p class="mt-4 max-w-2xl text-sm leading-relaxed text-muted">
-        Against the two servers people weigh it against: datarhei Restreamer,
-        the self-hosted standard, and restream.io, the hosted one. The OBS
-        plugins most readers already have (obs-multi-rtmp, Aitum Multistream)
-        and MistServer are on the full comparison, where the distinction is that
-        they select an audio track per destination rather than mix one.
-      </p>
-
-      {/* THE FULL TABLE USED TO BE REPEATED HERE, all eight rows of it, and it
-          was character-for-character identical to the primary table on
-          /comparison -- 9 of 9 rows, verified.
-
-          It cost authority rather than bytes. A reader who studied it here and
-          met the same table again on /comparison learned that the page named
-          for the comparison had nothing further to offer, which is the wrong
-          thing to teach about the page doing the arguing. Keeping two copies
-          honest also needed a build check, and that check existed because they
-          had already drifted twice.
-
-          What is left is the one row that is actually the product's thesis, and
-          a door to the page that carries the evidence. The claim still appears
-          on this page; the argument now lives in exactly one place. */}
-      <div class="mt-8 rounded-token border border-line bg-ink/40 p-6">
-        <p class="font-mono text-[11px] font-medium uppercase tracking-wider text-primary-bright">
-          The row that matters
-        </p>
-        <p class="mt-3 text-balance text-lg leading-snug text-fg">
-          Per-destination audio mix from one multitrack ingest.
-        </p>
-        <p class="mt-2 text-sm leading-relaxed text-muted">
-          polyemesis <span class="font-mono text-[13px] text-ok">Yes</span> ·
-          Restreamer <span class="font-mono text-[13px] text-subtle">No</span> ·
-          restream.io <span class="font-mono text-[13px] text-subtle">No</span>
-        </p>
-        <p class="mt-4 max-w-2xl text-sm leading-relaxed text-muted">
-          All three restream one input to many platforms. The difference is what
-          happens to the audio on the way: polyemesis is the only one that lets{" "}
-          <em>this</em> platform take the clean mix while <em>that</em> one takes
-          the full mix, from a single upload and without re-encoding the picture.
-        </p>
-        <p class="mt-5">
-          <a href="/comparison" class="inline-block py-1 text-sm text-primary-bright underline-offset-4 hover:underline">
-            All eight capabilities, against five products →
-          </a>
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section class="wrap py-20 text-center">
-    <h2 class="text-balance text-3xl font-medium">See it running, end to end.</h2>
-    <div class="mt-7 flex flex-wrap justify-center gap-3">
-      <a href="/download" class="btn btn-primary">Install</a>
-      <a href="/comparison" class="btn btn-ghost">How it compares</a>
-    </div>
-  </section>
-
-  {/* Last in the page, once, for every screenshot above. */}
-  <Lightbox />
-</Base>
+</InnerPage>

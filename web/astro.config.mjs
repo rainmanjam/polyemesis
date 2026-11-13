@@ -9,6 +9,7 @@ import { PUBLISHED } from "./src/data/docs.mjs";
 import { mdastDocLinks } from "./src/lib/mdast-doc-links.mjs";
 import { hastCodeBlock } from "./src/lib/hast-code-block.mjs";
 import { hastDocTables } from "./src/lib/hast-doc-tables.mjs";
+import { hastHeadingIds } from "./src/lib/hast-heading-ids.mjs";
 import { hastMermaid } from "./src/lib/hast-mermaid.mjs";
 
 /* lastmod, taken from git rather than from the clock.
@@ -41,11 +42,11 @@ export const pageSource = {
   "/download": "src/pages/download.astro",
   "/free-restream-service": "src/pages/free-restream-service.astro",
   "/how-to-multistream-from-obs": "src/pages/how-to-multistream-from-obs.astro",
-  "/vs/aitum-multistream": "src/pages/vs/aitum-multistream.astro",
-  "/vs/obs-multi-rtmp": "src/pages/vs/obs-multi-rtmp.astro",
-  "/vs/restreamer": "src/pages/vs/restreamer.astro",
-  "/vs/streamelements": "src/pages/vs/streamelements.astro",
-  "/vs/streamlabs": "src/pages/vs/streamlabs.astro",
+  "/vs/aitum-multistream": "src/data/vs/aitum-multistream.mjs",
+  "/vs/obs-multi-rtmp": "src/data/vs/obs-multi-rtmp.mjs",
+  "/vs/restreamer": "src/data/vs/restreamer.mjs",
+  "/vs/streamelements": "src/data/vs/streamelements.mjs",
+  "/vs/streamlabs": "src/data/vs/streamlabs.mjs",
   "/multistream": "src/pages/multistream.astro",
   "/twitch-vod-track": "src/pages/twitch-vod-track.astro",
   ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
@@ -148,7 +149,9 @@ export default defineConfig({
       // hastMermaid first: it turns a ```mermaid fence into a <div> before
       // hastCodeBlock could wrap it. hastCodeBlock also declines the node on its
       // own, so this order is a convenience rather than a dependency.
-      hastPlugins: [hastMermaid, hastCodeBlock, hastDocTables],
+      // hastHeadingIds is a factory (one slugger per document); it changes the
+      // content cache's output like any plugin here, see the note above.
+      hastPlugins: [hastMermaid, hastCodeBlock, hastDocTables, hastHeadingIds],
     }),
   },
   integrations: [

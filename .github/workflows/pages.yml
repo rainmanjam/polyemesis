@@ -73,6 +73,7 @@ on:
       - "integrations/streamdeck/scripts/keyPalette.mjs"
       - "internal/routing/profile.go"
       - "internal/ffmpeg/detect.go"
+      - "scripts/demo-seed.fixture.json"
       - "go.mod"
       - "ui/package.json"
       - "CHANGELOG.md"
@@ -169,7 +170,7 @@ jobs:
           echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
           # The globs the `pull_request:` filter used to carry, plus the files
           # web/scripts/check-build.mjs reads from outside web/ and docs/ (the
-          # root README, CHANGELOG.md (web/src/lib/release.ts reads it for the hero's version and date), go.mod, ui/package.json, the routing and ffmpeg constants, the
+          # root README, CHANGELOG.md (web/src/lib/release.ts reads it for the hero's version and date), go.mod, ui/package.json, the routing and ffmpeg constants, the demo-seed fixture the site tests read, the
           # Stream Deck plugin's three Node-floor files, and the plugin's key-layout code
           # (src/, scripts/keyPalette.mjs and its key images) that the homepage's Stream Deck
           # section imports); the
@@ -177,7 +178,7 @@ jobs:
           # docs/** is load-bearing and not a courtesy -- astro.config.mjs maps
           # /docs/${slug} onto the repository's own docs/, so a docs-only change
           # IS a site change. See the comment on the triggers above.
-          if grep -qE '^(web/|docs/|README\.md$|go\.mod$|ui/package\.json$|CHANGELOG\.md$|internal/routing/profile\.go$|internal/ffmpeg/detect\.go$|integrations/streamdeck/(README\.md|package\.json|scripts/keyPalette\.mjs|src/.*|com\.polyemesis\.streamdeck\.sdPlugin/(manifest\.json|imgs/.*))$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
+          if grep -qE '^(web/|docs/|README\.md$|go\.mod$|ui/package\.json$|CHANGELOG\.md$|internal/routing/profile\.go$|internal/ffmpeg/detect\.go$|scripts/demo-seed\.fixture\.json$|integrations/streamdeck/(README\.md|package\.json|scripts/keyPalette\.mjs|src/.*|com\.polyemesis\.streamdeck\.sdPlugin/(manifest\.json|imgs/.*))$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
             echo "site=true" >> "$GITHUB_OUTPUT"
             echo "touches the site: building"
           else
@@ -208,10 +209,13 @@ jobs:
     needs: site-scope
     if: needs.site-scope.outputs.site == 'true'
     runs-on: ubuntu-latest
-    # Step limits below: apt mirror 3 + Chromium 8 + layout check 3 + home check 15 = 29 minutes at most.
+    # Step limits below: apt mirror 3 + Chromium 8 + layout check 3 + home check 15 + inner-page check 15 = 44 minutes.
+    # The job's limit is above that sum, so no step's own limit can be pre-empted by the job's (a job timeout
+    # names no step, which is the failure internal/testenv/ci_timeout_test.go describes): 44 <= 45.
     # The steps without a limit of their own (npm ci ~3, unit tests ~1, build ~1, publish ~1, setup ~1)
-    # add ~7 typically, so every step can run to its limit and the job still ends by its own limit: 29 + 7 = 36 <= 40.
-    timeout-minutes: 40
+    # add ~7 typically, and a run takes about 20 minutes, so the two checks both running to their limits
+    # is not expected; if one does, the step limit that fires names the step.
+    timeout-minutes: 45
     defaults:
       run:
         # Every path in this job is relative to web/, which is what makes
@@ -349,6 +353,13 @@ jobs:
         # 15 lets it stop and report before the step is killed.
         timeout-minutes: 15
         run: npm run check:home
+
+      - name: Inner pages (browser)
+        # Twelve routes in six contexts (two widths, each with scripts on, scripts off and reduced motion): about
+        # 4 minutes on a many-core laptop with the contexts running side by side. The script's own deadline is 780 s
+        # (13 minutes), so 15 lets it stop and report before the step is killed.
+        timeout-minutes: 15
+        run: npm run check:inner
 
       - name: Publish to Cloudflare Pages
         # Both halves are load-bearing. The gate is the credential. refs/heads/

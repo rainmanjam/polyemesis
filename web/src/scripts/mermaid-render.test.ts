@@ -83,6 +83,26 @@ describe("mermaid-render", () => {
     expect(states).toEqual(["done", "done"]);
   });
 
+  it("records the diagram's drawn width, so a phone can keep it at that size", async () => {
+    renderMock.mockResolvedValue({ svg: '<svg viewBox="0 0 902.2 1234.5"><g>drawn</g></svg>' });
+    givenDiagrams(1);
+
+    await run();
+
+    const svg = document.querySelector("[data-mermaid] svg") as SVGElement;
+    expect(svg.style.getPropertyValue("--diagram-w")).toBe("902px");
+  });
+
+  it("records nothing for an svg that has no usable viewBox", async () => {
+    renderMock.mockResolvedValue({ svg: "<svg><g>drawn</g></svg>" });
+    givenDiagrams(1);
+
+    await run();
+
+    const svg = document.querySelector("[data-mermaid] svg") as SVGElement;
+    expect(svg.style.getPropertyValue("--diagram-w")).toBe("");
+  });
+
   it("hands mermaid the fence source, not the element's markup", async () => {
     givenDiagrams(1, "flowchart TD\n  a -- no --> b");
 

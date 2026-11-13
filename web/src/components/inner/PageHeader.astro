@@ -1,0 +1,33 @@
+---
+/* The top of every inner page: trail, one h1 with at most one accent word, a
+ * lede, then optional actions (buttons) and a mono meta line. */
+import Crumbs from "./Crumbs.astro";
+import { splitAccent } from "../../lib/accent";
+import type { Crumb } from "../../lib/breadcrumbs";
+
+interface Props {
+  crumbs: Crumb[];
+  heading: string;
+  accent?: string;
+  lede: string;
+}
+
+const { crumbs, heading, accent, lede } = Astro.props;
+const [before, word, after] = splitAccent(heading, accent);
+
+/* A forwarded slot can still render empty (a page may fill `actions` with a
+ * conditional that yields nothing), so `Astro.slots.has` is not enough. The
+ * rendered markup decides: an empty slot leaves no empty `div.acts` or
+ * `p.meta` behind. */
+const filled = async (name: string) => (Astro.slots.has(name) ? (await Astro.slots.render(name)).trim() : "");
+const actions = await filled("actions");
+const meta = await filled("meta");
+---
+
+<header class="ph wrap">
+  <Crumbs crumbs={crumbs} />
+  <h1>{before}{word && <em class="it">{word}</em>}{after}</h1>
+  <p class="lede">{lede}</p>
+  {actions && <div class="acts" set:html={actions} />}
+  {meta && <p class="meta" set:html={meta} />}
+</header>
