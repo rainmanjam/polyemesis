@@ -1359,7 +1359,7 @@ const DROPPED = {
     },
     {
       cut: "read the quickstart this page, with its sources try the routing matrix · install options",
-      why: "Only button labels, no sentence. The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action, so 'Install options' is now 'Install polyemesis'.",
+      why: "Only button labels, no sentence. The closing buttons now sit in different places: the closing band (Install polyemesis, Read the quickstart), the table section (Try the routing matrix) and the last section (the link to this page with its sources, /docs/comparison). The old Install options link is now Install polyemesis, the band's primary action.",
     },
     {
       cut: "2–5 by plan (checked 15 Aug 2026)",
@@ -1442,6 +1442,10 @@ const DROPPED = {
     },
   ],
   "/how-to-multistream-from-obs": [
+    {
+      cut: "can carry several audio tracks",
+      why: "docs/OBS.md (measured): OBS offers multitrack over Enhanced RTMP but no service enables it, so it sends one track. The old wording overstated it; the page now says it offers multitrack audio. The rest of the sentence is checked.",
+    },
     {
       cut: "guide how to",
       why: "The old eyebrow word 'Guide' ran into the h1. The eyebrow is gone (the breadcrumb trail precedes the h1); the h1 and the lede after it are checked.",

@@ -889,7 +889,8 @@
 
   /* ===== install ===== */
 
-  :where(.inner-main) .inst-acts { display: flex; flex-wrap: wrap; gap: 12px; }
+  /* In the page header, which sits outside .inner-main. */
+  .ph .inst-acts { display: flex; flex-wrap: wrap; gap: 12px; }
   :where(.inner-main) .inst + .inst { margin-top: var(--section-gap); }
   :where(.inner-main) .inst h2 {
     font-family: var(--font-display);
@@ -1027,8 +1028,7 @@
      "What it is" sits beside Port and "When" wraps at a readable width. */
   @media (max-width: 48rem) {
     :where(.inner-main) .cmp.inst-ports { min-width: 34rem; }
-    :where(.inner-main) .cmp.inst-ports :is(thead th,
-  :where(.inner-main) tbody th):first-child { width: 4.5rem; min-width: 4.5rem; }
+    :where(.inner-main) .cmp.inst-ports :is(thead th, tbody th):first-child { width: 4.5rem; min-width: 4.5rem; }
     :where(.inner-main) .inst-ports th,
   :where(.inner-main) .inst-ports td { padding-inline: 10px; }
     :where(.inner-main) .inst-ports td:nth-child(2) { width: 3.5rem; }

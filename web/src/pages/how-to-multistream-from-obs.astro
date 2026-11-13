@@ -370,8 +370,8 @@ ffmpeg -protocols | tr ' ' '\\n' | grep -x srt   # must print: srt`}
       }
     </dl>
     <p class="lf-note">
-      One more, for completeness: OBS 30.2 and newer can carry several audio
-      tracks over Enhanced RTMP, and every FFmpeg polyemesis supports demuxes
+      One more, for completeness: OBS 30.2 and newer offers multitrack audio
+      over Enhanced RTMP, and every FFmpeg polyemesis supports demuxes
       it, but measured against a real polyemesis, OBS 30.2.3 sends one
       track, because no service in its services.json enables multitrack (0 of
       91). SRT is the path that is operated and tested. Use it.
