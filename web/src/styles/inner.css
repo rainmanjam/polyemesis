@@ -1,0 +1,504 @@
+/* Inner-page layer: everything under the homepage that is not a docs article.
+ * One banner per area, each in its own region, so sibling edits merge cleanly.
+ * Put your rules under your area's banner and nowhere else. All values are
+ * tokens; focus is the one ring .btn uses (2px --color-primary-bright). */
+
+@layer components {
+  /* ===== shell ===== */
+
+  /* The page header. Crumbs, one h1 (display face, at most one accent word in
+     Instrument Serif), a lede, then the optional actions and meta line. */
+  .ph {
+    padding: 32px 0 28px;
+  }
+  .ph h1 {
+    margin-top: 16px;
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(2.75rem, 6vw, 4.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+  .ph h1 .it {
+    color: var(--color-accent);
+    font-size: 1.12em;
+    line-height: 0.8;
+    letter-spacing: -0.02em;
+    padding-right: 0.04em;
+  }
+  .lede {
+    margin-top: 20px;
+    max-width: 60ch;
+    color: var(--color-muted);
+    font-size: 1.1875rem;
+    line-height: 1.5;
+  }
+  .ph .acts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+  }
+  .ph .meta {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  @media (min-width: 1024px) {
+    .ph { padding: 56px 0 40px; }
+  }
+
+  /* The trail. Lower-case by CSS so the source keeps real capitalisation. */
+  .crumb {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    text-transform: lowercase;
+    color: var(--color-muted);
+  }
+  .crumb a { text-decoration: none; }
+  .crumb a:hover { color: var(--color-fg); }
+  .crumb li + li::before {
+    content: "/";
+    padding-inline: 8px;
+  }
+  .crumb [aria-current="page"] { color: var(--color-fg); }
+
+  /* One focus ring for every inner-page control: the one .btn uses. */
+  .crumb a:focus-visible,
+  .band a:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+
+  /* The body: an optional index column beside the content. Below 1024px it is
+     a plain block, so the phone index strip can stick over the whole column. */
+  .lay { padding-bottom: 64px; }
+  .inner-main { min-width: 0; }
+  @media (min-width: 1024px) {
+    .lay[data-lay="rail"] {
+      display: grid;
+      grid-template-columns: 13rem minmax(0, 1fr);
+      gap: 48px;
+    }
+    /* A page whose index shows on phones only has no rail to make room for. */
+    .lay[data-lay="rail"]:has(> [data-variant="phone"]) { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* Closing band: the last thing on a page, one decision. */
+  .band {
+    border-top: 1px solid var(--color-line);
+    padding: 56px 0 64px;
+  }
+  .band-in {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+  .band h2 {
+    font-size: clamp(2.125rem, 5vw, 3.5rem);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.03em;
+  }
+  .band h2 .it {
+    color: var(--color-accent);
+    font-size: 1.12em;
+    line-height: 0.8;
+    letter-spacing: -0.02em;
+  }
+  .band .lede { margin-top: 16px; }
+  .band-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 24px;
+  }
+  .band .code { align-self: center; min-width: 0; }
+  @media (min-width: 1000px) {
+    .band-in:has(.code) {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+      gap: 64px;
+      align-items: center;
+    }
+  }
+
+  /* A list of rows: a hairline above each, one below the last. */
+  .rows { border-bottom: 1px solid var(--color-line); }
+  .rows > * {
+    border-top: 1px solid var(--color-line);
+    padding-block: 20px;
+  }
+
+  /* A framed block of content. */
+  .panel {
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-surface);
+  }
+
+  /* Long-form reading pages: Plex Sans at 17px, a measure under 80 characters,
+     headings in the display face. */
+  .longform {
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    color: color-mix(in srgb, var(--color-fg) 82%, var(--color-ink));
+    overflow-wrap: break-word;
+  }
+  .longform p,
+  .longform ul,
+  .longform ol { max-width: 39rem; }
+  .longform p,
+  .longform ul,
+  .longform ol { margin-block: 1em; }
+  .longform ul { list-style: disc; padding-left: 1.25rem; }
+  .longform ol { list-style: decimal; padding-left: 1.5rem; }
+  .longform h2,
+  .longform h3 {
+    font-family: var(--font-display);
+    color: var(--color-fg);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+  }
+  .longform > :first-child { margin-top: 0; }
+  .longform h2 { margin-top: 2.5em; font-size: 2rem; }
+  .longform h3 { margin-top: 2em; font-size: 1.375rem; }
+  .longform a {
+    color: var(--color-primary-bright);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+
+
+
+  /* ===== nav ===== */
+
+  /* Current-page marking. Nav.astro puts aria-current="page" on the link of the
+     section you are in (the Docs link for every /docs/... page). The current
+     text link is ink; the current Install button gets a coral bottom rule
+     (coral is the primary action, which is what that button is). */
+  .nav-link { color: var(--color-muted); }
+  .nav-link[aria-current="page"] { color: var(--color-fg); }
+  .nav-install[aria-current="page"] { box-shadow: inset 0 -2px 0 var(--color-accent); }
+
+
+
+
+  /* ===== index ===== */
+
+  /* The in-page index. Both forms are in the HTML; CSS shows the rail from
+     1024px and the phone form below it. */
+  [data-index] { display: contents; }
+  [data-index] ol { list-style: none; }
+  [data-index] a { text-decoration: none; }
+  [data-index] a:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+
+  .rail { display: none; }
+  .idx-hd {
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .rail ol { font-family: var(--font-mono); font-size: 0.8125rem; }
+  .rail a {
+    display: block;
+    padding: 9px 0 9px 14px;
+    border-left: 1px solid var(--color-line);
+    color: var(--color-muted);
+  }
+  .rail .d3 a { padding-left: 28px; }
+  .rail a:hover,
+  .rail a[aria-current="true"] { color: var(--color-fg); }
+  .rail a[aria-current="true"] { border-left-color: var(--color-fg); }
+  @media (min-width: 1024px) {
+    [data-index] { display: block; }
+    .rail {
+      display: block;
+      position: sticky;
+      top: calc(var(--nav-h) + 24px);
+    }
+    .idx-strip,
+    .idx-details { display: none; }
+  }
+
+  /* Phone strip: one scrolling line of links, stuck under the nav. */
+  .idx-strip {
+    position: sticky;
+    top: var(--nav-h);
+    z-index: 20;
+    margin: 0 -20px 24px;
+    padding: 0 20px;
+    background: var(--color-ink);
+    border-bottom: 1px solid var(--color-line);
+  }
+  @media (min-width: 768px) {
+    .idx-strip { margin-inline: -40px; padding-inline: 40px; }
+  }
+  .idx-strip ol {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  .idx-strip ol::-webkit-scrollbar { display: none; }
+  .idx-strip a {
+    display: flex;
+    align-items: center;
+    height: 46px;
+    padding: 0 14px;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .idx-strip a:hover,
+  .idx-strip a[aria-current="true"] { color: var(--color-fg); }
+  .idx-strip a[aria-current="true"] { border-bottom-color: var(--color-fg); }
+
+  /* Phone disclosure: the same list behind one summary. */
+  .idx-details {
+    margin-bottom: 24px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-surface);
+  }
+  .idx-details summary {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg);
+  }
+  .idx-details summary:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+  .idx-details ol { padding: 0 16px 12px; font-family: var(--font-mono); font-size: 0.8125rem; }
+  .idx-details a { display: block; padding: 8px 0; color: var(--color-muted); }
+  .idx-details .d3 a { padding-left: 14px; }
+  .idx-details a:hover,
+  .idx-details a[aria-current="true"] { color: var(--color-fg); }
+  .idx-details a[aria-current="true"] { box-shadow: inset 2px 0 0 var(--color-fg); padding-left: 10px; }
+  .idx-details .d3 a[aria-current="true"] { padding-left: 24px; }
+
+
+  /* ===== table ===== */
+
+  /* A symbol in a table cell. */
+  .glyph {
+    display: inline-block;
+    min-width: 1.25em;
+    text-align: center;
+    font-family: var(--font-mono);
+  }
+  /* The product chooser above a comparison table; script un-hides it. */
+  .chooser {
+    margin-bottom: 20px;
+    padding: 16px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-surface);
+  }
+  .chooser[hidden] { display: none; }
+
+
+
+
+  /* ===== docs ===== */
+
+  /* --- rendered documentation ------------------------------------------- */
+
+  /* The 23 documents under /docs/* are markdown, so nothing in them carries a
+     class and every element has to be styled by tag inside this one wrapper.
+     Deliberately narrow: it sets rhythm, scale and colour and nothing else, so
+     that a document reads as this site rather than as a README pasted onto it.
+
+     Code blocks and tables are NOT here. Both go through the same components
+     the hand-written pages use -- `.code` above and `.cmp` / `.scroll-hint`
+     further up -- because a docs-only copy of either is how the first one rots.
+     lib/rehype-code-block.mjs and lib/rehype-doc-tables.mjs do that rewriting. */
+  .doc-prose {
+    color: var(--color-muted);
+    line-height: 1.7;
+    /* Long unbreakable strings -- an srt:// URL with a query string, a
+       filtergraph -- appear in prose here, not only in code blocks. Without this
+       they push the column wider than the phone, which is the same failure
+       `.card { min-width: 0 }` exists for one level up. */
+    overflow-wrap: break-word;
+  }
+  .doc-prose > :first-child { margin-top: 0; }
+
+  /* The page title, from the markdown's `# Heading`. Without this rule it fell
+     through to the reset and rendered as 16px body text; it now sits on the
+     same scale as every other page's h1 (text-4xl, sm:text-5xl, bold). */
+  .doc-prose h1 {
+    margin-bottom: 1.25rem;
+    font-size: 2.25rem;
+    line-height: 1.25;
+    font-weight: 700;
+    color: var(--color-fg);
+    text-wrap: balance;
+  }
+  @media (min-width: 640px) { .doc-prose h1 { font-size: 3rem; } }
+  .doc-prose h2 {
+    margin-top: 3rem;
+    margin-bottom: 0.75rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--color-line);
+    font-size: 1.5rem;
+    font-weight: 500;
+    color: var(--color-fg);
+  }
+  .doc-prose h3 {
+    margin-top: 2.25rem;
+    margin-bottom: 0.5rem;
+    font-size: 1.125rem;
+    font-weight: 500;
+    color: var(--color-fg);
+  }
+  .doc-prose h4 {
+    margin-top: 1.75rem;
+    margin-bottom: 0.375rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--color-subtle);
+  }
+
+  .doc-prose p,
+  .doc-prose ul,
+  .doc-prose ol {
+    margin-block: 1rem;
+  }
+  .doc-prose ul { list-style: disc; padding-left: 1.25rem; }
+  .doc-prose ol { list-style: decimal; padding-left: 1.5rem; }
+  .doc-prose li { margin-block: 0.375rem; }
+  .doc-prose li::marker { color: var(--color-subtle); }
+  /* A nested list is a sub-point, not a new paragraph. */
+  .doc-prose li > ul,
+  .doc-prose li > ol { margin-block: 0.375rem; }
+
+  .doc-prose strong { color: var(--color-fg); font-weight: 600; }
+
+  .doc-prose a {
+    color: var(--color-primary-bright);
+    text-decoration: underline;
+    /* Far enough off the baseline that a descender does not sit on the rule.
+       These documents are dense with links and a tight underline turns a
+       paragraph into a smear. */
+    text-underline-offset: 0.2em;
+    text-decoration-color: var(--color-primary-dim);
+    transition: text-decoration-color var(--motion-instant) var(--ease-out);
+  }
+  .doc-prose a:hover { text-decoration-color: var(--color-primary-bright); }
+
+  /* Inline code, which is NOT a code block and must not look like a small one.
+     `:not(pre code)` keeps it off the fenced blocks, whose type is set by
+     `.code pre` above. */
+  .doc-prose code:not(pre code) {
+    padding: 0.1em 0.35em;
+    border-radius: 0.25rem;
+    background: var(--color-surface);
+    font-family: var(--font-mono);
+    font-size: 0.8125em;
+    color: var(--color-fg);
+  }
+
+  /* A blockquote in these documents is almost always a caveat or a measured
+     result, never a quotation. A left rule in primary says "read this"; amber
+     would say "warning", which it is not -- see the note at the top. */
+  .doc-prose blockquote {
+    margin-block: 1.25rem;
+    padding: 0.25rem 0 0.25rem 1.125rem;
+    border-left: 2px solid var(--color-primary);
+  }
+  .doc-prose blockquote > :first-child { margin-top: 0; }
+  .doc-prose blockquote > :last-child { margin-bottom: 0; }
+
+  .doc-prose hr {
+    margin-block: 2.5rem;
+    border: 0;
+    border-top: 1px solid var(--color-line);
+  }
+
+  /* The scroll container for a markdown table. The classes on the table itself
+     (`.cmp`) and the fade (`.scroll-hint`) are the site's existing ones; this
+     only supplies the box they assume. */
+  .doc-table {
+    margin-block: 1.5rem;
+    overflow-x: auto;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-token);
+  }
+  .doc-table table {
+    width: 100%;
+    /* Wide enough that the columns do not crush into unreadable stacks, which is
+       what forces the horizontal scroll `.scroll-hint` then advertises. Below
+       this the browser would rather wrap every cell to two characters. */
+    min-width: 40rem;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .doc-table :is(th, td) {
+    padding: 0.625rem 0.875rem;
+    border-bottom: 1px solid var(--color-line);
+    text-align: left;
+    vertical-align: top;
+  }
+  .doc-table tr:last-child :is(th, td) { border-bottom: 0; }
+  /* The head row paints its own ground, and `.cmp thead th:first-child` above
+     matches it so the pinned corner does not read as a hole in the header. */
+  .doc-table thead { background: var(--color-surface); }
+  .doc-table thead th { color: var(--color-fg); font-weight: 500; }
+
+
+
+
+  /* ===== docs-index ===== */
+
+
+
+
+  /* ===== install ===== */
+
+
+
+
+  /* ===== features ===== */
+
+
+
+
+  /* ===== comparison ===== */
+
+
+
+
+  /* ===== vs ===== */
+
+
+
+
+  /* ===== longform ===== */
+
+
+
+
+  /* ===== calculator ===== */
+}

@@ -488,10 +488,10 @@ if (!meterKf) {
  * nav and the mobile menu are separate markup and the mobile one -- the only
  * navigation a phone has -- was the half left behind when this was first fixed.
  */
-for (const f of ["features", "docs", "download"]) {
+for (const f of ["features", "docs", "download", "docs/install"]) {
   if (!pages.includes(`${f}.html`)) continue;
   const html = readFileSync(join(DIST, `${f}.html`), "utf8");
-  const marked = [...html.matchAll(new RegExp(`<a(?=[^>]*\\shref="/${f}")(?=[^>]*\\saria-current="page")[^>]*>`, "g"))].length;
+  const marked = [...html.matchAll(new RegExp(`<a(?=[^>]*\\shref="/${f.split("/")[0]}")(?=[^>]*\\saria-current="page")[^>]*>`, "g"))].length;
   if (marked < 2) {
     fail.push(
       `${f}.html marks its own nav link as current ${marked} time(s), expected 2 ` +
