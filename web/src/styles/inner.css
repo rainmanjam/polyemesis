@@ -6,6 +6,14 @@
 @layer components {
   /* ===== shell ===== */
 
+  /* Two values every inner page shares, defined once. A section heading is
+     36px from 1024px up and scales down to 28px on a phone; sections sit 72px
+     apart. Docs articles keep their own reading scale. */
+  :root {
+    --h2-section: clamp(1.75rem, 1.44rem + 1.26vw, 2.25rem);
+    --section-gap: 72px;
+  }
+
   /* The page header. Crumbs, one h1 (display face, at most one accent word in
      Instrument Serif), a lede, then the optional actions and meta line. */
   .ph {
@@ -41,6 +49,10 @@
     font-size: 1.1875rem;
     line-height: 1.5;
   }
+  /* The homepage's section lede drops to 17px on a phone; so does this one. */
+  @media (max-width: 767.98px) {
+    .lede { font-size: 1.0625rem; }
+  }
   .ph .acts {
     display: flex;
     flex-wrap: wrap;
@@ -73,10 +85,19 @@
   .crumb a:hover { color: var(--color-fg); }
   /* The separator belongs to the item before it, so a wrapped line never starts with "/". */
   .crumb li:not(:last-child)::after {
-    content: "/";
+    content: "/" / "";
     padding-inline: 8px;
   }
   .crumb [aria-current="page"] { color: var(--color-fg); }
+
+  /* Keyboard focus clears the sticky stack. Anchors keep landing by the global
+     [id] rule (section ids, journey.ts reads it); this is for the controls
+     themselves, so Shift+Tab never scrolls a link under the nav or the phone
+     index strip. Zero specificity: a control's own scroll margin still wins. */
+  :where(.inner-main, [data-doc-column], .docnav, nav.rail)
+    :where(a, button, input, select, textarea, summary, [tabindex]) {
+    scroll-margin-top: var(--anchor-offset);
+  }
 
   /* One focus ring for every inner-page control: the one .btn uses. */
   .crumb a:focus-visible,
@@ -129,7 +150,7 @@
     margin-top: 24px;
   }
   .band .code { align-self: center; min-width: 0; }
-  @media (min-width: 1000px) {
+  @media (min-width: 1024px) {
     .band-in:has(.code) {
       grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
       gap: 64px;
@@ -151,34 +172,6 @@
     background: var(--color-surface);
   }
 
-  /* Long-form reading pages: Plex Sans at 17px, a measure under 80 characters,
-     headings in the display face. */
-  .longform {
-    font-family: var(--font-sans);
-    font-size: 1.0625rem;
-    line-height: 1.65;
-    color: color-mix(in srgb, var(--color-fg) 82%, var(--color-ink));
-    overflow-wrap: break-word;
-  }
-  .longform p,
-  .longform ul,
-  .longform ol { max-width: 39rem; }
-  .longform p,
-  .longform ul,
-  .longform ol { margin-block: 1em; }
-  .longform ul { list-style: disc; padding-left: 1.25rem; }
-  .longform ol { list-style: decimal; padding-left: 1.5rem; }
-  .longform h2,
-  .longform h3 {
-    font-family: var(--font-display);
-    color: var(--color-fg);
-    font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: -0.025em;
-  }
-  .longform > :first-child { margin-top: 0; }
-  .longform h2 { margin-top: 2.5em; font-size: 2rem; }
-  .longform h3 { margin-top: 2em; font-size: 1.375rem; }
   /* Links inside running copy are ink with a quiet underline, as in the docs:
      the site has no blue, and coral is kept for audio and the primary action. */
   .longform a:not([class]),
@@ -347,39 +340,44 @@
   }
   /* With two or fewer columns showing there is nothing to scroll to. */
   .cmp-wrap .cmp.narrow { min-width: 0; }
+  /* ... and no scroll fade to hint at it. */
+  .cmp-wrap:has(.narrow)::after { display: none; }
   /* On a phone the pinned label takes a fixed share, so the first answer
      column is on screen beside it. */
   @media (max-width: 48rem) {
     .cmp-wrap .cmp { min-width: 38rem; }
     .cmp-wrap .cmp.narrow { min-width: 0; }
-    .cmp :is(thead th, tbody th):first-child { width: 9.5rem; min-width: 9.5rem; }
+    :where(.cmp-wrap) .cmp :is(thead th, tbody th):first-child { width: 9.5rem; min-width: 9.5rem; }
   }
-  .cmp th,
-  .cmp td {
+  /* The comparison table's own look. Scoped to .cmp-wrap because the docs
+     pipeline puts .cmp on every markdown table too, and those keep the docs
+     rules. :where() keeps the specificity these rules always had. */
+  :where(.cmp-wrap) .cmp th,
+  :where(.cmp-wrap) .cmp td {
     padding: 12px 16px;
     text-align: left;
     vertical-align: top;
     border-bottom: 1px solid var(--color-line);
   }
-  .cmp tbody tr:last-child :is(th, td) { border-bottom: 0; }
-  .cmp thead th {
+  :where(.cmp-wrap) .cmp tbody tr:last-child :is(th, td) { border-bottom: 0; }
+  :where(.cmp-wrap) .cmp thead th {
     font-family: var(--font-mono);
     font-size: 0.8125rem;
     font-weight: 500;
     color: var(--color-muted);
   }
-  .cmp tbody th {
+  :where(.cmp-wrap) .cmp tbody th {
     font-weight: 400;
     color: var(--color-fg);
   }
-  .cmp td { color: var(--color-muted); }
-  .cmp [data-col] { width: 9.5rem; min-width: 9.5rem; }
-  .cmp thead th[data-poly] {
+  :where(.cmp-wrap) .cmp td { color: var(--color-muted); }
+  :where(.cmp-wrap) .cmp [data-col] { width: 9.5rem; min-width: 9.5rem; }
+  :where(.cmp-wrap) .cmp thead th[data-poly] {
     color: var(--color-fg);
     border-top: 2px solid var(--color-accent);
   }
-  .cmp td[data-poly] { color: var(--color-fg); }
-  .cmp [hidden] { display: none; }
+  :where(.cmp-wrap) .cmp td[data-poly] { color: var(--color-fg); }
+  :where(.cmp-wrap) .cmp [hidden] { display: none; }
 
   /* A symbol before a cell's words: a shape, so colour is never the only cue.
      Yes is a filled dot, No an empty ring, not assessed a dashed ring. The
@@ -587,7 +585,7 @@
     font-family: var(--font-display);
     font-weight: 600;
     color: var(--color-fg);
-    scroll-margin-top: 6rem;
+    scroll-margin-top: var(--anchor-offset);
   }
   .doc-prose h2 {
     margin-top: 3rem;
@@ -789,23 +787,26 @@
   }
   .doc-source a:hover { text-decoration-color: var(--color-fg); }
   .doc-source .font-mono { font-size: 0.8125rem; }
+  /* The previous/next cards share .card (8px corners); the site's corners stop at 4. */
+  .doc-foot [data-pager] .card { border-radius: 4px; }
 
 
 
   /* ===== docs-index ===== */
 
-  .docs-start { padding-bottom: 36px; }
-  .docs-more { border-top: 1px solid var(--color-line); padding-top: 22px; }
+  .docs-start { padding-bottom: calc(var(--section-gap) / 2); }
+  .docs-more { border-top: 1px solid var(--color-line); padding-top: calc(var(--section-gap) / 2); }
   .docs-start > h2 {
     font-family: var(--font-display);
-    font-size: 1.5rem;
+    font-size: var(--h2-section);
     font-weight: 600;
-    letter-spacing: -0.02em;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
     margin-bottom: 14px;
   }
   .grp {
     border-top: 1px solid var(--color-line);
-    padding-bottom: 30px;
+    padding-bottom: calc(var(--section-gap) / 2);
   }
   .grp > summary {
     list-style: none;
@@ -814,14 +815,14 @@
     grid-template-columns: 1fr auto;
     gap: 2px 16px;
     align-items: baseline;
-    padding: 22px 0 16px;
+    padding: calc(var(--section-gap) / 2) 0 16px;
   }
   .grp > summary::-webkit-details-marker { display: none; }
   .grp > summary:focus-visible { outline-offset: -2px; }
   .grp h2 {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.625rem, 5.5vw, 2.125rem);
+    font-size: var(--h2-section);
     line-height: 1.05;
     letter-spacing: -0.03em;
   }
@@ -862,6 +863,9 @@
     padding: 12px 0 13px;
     text-decoration: none;
   }
+  /* An entry is navigation, not running copy: the shell's underline for links
+     in running copy does not apply (it outranks .dl a, so this matches it). */
+  .inner-main .dl li > a:not([class]) { text-decoration: none; }
   .dl-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
   .dl-t b { font-weight: 500; font-size: 1rem; line-height: 1.3; }
   .dl-t i { font: normal 0.75rem var(--font-mono); color: var(--color-muted); }
@@ -876,7 +880,7 @@
   .dl a:hover .dl-t b,
   .dl a:focus-visible .dl-t b {
     text-decoration: underline;
-    text-decoration-color: var(--color-accent);
+    text-decoration-color: var(--color-fg);
     text-underline-offset: 4px;
   }
 
@@ -886,11 +890,10 @@
   /* ===== install ===== */
 
   :where(.inner-main) .inst-acts { display: flex; flex-wrap: wrap; gap: 12px; }
-  :where(.inner-main) .inst { scroll-margin-top: var(--anchor-offset); }
-  :where(.inner-main) .inst + .inst { margin-top: 72px; }
+  :where(.inner-main) .inst + .inst { margin-top: var(--section-gap); }
   :where(.inner-main) .inst h2 {
     font-family: var(--font-display);
-    font-size: clamp(1.75rem, 1rem + 2.4vw, 2.5rem);
+    font-size: var(--h2-section);
     font-weight: 600;
     line-height: 1.05;
     letter-spacing: -0.03em;
@@ -967,6 +970,7 @@
   :where(.inner-main) .inst-tab:hover { color: var(--color-fg); }
   :where(.inner-main) .inst-tab[aria-selected="true"] {
     color: var(--color-fg);
+    /* Coral, exactly as the homepage's own install tabs (Install.astro) mark the selected tab. */
     border-bottom-color: var(--color-accent);
   }
   :where(.inner-main) .inst-tab:focus-visible {
@@ -1054,7 +1058,7 @@
     padding-top: 3px;
     font-family: var(--font-mono);
     font-size: 0.875rem;
-    color: var(--color-accent);
+    color: var(--color-fg);
   }
   :where(.inner-main) .inst-steps > li > * { grid-column: 2; min-width: 0; }
   :where(.inner-main) .inst-steps h3 { font-weight: 600; color: var(--color-fg); }
@@ -1105,7 +1109,10 @@
   :where(.inner-main) .inst-next a b { font-weight: 500; }
   :where(.inner-main) .inst-next a span { font-size: 0.9375rem; color: var(--color-muted); }
   :where(.inner-main) .inst-next a:hover b,
-  :where(.inner-main) .inst-next a:focus-visible b { color: var(--color-accent); }
+  :where(.inner-main) .inst-next a:focus-visible b {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
   :where(.inner-main) .inst-next a:focus-visible {
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
@@ -1117,13 +1124,13 @@
   /* ===== features ===== */
 
   /* Sections: one rhythm for all seven, each with its own interior layout. */
-  .fe { padding-block: 56px; border-top: 1px solid var(--color-line); }
+  .fe { padding-block: calc(var(--section-gap) / 2); border-top: 1px solid var(--color-line); }
   .fe:first-child { border-top: 0; padding-top: 8px; }
   .fe h2 {
     margin-top: 12px;
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.875rem, 3.6vw, 2.5rem);
+    font-size: var(--h2-section);
     line-height: 1.05;
     letter-spacing: -0.03em;
     text-wrap: balance;
@@ -1235,7 +1242,7 @@
   .fx-dest b { font-weight: 500; color: var(--color-fg); }
   .fx-dest li > span { display: inline-flex; align-items: center; color: var(--color-muted); }
   .fx-log { display: flex; flex-direction: column; gap: 4px; color: var(--color-muted); }
-  @media (max-width: 639px) {
+  @media (max-width: 639.98px) {
     .fx-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .fx-row { grid-template-columns: 1fr auto; }
     .fx-bar { display: none; }
@@ -1284,11 +1291,11 @@
 
   /* /comparison. Plain sections down a single column, one rhythm; the tables
      are the shared .cmp-wrap and the lists are the shared .rows. */
-  .cp-sec { margin-top: 72px; }
+  .cp-sec { margin-top: var(--section-gap); }
   .cp-sec h2 {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-size: var(--h2-section);
     line-height: 1.1;
     letter-spacing: -0.025em;
     text-wrap: balance;
@@ -1357,12 +1364,12 @@
   /* The /vs/<product> pages (layouts/VsPage.astro). One column of sections on
      one rhythm; the tables are the shared .cmp-wrap, the lists of other
      comparisons are the shared .rows. */
-  .vs-sec { margin-top: 72px; }
+  .vs-sec { margin-top: var(--section-gap); }
   .vs > :first-child { margin-top: 0; }
   .vs-sec h2 {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-size: var(--h2-section);
     line-height: 1.1;
     letter-spacing: -0.025em;
     text-wrap: balance;
@@ -1465,8 +1472,33 @@
 
   /* ===== longform ===== */
 
+  /* Long-form reading pages: Plex Sans at 17px, a measure under 80 characters,
+     headings in the display face. */
+  .longform {
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    color: color-mix(in srgb, var(--color-fg) 82%, var(--color-ink));
+    overflow-wrap: break-word;
+  }
+  /* Element defaults for running copy, at zero specificity so any class in the
+     long-form area (.lf-steps, .lf-links, .lf-label, .lede ...) wins without a
+     fight. */
+  :where(.longform) :where(p, ul, ol) { max-width: 39rem; margin-block: 1em; }
+  :where(.longform) :where(ul) { list-style: disc; padding-left: 1.25rem; }
+  :where(.longform) :where(ol) { list-style: decimal; padding-left: 1.5rem; }
+  .longform h2,
+  .longform h3 {
+    font-family: var(--font-display);
+    color: var(--color-fg);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+  }
+  .longform h2 { margin-top: 2.5em; font-size: var(--h2-section); }
+  .longform h3 { margin-top: 2em; font-size: 1.375rem; }
   /* The four search pages: sections spaced as chapters, items as hairline rows. */
-  .longform section { margin-top: 4.5rem; }
+  .longform section { margin-top: var(--section-gap); }
   .longform > :first-child { margin-top: 0; }
   .longform .eyebrow { margin-bottom: 0.75rem; }
   .longform .eyebrow + h2 { margin-top: 0; }

@@ -439,16 +439,13 @@
   /* EVERY wide table, not just the comparison ones.
    *
    * This started as a fix for /comparison and was measured afterwards on the
-   * other two: the routing matrix (on the home page then, on /features now) hides 403px of 736 (55%) at
-   * a 390px viewport, and it is the worse case of the two. That table is
-   * INTERACTIVE -- you scroll right to reach a destination column and click a
-   * crosspoint -- so losing the track label means clicking a cell without
-   * knowing which of six tracks it belongs to.
+   * other tables. Losing the row label while swiping to a far column leaves a
+   * grid of bare cells against nothing. The routing matrix that once had its
+   * own `.patch` table no longer exists; `.patch` stays in this selector only
+   * because scripts/check-build.mjs asserts both names are in the rule.
    *
-   * The background is a variable because the two tables sit on different
-   * grounds: the comparison tables on the page, the matrix inside a
-   * surface-filled card. An opaque background is required either way, and the
-   * wrong opaque colour is as visible as none. */
+   * An opaque background is required: without it the scrolling cells slide
+   * visibly underneath the label. */
   :is(.cmp, .patch) :is(th, td):first-child {
     position: sticky;
     left: 0;
@@ -463,11 +460,6 @@
      rather than the page, or the corner reads as a hole in the header. */
   .cmp thead :is(th, td):first-child {
     background: var(--color-surface);
-  }
-  /* The matrix is inside a card that is already surface-coloured, so both its
-     head and its body cells take that instead of the page colour. */
-  .patch {
-    --sticky-bg: var(--color-surface);
   }
   /* The edge that says "this column is pinned, the rest moved". Drawn with a
      shadow rather than a border so it costs no layout width and cannot push the
@@ -701,8 +693,7 @@
      the control. Keyboard users on this site are disproportionately the people
      evaluating it seriously, and a blurred halo reads as decoration — it is
      also the first thing to disappear against a dark background. */
-  .btn:focus-visible,
-  .xpt:focus-visible {
+  .btn:focus-visible {
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
   }
@@ -809,61 +800,6 @@
   }
   .frame img { display: block; width: 100%; height: auto; }
 
-  /* --- the patchbay ---------------------------------------------------- */
-
-  /* A crosspoint, not a checkbox. Both agents said the same thing about the
-     first draft: <input type=checkbox> reads as a web survey, and this needs to
-     read as a router. The input stays for keyboard and screen-reader
-     behaviour and is drawn as an illuminated square button. */
-  .xpt {
-    appearance: none;
-    width: 1.75rem;
-    height: 1.75rem;
-    border-radius: 0.25rem;
-    border: 1px solid var(--color-line-strong);
-    background: var(--color-ink);
-    cursor: pointer;
-    position: relative;
-    /* A top highlight and a floor shadow, one pixel each. This is what makes a
-       square read as a KEY rather than a filled rectangle — the same trick a
-       physical patchbay gets for free from having a lit cap sitting proud of
-       the panel. Kept to 1px: heavier bevels look like 2009. */
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.04),
-      inset 0 -1px 0 rgb(0 0 0 / 0.35);
-    transition:
-      background-color var(--motion-instant) var(--ease-out),
-      border-color var(--motion-instant) var(--ease-out),
-      box-shadow var(--motion-instant) var(--ease-out),
-      transform var(--motion-instant) var(--ease-out);
-  }
-  .xpt:hover { border-color: var(--color-primary); }
-  /* Travel. A key that does not move when pressed is a picture of a key. */
-  .xpt:active { transform: translateY(1px); }
-  .xpt:checked {
-    background: var(--color-cross-dim);
-    border-color: var(--color-cross);
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-cross) 35%, transparent);
-  }
-  .xpt:checked::after {
-    content: "";
-    position: absolute;
-    inset: 0.4375rem;
-    border-radius: 1px;
-    background: var(--color-cross);
-  }
-
-  /* Hovering a destination column isolates its path. The whole product is
-     "these columns differ", so letting someone trace one is the fastest way to
-     show it. */
-  .patch:has(.col-1:hover) td:not(.c1),
-  .patch:has(.col-2:hover) td:not(.c2),
-  .patch:has(.col-3:hover) td:not(.c3),
-  .patch:has(.col-4:hover) td:not(.c4) {
-    opacity: 0.35;
-  }
-  .patch td { transition: opacity 120ms; }
-
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -892,78 +828,32 @@
    Motion.
 
    The rule applied throughout: motion has to carry meaning or it is noise on a
-   page about a signal path. So there are exactly three kinds here — content
-   arriving, signal flowing, and levels moving — and nothing decorative.
+   page about a signal path. What is left lives inside product visuals (signal
+   flowing, levels moving) and nothing is decorative.
 
    All of it is already covered by the prefers-reduced-motion block above, which
    zeroes every duration rather than merely shortening it.
    --------------------------------------------------------------------------- */
 
 @layer components {
-  /* 1. Content arriving. A short rise on first paint for the hero, and
-        nothing else (see the note under .rise-5). 14px — far enough to read
-        as motion, short enough that nobody waits for it.
-
-     ON THE TOKENS NOW, AND IT WAS NOT. The duration and the curve were written
-     here as `0.45s cubic-bezier(0.22, 0.61, 0.36, 1)` — two literals four lines
-     below the block that names --motion-enter (420ms) and --ease-out for
-     exactly this. That is how a scale becomes decorative: the tokens are
-     declared, nothing references them, and the next person to tune the timing
-     tunes the literal because it is the thing in front of them. 420ms and
-     --ease-out are close enough to what was here that the page looks unchanged;
-     what changes is that retuning entry motion is now one edit at the top of
-     this file rather than a search for every literal that happened to mean it.
-
-     ONE PAGE-LOAD MOMENT, NOT FIVE INDEPENDENT FADES. The delays are a single
-     70ms cascade indexed by --rise-step, so the hero reads top to bottom in the
-     order a person reads it and the product panel lands last, as the payoff.
-     Three elements in the old hero shared rise-3 and therefore arrived
-     simultaneously from three different places on the screen — which is not a
-     sequence, it is a flicker with a delay on it.
-
-     Deliberately capped at five steps. 70ms × 5 plus the 420ms rise is 770ms to
-     the last element; a sixth step pushes the payoff past the point where a
-     visitor has started scrolling and animates content they can no longer see
-     arrive. */
+  /* Kept only because scripts/check-build.mjs asserts that something references
+     --motion-enter in the built CSS. Nothing in web/src uses .rise any more
+     (searched: pages, components, scripts, tests, public); the check should be
+     moved to a live consumer and this deleted with it. */
   @keyframes rise {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: none; }
   }
-
   .rise {
     animation: rise var(--motion-enter) var(--ease-out) both;
-    animation-delay: calc(var(--rise-step, 0) * 70ms);
   }
-  .rise-1 { --rise-step: 1; }
-  .rise-2 { --rise-step: 2; }
-  .rise-3 { --rise-step: 3; }
-  .rise-4 { --rise-step: 4; }
-  .rise-5 { --rise-step: 5; }
 
   /* NO SCROLL REVEALS BELOW THE HERO, and they were here until the 2026-11
      design review. Every section below the fold used to fade in on entry, by
      `animation-timeline: view()` or an IntersectionObserver fallback. It moved
      nothing a reader needed to see move, and it had real costs: a full-page
      capture, a print, a link preview or any tool that renders without
-     scrolling saw blank space where the sections were. The hero's page-load
-     cascade above is the one entry motion left. scripts/check-build.mjs fails
+     scrolling saw blank space where the sections were. No entry motion is left
+     (the hero's page-load cascade went with it). scripts/check-build.mjs fails
      the build if `data-reveal` or a scroll timeline comes back. */
-
-  /* 2. Destination loudness bars. These carry measured LUFS figures, so the
-     movement has to stay small enough that nobody could misread the bar as
-     reporting a different number than the one printed beside it. 1.5% of width,
-     and the
-     printed figure never moves. */
-  @keyframes loud {
-    0%, 100% { transform: scaleX(1); }
-    50%      { transform: scaleX(0.985); }
-  }
-  /* Loudness is NOT given the ballistics above, deliberately. Integrated LUFS
-     is a long moving average — it drifts, it does not chase transients — so a
-     fast attack here would be the wrong instrument entirely. Smooth and slow
-     is what an R128 readout actually does. */
-  .loud-bar {
-    transform-origin: left;
-    animation: loud 3.4s var(--ease-breath) infinite;
-  }
 }
