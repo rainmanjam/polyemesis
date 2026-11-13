@@ -127,7 +127,11 @@ test("dashboard — two programmes, and the lanes that divide them", async ({ pa
       "dashboard being photographed under a multi-programme name",
   ).toBeVisible({ timeout: 120_000 });
 
-  await topOfFrame(page, page.getByRole("heading", { name: /^Destinations/ }));
+  // Framed on the line between the two lanes: the end of the first programme's
+  // cards, the second programme's heading and its first cards. From the top of
+  // Destinations the first lane alone fills the window and the second is below
+  // the fold, which leaves nothing to show a lane dividing anything.
+  await laneHeading.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
   await shoot(page, `${OUT}/19-lanes.png`, ["Waiting for a stream…", "Ingest offline"], {
     settleMs: 700,
   });
@@ -760,6 +764,12 @@ test("chat — four platforms in one hub", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 720 });
   await page.goto("/chat");
   await settle(page, 1500);
+  // Close any toast the page raised (the moderator side cards answer "not
+  // connected" with one): a red error toast in the corner is not the subject.
+  for (const close of await page.locator("[data-sonner-toast] [data-close-button]").all()) {
+    await close.click().catch(() => {});
+  }
+  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0, { timeout: 20_000 });
   await snap(page, "09-chat.png", { clip: { x: 180, y: 150, width: 950, height: 560 } });
 });
 
@@ -850,11 +860,7 @@ test("automod — the rules, and the matrix that grants them", async ({ page }) 
   // Clear of the tab's sticky save bar, which otherwise covers the titles.
   await page.locator("main").evaluate((m) => m.scrollBy(0, -88));
   await settle(page);
-  // The frame is the Model checker beside the Automatic moderation card, whose
-  // platform rows are the matrix. "Pattern rules" is not asserted: it sits a
-  // screen above, in the card pair before this one, and the demo seed writes no
-  // rules, so it reads "No rules yet".
-  await expect(page.locator("[data-slot=card-title]", { hasText: "Automatic moderation" }).first()).toBeInViewport();
+  await expect(page.getByText("Pattern rules", { exact: true }).first()).toBeInViewport();
   await snap(page, "20-automod.png");
 });
 
@@ -970,6 +976,17 @@ test("platforms — connected, the end state of the one-time setup", async ({ pa
       "the stubbed accounts did not render, so this would photograph the empty state under a 'connected' name",
     ).toBeVisible({ timeout: 20_000 });
   }
+  // The LAST row opened, with its app credentials expanded: the other rows keep
+  // their Connected pills above it, and the registered app's client id (an
+  // input's value, which is why it is checked as one) and the viewer readout
+  // are on the page too.
+  const panel = page.locator("#platform-panel-facebook");
+  await connected.locator('[data-platform-row="facebook"]').getByRole("button", { name: /Manage/ }).click();
+  await panel.getByText(/App credentials/).first().click();
+  await expect(
+    panel.locator("input").first(),
+    "the opened row does not show the demo client id",
+  ).toHaveValue("demo-facebook-client-not-real", { timeout: 20_000 });
   await topOfFrame(page, page.getByText("Optional.", { exact: true }));
   await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);

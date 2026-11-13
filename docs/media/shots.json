@@ -136,10 +136,9 @@
       "usedBy": [],
       "exception": null,
       "allowFailedWords": [
-        "errors",
         "offline"
       ],
-      "caption": "The \"Player errors\" figure is a static label over a zero count, and \"Offline card\" is the name of the playout page's offline-slate card, not a state."
+      "caption": "\"Offline card\" is the name of the playout page's offline-slate card, not a state."
     },
     {
       "file": "11-library.png",
