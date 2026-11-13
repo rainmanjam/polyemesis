@@ -655,11 +655,11 @@ func content(fx *fixture) {
 // URL must pass demorig.CheckWebhookURLs. Run before any container exists, and
 // again before the rules are sent.
 func guardContent(fx *fixture) {
-	urls := map[string]string{}
+	var urls []demorig.WebhookRule
 	for _, r := range fx.Automation.AlertRules {
 		name, _ := r["name"].(string)
 		u, _ := r["url"].(string)
-		urls[name] = u
+		urls = append(urls, demorig.WebhookRule{Name: name, URL: u})
 	}
 	if err := demorig.CheckWebhookURLs(urls); err != nil {
 		die("%v", err)

@@ -306,9 +306,9 @@ func TestCheckStoredRefusesWhatReachesAPlatformWithoutTheURL(t *testing.T) {
 }
 
 func TestCheckWebhookURLsAcceptsInvalidHostsOnly(t *testing.T) {
-	ok := map[string]string{
-		"a": "https://alerts.demo.invalid/hooks/ops",
-		"b": "HTTPS://Pager.Demo.INVALID/x/y",
+	ok := []WebhookRule{
+		{"a", "https://alerts.demo.invalid/hooks/ops"},
+		{"b", "HTTPS://Pager.Demo.INVALID/x/y"},
 	}
 	if err := CheckWebhookURLs(ok); err != nil {
 		t.Fatalf("refused: %v", err)
@@ -335,7 +335,7 @@ func TestCheckWebhookURLsRefuses(t *testing.T) {
 		"parse":      "https://alerts.demo.invalid/%zz",
 		"ip":         "https://127.0.0.1/x",
 	} {
-		err := CheckWebhookURLs(map[string]string{name: u})
+		err := CheckWebhookURLs([]WebhookRule{{name, u}})
 		if err == nil {
 			t.Errorf("%s: %q accepted", name, u)
 			continue
@@ -343,5 +343,24 @@ func TestCheckWebhookURLsRefuses(t *testing.T) {
 		if u != "" && len(u) < 100 && strings.Contains(err.Error(), u) {
 			t.Errorf("%s: the error quotes the URL: %v", name, err)
 		}
+	}
+}
+
+func TestCheckWebhookURLsChecksEveryRowEvenWithTheSameName(t *testing.T) {
+	err := CheckWebhookURLs([]WebhookRule{
+		{"Ops", "https://example.com/real"},
+		{"Ops", "https://alerts.demo.invalid/fine"},
+	})
+	if err == nil {
+		t.Fatal("the first of two same-named rules is a real host and was accepted")
+	}
+	if strings.Contains(err.Error(), "example.com") {
+		t.Errorf("the error quotes the host: %v", err)
+	}
+	if err := CheckWebhookURLs([]WebhookRule{
+		{"Ops", "https://alerts.demo.invalid/fine"},
+		{"Ops", "https://alerts.demo.invalid/also-fine"},
+	}); err != nil {
+		t.Errorf("two same-named .invalid rules refused: %v", err)
 	}
 }
