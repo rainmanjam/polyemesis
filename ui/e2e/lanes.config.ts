@@ -32,6 +32,10 @@ export default defineConfig({
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:8099",
     ignoreHTTPSErrors: true,
     ...devices["Desktop Chrome"],
+    // Dark, in the system Chrome: the same as capture.config.ts, so the lane
+    // shots match the rest of the set.
+    colorScheme: "dark",
+    channel: "chrome",
     // TALL ON PURPOSE, and this is the one place these shots deliberately
     // differ from capture.config.ts.
     //
