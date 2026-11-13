@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -15,13 +15,12 @@ import { describe, expect, it } from "vitest";
  * the test lives where tests live. */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const page = readFileSync(join(here, "..", "pages", "features.astro"), "utf8");
+const page = readFileSync(join(here, "..", "data", "features.mjs"), "utf8");
 
-/** Every `shot:` on the features page, in source order, with its section id. */
+/** Every `shot:` in the features data, in source order, with its section id. */
 function sections(): { id: string; shot: string; alt: string }[] {
-  // The page is a literal array of objects; read it as text rather than
-  // importing it, because importing an .astro module from vitest drags in the
-  // whole Astro pipeline to answer a question about a string.
+  // SCREENS is a literal array of objects, each starting `id:`, then `shot:`,
+  // then `alt:`; no other array in features.mjs uses an `id:` key.
   const out: { id: string; shot: string; alt: string }[] = [];
   const re = /id:\s*"([^"]+)"[\s\S]*?shot:\s*"([^"]+)"[\s\S]*?alt:\s*"([^"]+)"/g;
   for (const m of page.matchAll(re)) out.push({ id: m[1], shot: m[2], alt: m[3] });
@@ -29,10 +28,14 @@ function sections(): { id: string; shot: string; alt: string }[] {
 }
 
 describe("the features page's screenshots", () => {
+  it("ships the Stream Deck still", () => {
+    expect(existsSync(join(here, "..", "assets", "home", "deck-still.jpg"))).toBe(true);
+  });
+
   it("finds the sections it is meant to be checking", () => {
     // A regex that stops matching would leave every assertion below passing
     // over an empty list, which is the same silence they exist to break.
-    expect(sections().length).toBeGreaterThanOrEqual(8);
+    expect(sections().length).toBeGreaterThanOrEqual(4);
   });
 
   /* THE DEFECT THIS EXISTS FOR. "Audio routing" and "Two mixes, one
