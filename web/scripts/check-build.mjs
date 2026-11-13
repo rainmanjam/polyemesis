@@ -1328,130 +1328,183 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * reordered, but a sentence of 40 characters or more must not be lost. Both
  * sides are normalised by norm() above, so typography and whitespace cannot
  * fail it; the " | " seam the freeze script leaves where it cut a retired
- * sentence also ends a sentence. A sentence that is dropped on purpose goes in DROPPED with the
- * reason: route -> [{ contains, why }]; any legacy sentence containing the
- * `contains` text is exempt. */
+ * sentence also ends a sentence. Tags become spaces, so un-punctuated chrome (a
+ * breadcrumb, an eyebrow, button and link labels) runs into the real sentence
+ * after it. A DROPPED entry cuts out only what is gone: route -> [{ cut, why }].
+ * `cut` (12 characters or more once normalised, with a `why`) occurs exactly
+ * once in exactly one frozen sentence of that route. The sentence is split at
+ * the cut and every piece of 40 characters or more must be on the built page,
+ * as an ordinary sentence must; several entries may cut one sentence. An entry
+ * is stale, and fails, when the whole sentence is on the page after all. */
 const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
-const CHROME_RUN =
-  "Not copy: breadcrumb trail, eyebrow, button and index labels the old markup ran together with the next heading or sentence. The shell draws the trail separator in CSS and puts the index between header and body, so the run cannot recur; the real sentence it ends with is still on the page.";
-const LINK_RUN =
-  "Not copy: a run of link labels the old markup left without punctuation. Its last label, \"Install it\", is now \"Install polyemesis\" (the primary action); every other label and the sentence that follows are still on the page.";
+const CRUMB_EYEBROW =
+  "Not copy: the breadcrumb trail and eyebrow word the old markup ran straight into the h1. The shell draws the trail (its separators are CSS) and the eyebrow is gone; the h1 is on the page word for word.";
+const CLOSING_RUN =
+  "Not copy: the closing buttons and the 'Also compared' link list the old markup ran together with the note after them. Rebuilt, the buttons are in the closing band and the list is above it (with 'Also compared' as its heading); every label is still on the page, and the note is checked whole.";
 const DROPPED = {
   "/calculator": [
     {
-      contains: "bandwidth what a multistream actually costs your connection two different connections",
-      why: "The old page ran its 'Bandwidth' eyebrow straight into the h1 and lede, so the frozen sentence begins with that word. The eyebrow is gone (the breadcrumb trail precedes the h1 now); the lede itself is on the page word for word.",
+      cut: "bandwidth what",
+      why: "The old page ran its 'Bandwidth' eyebrow straight into the h1 and lede. The eyebrow is gone (the breadcrumb trail precedes the h1 now); the h1 and the lede are on the page word for word.",
     },
   ],
   "/comparison": [
     {
-      contains: "per-destination loudness target you set - i, lra and tp, measured after routing yes multitrack archive",
-      why: "The capability table is now the shared CompareTable: the row labels and cells are all still on the page (the build's capability parity and recording rules read them), but its glyph legend sits between the table and the experimental note, and the two blank loudness cells carry the document's words (Filter only, No).",
+      cut: "yes multitrack",
+      why: "The capability table is now the shared CompareTable. Every cell is still on the page, but the two blank loudness cells carry the document's words (Filter only, No) between 'routing yes' and the next row's label, so the cells no longer run on.",
     },
     {
-      contains: "read the quickstart this page, with its sources try the routing matrix",
-      why: "The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action.",
+      cut: "no experimental",
+      why: "The table's glyph legend now sits between the last row and the experimental note, so the last cell and the note no longer run on; the note itself is on the page.",
+    },
+    {
+      cut: "read the quickstart this page, with its sources try the routing matrix · install options",
+      why: "Only button labels, no sentence. The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action, so 'Install options' is now 'Install polyemesis'.",
     },
   ],
   "/vs/aitum-multistream": [
+    { cut: "polyemesis / comparison / aitum multistream compared", why: CRUMB_EYEBROW },
     {
-      contains: "polyemesis / comparison / aitum multistream compared aitum multistream picks a mix.",
-      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
-    },
-    {
-      contains: "also compared: obs-multi-rtmp \u00b7 streamelements \u00b7 streamlabs \u00b7 restreamer and restream.io everything this page says about aitum",
-      why: "The old page ran the closing buttons, the Also compared link list and the checked-and-recorded note together as one unpunctuated run. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact), the closing band sits below it, and the other comparisons are the Also compared list above it; every link and button label is still on the page.",
+      cut: "all five compared install polyemesis also compared: obs-multi-rtmp · streamelements · streamlabs · restreamer and restream.io",
+      why: CLOSING_RUN,
     },
   ],
   "/vs/obs-multi-rtmp": [
+    { cut: "polyemesis / comparison / obs-multi-rtmp compared", why: CRUMB_EYEBROW },
     {
-      contains: "polyemesis / comparison / obs-multi-rtmp compared obs-multi-rtmp uploads once per platform.",
-      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
-    },
-    {
-      contains: "also compared: aitum multistream \u00b7 streamelements \u00b7 streamlabs \u00b7 restreamer and restream.io everything this page says about obs-multi-rtmp",
-      why: "The old page ran the closing buttons, the Also compared link list and the checked-and-recorded note together as one unpunctuated run. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact), the closing band sits below it, and the other comparisons are the Also compared list above it; every link and button label is still on the page.",
+      cut: "all five compared install polyemesis also compared: aitum multistream · streamelements · streamlabs · restreamer and restream.io",
+      why: CLOSING_RUN,
     },
   ],
   "/vs/restreamer": [
+    { cut: "polyemesis / comparison / restreamer and restream.io compared", why: CRUMB_EYEBROW },
     {
-      contains: "polyemesis / comparison / restreamer and restream.io compared two products are called restream.",
-      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
-    },
-    {
-      contains: "install polyemesis all five compared also compared: aitum multistream \u00b7 obs-multi-rtmp \u00b7 streamelements \u00b7 streamlabs",
-      why: "The old page ran the closing buttons and the Also compared link list together as one unpunctuated run. Rebuilt, the buttons are in the closing band, which sits below the Also compared list; every link and button label is still on the page.",
+      cut: "install polyemesis all five compared also compared: aitum multistream · obs-multi-rtmp · streamelements · streamlabs",
+      why: "Only button and link labels, no sentence. The old page ran the closing buttons and the 'Also compared' link list together; rebuilt, the buttons are in the closing band, which sits below the list, and every label is still on the page.",
     },
   ],
   "/vs/streamelements": [
+    { cut: "polyemesis / comparison / streamelements compared", why: CRUMB_EYEBROW },
     {
-      contains: "polyemesis / comparison / streamelements compared streamelements multistreaming is se.live.",
-      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
-    },
-    {
-      contains: "also compared: streamlabs \u00b7 restreamer and restream.io everything this page says about streamelements",
-      why: "The old page ran the closing buttons, the Also compared link list and the checked-and-recorded note together as one unpunctuated run. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact), the closing band sits below it, and the other comparisons are the Also compared list above it; every link and button label is still on the page.",
+      cut: "all five compared install polyemesis also compared: streamlabs · restreamer and restream.io",
+      why: CLOSING_RUN,
     },
   ],
   "/vs/streamlabs": [
+    { cut: "polyemesis / comparison / streamlabs compared", why: CRUMB_EYEBROW },
     {
-      contains: "polyemesis / comparison / streamlabs compared streamlabs multistreams from their servers.",
-      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
-    },
-    {
-      contains: "the three ways to multistream the full comparison how the mix works everything this page says about streamlabs",
-      why: "The old page ran its three footer links (kept as the links under Use Streamlabs, not this) into the checked-and-recorded note. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact); the three links are still on the page.",
+      cut: "the three ways to multistream the full comparison how the mix works",
+      why: "The old page ran its three footer links into the checked-and-recorded note. They are kept as the links under 'Use Streamlabs', no longer next to the note, which is the last paragraph of the page body and is checked whole.",
     },
   ],
   "/docs": [
-    { contains: "documentation the docs live with the code", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page now has a breadcrumb instead, and the h1 itself is kept." },
-    { contains: "getting it running the routing operating it automating it understanding it", why: "The old sidebar list ran straight into the first section's blurb; the list is now the in-page index and every blurb is kept beside its own heading." },
-    { contains: "the docs are in the same repository as the code, under docs/", why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the link moved to a 'Browse docs/ on GitHub' line after the last group and the sentence is otherwise kept." },
+    { cut: "documentation", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page has a breadcrumb instead, and the h1 itself is kept." },
+    {
+      cut: "getting it running the routing operating it automating it understanding it",
+      why: "The old sidebar list ran straight into the first section's heading and blurb. The list is now the in-page index (its labels are the section headings, which the heading check guards); the heading and the blurb are checked whole.",
+    },
+    {
+      cut: "under docs/ .",
+      why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the link moved to a 'Browse docs/ on GitHub' line after the last group. The rest of the sentence is checked.",
+    },
   ],
   "/multistream": [
-    { contains: "polyemesis / multistream multistreaming multistreaming is one upload reaching several platforms.", why: CHROME_RUN },
-    { contains: "multistream from obs, three ways how the mix matrix works the full comparison a free restream service you run yourself install it per platform", why: LINK_RUN },
+    { cut: "polyemesis / multistream multistreaming", why: CRUMB_EYEBROW },
+    {
+      cut: "yourself install it",
+      why: "The old link list ended with 'Install it', which is now 'Install polyemesis' (the primary action). Every other label, the eyebrow, the h2 and the sentence after them are checked.",
+    },
   ],
-  "/free-restream-service": [{ contains: "install it what it costs you the word what a restream service actually is you send one stream out of your encoder.", why: CHROME_RUN }],
+  "/free-restream-service": [
+    {
+      cut: "install it what it costs you",
+      why: "Link labels the old markup left without punctuation: 'Install it' is now 'Install polyemesis' (the primary action) and 'What it costs you' moved to the in-page index, away from the section after it. The eyebrow, the h2 and the sentence are checked.",
+    },
+  ],
   "/how-to-multistream-from-obs": [
-    { contains: "guide how to multistream from obs to multistream is to broadcast one programme to several platforms at once:", why: CHROME_RUN },
-    { contains: "the three routes walkthrough what goes wrong pick one three routes, and the cost each one moves somewhere else", why: CHROME_RUN },
+    {
+      cut: "guide how to",
+      why: "The old eyebrow word 'Guide' ran into the h1. The eyebrow is gone (the breadcrumb trail precedes the h1); the h1 and the lede after it are checked.",
+    },
+    {
+      cut: "the three routes walkthrough",
+      why: "The old page ran two index labels (The three routes, Walkthrough) into the next index entries. The index now sits between the header and the body, so the run cannot recur; the real sentence after it is checked.",
+    },
   ],
   "/twitch-vod-track": [
-    { contains: "polyemesis / multistream / twitch vod track twitch the broadcast carries the music.", why: CHROME_RUN },
-    { contains: "how the mix matrix works multistreaming, three ways install it", why: LINK_RUN },
+    { cut: "polyemesis / multistream / twitch vod track twitch", why: CRUMB_EYEBROW },
+    {
+      cut: "ways install it",
+      why: "The old link list ended with 'Install it', which is now 'Install polyemesis' (the primary action). The other labels are checked.",
+    },
   ],
 };
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
 };
+const sentencesOf = (text) => text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
+// The pieces of a sentence left once the (non-overlapping, sorted) cuts are taken out of it.
+const piecesOf = (sentence, cuts) => {
+  const pieces = [];
+  let from = 0;
+  for (const { start, end } of cuts) {
+    pieces.push(sentence.slice(from, start));
+    from = end;
+  }
+  pieces.push(sentence.slice(from));
+  return pieces.map((p) => p.trim()).filter((p) => p.length >= 40);
+};
+// Check one route's DROPPED entries against its frozen sentences: report invalid or stale
+// entries, and return sentence -> its cuts for the entries that are valid.
+const cutsFor = (route, sentences, built) => {
+  const bySentence = new Map();
+  for (const d of DROPPED[route] ?? []) {
+    const cut = norm(String(d.cut ?? ""));
+    const label = `DROPPED entry for ${route} (cut: "${d.cut ?? ""}")`;
+    const hits = sentences.filter((t) => t.includes(cut));
+    if (cut.length < 12) {
+      fail.push(`${label} is too short: "cut" must be at least 12 characters once normalised.`);
+    } else if (typeof d.why !== "string" || d.why.trim() === "") {
+      fail.push(`${label} has no "why".`);
+    } else if (hits.length !== 1) {
+      fail.push(`${label} matches ${hits.length} legacy sentences; it must match exactly one.`);
+    } else if (hits[0].indexOf(cut) !== hits[0].lastIndexOf(cut)) {
+      fail.push(`${label} occurs more than once in the legacy sentence it matches; it must occur exactly once.`);
+    } else if (built.includes(hits[0])) {
+      fail.push(`${label} is stale: the whole legacy sentence is on the built page, so nothing is cut out. Delete the entry.`);
+    } else {
+      const start = hits[0].indexOf(cut);
+      bySentence.set(hits[0], [...(bySentence.get(hits[0]) ?? []), { start, end: start + cut.length, label }]);
+    }
+  }
+  for (const [sentence, cuts] of bySentence) {
+    cuts.sort((a, b) => a.start - b.start);
+    for (let i = 1; i < cuts.length; i++) {
+      if (cuts[i].start < cuts[i - 1].end) fail.push(`${cuts[i].label} overlaps ${cuts[i - 1].label} in the same legacy sentence.`);
+    }
+    bySentence.set(sentence, cuts);
+  }
+  return bySentence;
+};
 {
   for (const key of Object.keys(DROPPED)) {
-    if (!(key in LEGACY)) fail.push(`DROPPED has a key "${key}" that is not a route in legacy-inner.fixture.json, so it exempts nothing (typo?).`);
+    if (!(key in LEGACY)) fail.push(`DROPPED has a key "${key}" that is not a route in legacy-inner.fixture.json, so it cuts nothing (typo?).`);
   }
-  const sentencesOf = (text) => text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
   for (const [route, legacy] of Object.entries(LEGACY)) {
     const built = norm(legacyMain(route).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " "));
     const sentences = sentencesOf(legacy.text);
-    // An exemption must be specific: long enough, explained, and naming exactly one legacy sentence.
-    const exempt = [];
-    for (const d of DROPPED[route] ?? []) {
-      const needle = norm(String(d.contains ?? ""));
-      const label = `DROPPED entry for ${route} (contains: "${d.contains ?? ""}")`;
-      if (needle.length < 25) {
-        fail.push(`${label} is too short: "contains" must be at least 25 characters once normalised.`);
-      } else if (typeof d.why !== "string" || d.why.trim() === "") {
-        fail.push(`${label} has no "why".`);
-      } else {
-        const hits = sentences.filter((t) => t.includes(needle)).length;
-        if (hits !== 1) fail.push(`${label} matches ${hits} legacy sentences; it must match exactly one.`);
-        else exempt.push(needle);
-      }
-    }
+    const cuts = cutsFor(route, sentences, built);
     for (const sentence of sentences) {
-      if (built.includes(sentence) || exempt.some((needle) => sentence.includes(needle))) continue;
-      fail.push(`${route} lost legacy copy: "${sentence}". Keep it, or add it to DROPPED with a reason.`);
+      if (built.includes(sentence)) continue;
+      const cutHere = cuts.get(sentence);
+      if (!cutHere) {
+        fail.push(`${route} lost legacy copy: "${sentence}". Keep it, or cut out only what is gone with a DROPPED entry.`);
+        continue;
+      }
+      for (const piece of piecesOf(sentence, cutHere).filter((p) => !built.includes(p))) {
+        fail.push(`${route} lost legacy copy: "${piece}" (what is left of "${sentence}" after its DROPPED cut). Keep it, or cut it out too.`);
+      }
     }
   }
 }
