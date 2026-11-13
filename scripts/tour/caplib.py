@@ -6,7 +6,7 @@ import os, sys, time, json, base64, math, subprocess, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
-from shotlib import sync_playwright, login, BASE, AUTH  # noqa
+from shotlib import sync_playwright, ensure_session, BASE, AUTH  # noqa
 RAW = os.path.join(HERE, "raw")
 os.makedirs(RAW, exist_ok=True)
 DSF = float(os.environ.get("TOUR_DSF", "1.5"))
@@ -44,8 +44,7 @@ def st(name):
 
 class Take:
     def __init__(self, p, name, start_pos=(1500, 620)):
-        if not os.path.exists(AUTH):
-            login(p)
+        ensure_session(p)
         self.name = name
         self.b = p.chromium.launch(channel="chrome")
         self.c = self.b.new_context(viewport={"width": 1920, "height": 1080}, device_scale_factor=DSF,

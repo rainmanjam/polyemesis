@@ -95,8 +95,9 @@ if [ ! -f "$MASTER" ]; then
 fi
 SECOND="$(poster_second)"
 
-TMP_MP4="$MP4.tmp.mp4"; TMP_JPG="$POSTER.tmp.jpg"
-trap 'command rm -f "$TMP_MP4" "$TMP_JPG"' EXIT
+TMP="$(mktemp -d)"
+TMP_MP4="$TMP/tour.mp4"; TMP_JPG="$TMP/tour-poster.jpg"
+trap 'command rm -rf "$TMP"' EXIT
 chosen=""
 for crf in 20 22 24 26 28 30; do
   ffmpeg -y -loglevel error -i "$MASTER" -an -vf scale=1920:1080 -c:v libx264 -profile:v high -pix_fmt yuv420p \
@@ -110,7 +111,7 @@ if [ -z "$chosen" ]; then
   exit 1
 fi
 ffmpeg -y -loglevel error -ss "$SECOND" -i "$MASTER" -frames:v 1 -vf scale=1920:1080 -q:v 3 "$TMP_JPG"
-mv "$TMP_MP4" "$MP4"; mv "$TMP_JPG" "$POSTER"
+mv "$TMP_MP4" "$MP4"; mv "$TMP_JPG" "$POSTER"   # both encodes finished before anything is replaced
 echo "wrote $MP4 (crf $chosen) and $POSTER (frame at $SECOND s)"
 echo "now verifying against $DATA and chapters.json:"
 check && echo "publish.sh: ok"

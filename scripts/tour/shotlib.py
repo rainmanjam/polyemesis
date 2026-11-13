@@ -6,6 +6,7 @@ The console is at TOUR_BASE (default http://127.0.0.1:8097, the sports scene of
 scripts/demo-seed.sh). The sign-in password is read from
 ${DEMO_WORK:-${TMPDIR:-/tmp}/polyemesis-demo-sports}/admin.pw and is never printed;
 the session it produces is kept beside it, outside the repository."""
+import json
 import os
 import sys
 
@@ -34,14 +35,38 @@ def login(p):
     pg.get_by_label("Password").fill(pw)
     pg.get_by_role("button", name="Sign in").click()
     pg.wait_for_selector("nav", timeout=20000)
-    c.storage_state(path=AUTH)
-    os.chmod(AUTH, 0o600)
+    state = c.storage_state()
+    fd = os.open(AUTH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(state, fh)
     b.close()
 
 
-def context(p, record=None):
+def session_works(p):
+    """True when the saved session is accepted by the console (one authenticated request answers 200)."""
     if not os.path.exists(AUTH):
-        login(p)
+        return False
+    b = p.chromium.launch(channel="chrome")
+    try:
+        c = b.new_context(storage_state=AUTH)
+        return c.request.get(BASE + "/api/v1/auth/me").status == 200
+    except Exception:
+        return False
+    finally:
+        b.close()
+
+
+def ensure_session(p):
+    """Reuses the saved session only if it still works (a rig restart invalidates it); otherwise signs in again."""
+    if session_works(p):
+        return
+    if os.path.exists(AUTH):
+        os.remove(AUTH)
+    login(p)
+
+
+def context(p, record=None):
+    ensure_session(p)
     b = p.chromium.launch(channel="chrome")
     c = b.new_context(viewport={"width": 1920, "height": 1080}, storage_state=AUTH, color_scheme="dark")
     return b, c

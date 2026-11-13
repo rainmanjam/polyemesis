@@ -1,8 +1,8 @@
-"""Contact sheets (six frames each) of check/ from frames.py, into out/sheets/ (git-ignored)."""
+"""Contact sheets (six frames each) of check/frames/ from frames.py, into out/sheets/ (git-ignored)."""
 import glob, subprocess, os
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 os.makedirs("out/sheets", exist_ok=True)
-fs = sorted(glob.glob("check/0*.png"))
+fs = sorted(glob.glob("check/frames/0*.png"))
 for f in glob.glob("out/sheets/m*.png"): os.remove(f)
 for i in range(0, len(fs), 6):
     grp = fs[i:i+6]

@@ -150,7 +150,7 @@ __pycache__/
 /web/scripts/stream-deck-model/work/
 *.stp
 *.step
-/web/scripts/stream-deck-model/*.glb
+/web/scripts/stream-deck-model/**/*.glb
 
 # The tour's source lives in scripts/tour/; what it records and renders does not
 # (raw captures are about 1.2 GB, the trimmed clips about 32 MB). HyperFrames

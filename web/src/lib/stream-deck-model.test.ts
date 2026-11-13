@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,16 +47,26 @@ describe("stream-deck-model scripts", () => {
   it("holds no STP, STEP or deck.glb outside work/, and every file is small", () => {
     for (const p of walk(dir)) {
       const rel = relative(dir, p);
-      expect(rel, rel).not.toMatch(/\.(stp|step)$/i);
-      expect(rel.split("/").pop(), rel).not.toBe("deck.glb");
+      expect(rel, rel).not.toMatch(/\.(glb|stp|step)$/i);
       expect(statSync(p).size, rel).toBeLessThanOrEqual(100_000);
     }
   });
 
-  it(".gitignore keeps the CAD inputs out", () => {
-    const lines = read(join(repo, ".gitignore")).split("\n").map((l) => l.trim());
-    for (const e of ["/web/scripts/stream-deck-model/work/", "*.stp", "*.step", "/web/scripts/stream-deck-model/*.glb"]) {
-      expect(lines, e).toContain(e);
+  it("git ignores the CAD inputs at every depth and keeps the scripts", () => {
+    const ignored = (p: string) => {
+      try {
+        execFileSync("git", ["check-ignore", "-q", "--", p], { cwd: repo });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const base = "web/scripts/stream-deck-model/";
+    for (const p of ["work/deck.glb", "deck.glb", "probes/x.glb", "anything.stp", "work/a/b.step"]) {
+      expect(ignored(base + p), p).toBe(true);
+    }
+    for (const p of ["build.py", "faces.json", "regen.sh", "README.md", "probes/bl_top.py"]) {
+      expect(ignored(base + p), p).toBe(false);
     }
   });
 

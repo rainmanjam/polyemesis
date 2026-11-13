@@ -11,7 +11,7 @@ Get the STP yourself from the Elgato Marketplace (search "Stream Deck + STP"). D
 ## What is not in the repo, and must not be committed
 
 - The STP (or STEP) file: not in the repo. `*.stp` and `*.step` are git-ignored.
-- `work/deck.glb`, the 14 MB intermediate converted from the STP: not in the repo. `work/` and `web/scripts/stream-deck-model/*.glb` are git-ignored.
+- `work/deck.glb`, the 14 MB intermediate converted from the STP: not in the repo. `work/` and every `.glb` under `web/scripts/stream-deck-model/` are git-ignored.
 
 Do not commit either, and do not widen what is committed here: a test (`web/src/lib/stream-deck-model.test.ts`) fails on an STP, a STEP file or a `deck.glb` in this folder.
 
@@ -21,6 +21,7 @@ The step from the STP to `deck.glb` was done once by hand and is not recorded. T
 
 ## What is here
 
+- `faces.json` holds measured face rectangles (the key, strip and dial outlines, in metres) and two part names taken from the CAD file's object tree, `STREAM_DECK-PLUS_MODULE_1_1_2` and `WD050-REAR-CHASSIS`. `build.py` and three probes use those names to select parts. It holds no geometry.
 - `build.py` splits the model's parts and slims them, using the face rectangles in `faces.json` (the eight keys `k00`..`k13` in two rows of four, the strip and the four dials). The last argument is the smallest feature kept, in millimetres (2 was used).
 - `regen.sh` runs `build.py` on `work/deck.glb` and writes the model. It exits 2 with a pointer to this file when `work/deck.glb` is missing.
 - `probes/bl_*.py` are the seven Blender scripts used to inspect and measure the CAD when `faces.json` was derived. They are not needed to rebuild.
