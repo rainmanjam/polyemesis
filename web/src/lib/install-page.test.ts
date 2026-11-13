@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { BUILD_FROM_CLONE, CLONE, COMPOSE_UP, HEALTH_CHECK, INSTALL_WITH_FLAGS, SETUP_CODE } from "../data/install.mjs";
+import { BUILD_FROM_CLONE, CLONE, COMPOSE_UP, HEALTH_CHECK, SETUP_CODE } from "../data/install.mjs";
 import { FIRST_RUN, PORTS, REQUIREMENTS } from "../data/install-page.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -62,9 +62,8 @@ describe("the install page takes its commands from install.mjs", () => {
     expect(BUILD_FROM_CLONE.startsWith(CLONE)).toBe(true);
   });
 
-  it("shows where installer flags go with the doc's own example", () => {
-    expect(installDoc).toContain(INSTALL_WITH_FLAGS);
-    expect(page).toContain("INSTALL_WITH_FLAGS");
+  it("says where installer flags go without a command or version", () => {
+    expect(page).toContain("Flags go on the last line, after install.sh.");
     expect(page).not.toContain("--mode binary");
   });
 

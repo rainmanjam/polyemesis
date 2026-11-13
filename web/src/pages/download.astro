@@ -23,7 +23,6 @@ import {
   DOCKER_RUN,
   HEALTH_CHECK,
   INSTALL_SCRIPT,
-  INSTALL_WITH_FLAGS,
 } from "../data/install.mjs";
 import { FIRST_RUN, PORTS, REQUIREMENTS } from "../data/install-page.mjs";
 import { FFMPEG_FLOOR, GO_FLOOR, NODE_BUILD_FLOOR } from "../data/facts.mjs";
@@ -82,7 +81,7 @@ const METHODS = [
     needs: `Linux with systemd, run as root. Docker mode bundles FFmpeg; binary mode needs FFmpeg ${FFMPEG_FLOOR} or later with SRT, and offers to install a pinned build.`,
     notes: [
       "Read it before you run it: it is one file and declares every flag up front.",
-      `Flags go on the last line, after install.sh, as in ${INSTALL_WITH_FLAGS}.`,
+      "Flags go on the last line, after install.sh.",
       "It installs a self-signed certificate unless told otherwise. For Let's Encrypt pass --tls acme with --hostname and --email; it refuses acme without both. Behind a reverse proxy that already terminates TLS, pass --tls off.",
       "In binary mode it also installs the fonts burned-in captions are drawn with (fontconfig, DejaVu and Noto CJK), so Chinese, Japanese, Korean, Arabic and Hebrew captions render out of the box. CJK is the large part (60–190 MB by distribution); --no-cjk-fonts leaves it out.",
     ],
