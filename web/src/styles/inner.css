@@ -77,19 +77,18 @@
     outline-offset: 2px;
   }
 
-  /* The body: an optional index column beside the content. */
-  .lay {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
-    padding-bottom: 64px;
-  }
+  /* The body: an optional index column beside the content. Below 1024px it is
+     a plain block, so the phone index strip can stick over the whole column. */
+  .lay { padding-bottom: 64px; }
   .inner-main { min-width: 0; }
   @media (min-width: 1024px) {
     .lay[data-lay="rail"] {
+      display: grid;
       grid-template-columns: 13rem minmax(0, 1fr);
       gap: 48px;
     }
+    /* A page whose index shows on phones only has no rail to make room for. */
+    .lay[data-lay="rail"]:has(> [data-variant="phone"]) { grid-template-columns: minmax(0, 1fr); }
   }
 
   /* Closing band: the last thing on a page, one decision. */
@@ -190,18 +189,17 @@
 
   /* ===== index ===== */
 
-  /* The in-page index: a rail from 1024px. The phone forms and the current-
-     section marking arrive with Task 5. */
-  .rail {
-    min-width: 0;
+  /* The in-page index. Both forms are in the HTML; CSS shows the rail from
+     1024px and the phone form below it. */
+  [data-index] { display: contents; }
+  [data-index] ol { list-style: none; }
+  [data-index] a { text-decoration: none; }
+  [data-index] a:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
   }
-  @media (min-width: 1024px) {
-    .rail {
-      position: sticky;
-      top: calc(var(--nav-h) + 24px);
-      align-self: start;
-    }
-  }
+
+  .rail { display: none; }
   .idx-hd {
     padding-bottom: 10px;
     border-bottom: 1px solid var(--color-line);
@@ -209,28 +207,88 @@
     font-size: 0.75rem;
     color: var(--color-muted);
   }
-  .idx-list {
-    list-style: none;
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-  }
-  .idx-list a {
+  .rail ol { font-family: var(--font-mono); font-size: 0.8125rem; }
+  .rail a {
     display: block;
     padding: 9px 0 9px 14px;
     border-left: 1px solid var(--color-line);
     color: var(--color-muted);
-    text-decoration: none;
   }
-  .idx-list a:hover,
-  .idx-list a[aria-current="true"] { color: var(--color-fg); }
-  .idx-list a[aria-current="true"] { border-left-color: var(--color-fg); }
-  .idx-list [data-depth="3"] a { padding-left: 28px; }
-  .idx-list a:focus-visible {
+  .rail .d3 a { padding-left: 28px; }
+  .rail a:hover,
+  .rail a[aria-current="true"] { color: var(--color-fg); }
+  .rail a[aria-current="true"] { border-left-color: var(--color-fg); }
+  @media (min-width: 1024px) {
+    [data-index] { display: block; }
+    .rail {
+      display: block;
+      position: sticky;
+      top: calc(var(--nav-h) + 24px);
+    }
+    .idx-strip,
+    .idx-details { display: none; }
+  }
+
+  /* Phone strip: one scrolling line of links, stuck under the nav. */
+  .idx-strip {
+    position: sticky;
+    top: var(--nav-h);
+    z-index: 20;
+    margin: 0 -20px 24px;
+    padding: 0 20px;
+    background: var(--color-ink);
+    border-bottom: 1px solid var(--color-line);
+  }
+  @media (min-width: 768px) {
+    .idx-strip { margin-inline: -40px; padding-inline: 40px; }
+  }
+  .idx-strip ol {
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  .idx-strip ol::-webkit-scrollbar { display: none; }
+  .idx-strip a {
+    display: flex;
+    align-items: center;
+    height: 46px;
+    padding: 0 14px;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .idx-strip a:hover,
+  .idx-strip a[aria-current="true"] { color: var(--color-fg); }
+  .idx-strip a[aria-current="true"] { border-bottom-color: var(--color-fg); }
+
+  /* Phone disclosure: the same list behind one summary. */
+  .idx-details {
+    margin-bottom: 24px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-surface);
+  }
+  .idx-details summary {
+    padding: 12px 16px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg);
+  }
+  .idx-details summary:focus-visible {
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
   }
-
-
+  .idx-details ol { padding: 0 16px 12px; font-family: var(--font-mono); font-size: 0.8125rem; }
+  .idx-details a { display: block; padding: 8px 0; color: var(--color-muted); }
+  .idx-details .d3 a { padding-left: 14px; }
+  .idx-details a:hover,
+  .idx-details a[aria-current="true"] { color: var(--color-fg); }
+  .idx-details a[aria-current="true"] { box-shadow: inset 2px 0 0 var(--color-fg); padding-left: 10px; }
+  .idx-details .d3 a[aria-current="true"] { padding-left: 24px; }
 
 
   /* ===== table ===== */
