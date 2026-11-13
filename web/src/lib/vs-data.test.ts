@@ -365,6 +365,14 @@ describe("validateVs hardening", () => {
   });
 });
 
+describe("validateVs on non-string leaves", () => {
+  it("skips numbers, booleans and null when it reads every string of the data", () => {
+    const d = structuredClone(bySlug("streamlabs")) as unknown as Record<string, unknown>;
+    d.extra = { n: 5, b: true, nothing: null };
+    expect(validateVs(d as unknown as VsData)).toEqual([]);
+  });
+});
+
 describe("hrefProblem", () => {
   it("accepts a path, a fragment and https, and nothing else", () => {
     expect(hrefProblem("/docs/x")).toBeNull();
@@ -372,6 +380,15 @@ describe("hrefProblem", () => {
     expect(hrefProblem("https://example.com")).toBeNull();
     for (const h of ["javascript:x", "data:x", "//evil", "http://x", "mailto:a@b", ""]) {
       expect(hrefProblem(h), h).not.toBeNull();
+    }
+  });
+
+  it("refuses what the URL parser turns into a protocol-relative or foreign address", () => {
+    for (const h of ["/\\evil.com", "/&#x2f;evil.com", "/&#9;/evil.com", "//evil.com", "/\t/evil.com", "/a\\b", "https://a.com/?b=1&c=2"]) {
+      expect(hrefProblem(h), h).not.toBeNull();
+    }
+    for (const h of ["/docs/x#y", "#frag", "https://github.com/a/b?c=d"]) {
+      expect(hrefProblem(h), h).toBeNull();
     }
   });
 });
@@ -394,5 +411,7 @@ describe("allowedTagProblems", () => {
     expect(allowedTagProblems('<em onclick="x">y</em>')).not.toEqual([]);
     expect(allowedTagProblems('<code class="x">y</code>')).not.toEqual([]);
     expect(allowedTagProblems("<img src=x")).not.toEqual([]);
+    expect(allowedTagProblems("a <!x hidden> b")).not.toEqual([]);
+    expect(allowedTagProblems("a <?x hidden> b")).not.toEqual([]);
   });
 });

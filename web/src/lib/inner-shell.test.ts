@@ -69,6 +69,12 @@ describe("splitAccent", () => {
   it("throws when the accent is missing from the heading", () => {
     expect(() => splitAccent("x", "y")).toThrow(/not in/);
   });
+  it("matches the accent as a whole word, not inside another word", () => {
+    expect(splitAccent("Restreamer, you stream", "stream")).toEqual(["Restreamer, you ", "stream", ""]);
+    expect(() => splitAccent("Restreamer", "stream")).toThrow(/not in/);
+    expect(() => splitAccent("stream the stream", "stream")).toThrow(/more than once/);
+    expect(splitAccent("Pick (once) now", "once")).toEqual(["Pick (", "once", ") now"]);
+  });
   it("throws when the accent occurs twice", () => {
     expect(() => splitAccent("go go", "go")).toThrow(/more than once/);
   });

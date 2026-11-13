@@ -31,18 +31,28 @@ const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quo
 function decodeEntities(text: string): string {
   return text.replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([a-z]+));/g, (whole, dec, hex, name) => {
     if (name) return NAMED_ENTITIES[name] ?? whole;
-    return String.fromCodePoint(dec ? Number(dec) : parseInt(hex, 16));
+    const cp = dec ? Number(dec) : parseInt(hex, 16);
+    // Beyond U+10FFFF there is no character: leave the entity as written.
+    return cp <= 0x10ffff ? String.fromCodePoint(cp) : whole;
   });
 }
 
+const ESCAPE_BASE = 0xe000;
+
 /** Reduces inline markdown to the text a reader sees. */
 function plainText(raw: string): string {
-  return decodeEntities(raw)
+  // A backslash before ASCII punctuation is an escape: kept as a private-use
+  // placeholder while the emphasis rules run, then turned into the character.
+  const escaped = decodeEntities(raw).replace(/\\([!-/:-@[-`{-~])/g, (_, c: string) =>
+    String.fromCodePoint(ESCAPE_BASE + c.charCodeAt(0)),
+  );
+  return escaped
     .replace(/[ \t]+#+$/, "") // closing run of #
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links and images
     .replace(/`+([^`]*)`+/g, "$1") // inline code
     .replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1") // * emphasis
     .replace(/(?<!\w)_{1,3}([^_]+)_{1,3}(?!\w)/g, "$1") // _ emphasis, not snake_case
+    .replace(/[\uE000-\uE07F]/g, (c) => String.fromCodePoint(c.codePointAt(0)! - ESCAPE_BASE))
     .trim();
 }
 

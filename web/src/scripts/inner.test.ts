@@ -74,6 +74,15 @@ describe("bootInner", () => {
     await vi.waitFor(() => expect(initChooser).toHaveBeenCalledWith(document.querySelector("[data-chooser]")));
   });
 
+  it("starts every chooser on the page, not only the first", async () => {
+    const initChooser = vi.fn();
+    vi.doMock("./chooser", () => ({ initChooser }));
+    document.body.innerHTML = `<fieldset data-chooser id="c1" hidden></fieldset><fieldset data-chooser id="c2" hidden></fieldset>`;
+    bootInner(document);
+    await vi.waitFor(() => expect(initChooser).toHaveBeenCalledTimes(2));
+    expect(initChooser).toHaveBeenCalledWith(document.getElementById("c2"));
+  });
+
   it("does not import the chooser module on a page without the root", async () => {
     const factory = vi.fn(() => ({ initChooser: vi.fn() }));
     vi.doMock("./chooser", factory);
@@ -179,6 +188,16 @@ describe("bootInner on a page opened at a #fragment", () => {
     expect(scroll).not.toHaveBeenCalled();
   });
 
+  it("does nothing on a back_forward navigation either", () => {
+    const scroll = withTarget();
+    window.location.hash = "#need";
+    vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+      { type: "back_forward" },
+    ] as unknown as PerformanceEntryList);
+    bootInner(document);
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
   it("realigns on a fresh navigation", () => {
     const scroll = withTarget();
     window.location.hash = "#need";
@@ -214,6 +233,7 @@ describe("bootInner holds a #fragment while the page settles", () => {
   afterEach(() => {
     window.location.hash = "";
     resized = undefined;
+    Object.defineProperty(window, "scrollY", { value: 0, configurable: true });
     disconnect.mockClear();
     observe.mockClear();
     vi.unstubAllGlobals();
@@ -229,20 +249,151 @@ describe("bootInner holds a #fragment while the page settles", () => {
     window.dispatchEvent(new Event("keydown")); // let go, so no listener outlives the test
   });
 
-  it("lets go as soon as the visitor scrolls, taps or types", () => {
+  it.each(["wheel", "touchstart", "pointerdown", "keydown"])("lets go on a %s", (type) => {
     setUp();
     bootInner(document);
-    window.dispatchEvent(new Event("wheel"));
+    window.dispatchEvent(new Event(type));
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it("lets go by itself after two seconds", () => {
+  it("does not realign on a resize after the visitor has let go", () => {
+    const scroll = setUp();
+    bootInner(document);
+    window.dispatchEvent(new Event("pointerdown"));
+    scroll.mockClear();
+    resized?.(); // the callback of an observer that has been disconnected must still not pull the page
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  /* A scroll the page's own align() causes must not count as the visitor's. */
+  const scrollTo = (y: number) => {
+    Object.defineProperty(window, "scrollY", { value: y, configurable: true });
+    window.dispatchEvent(new Event("scroll"));
+  };
+
+  it("lets go when something else moves the page (a scrollbar drag, find-in-page, assistive technology)", () => {
+    const scroll = setUp();
+    scroll.mockImplementation(() => Object.defineProperty(window, "scrollY", { value: 300, configurable: true }));
+    bootInner(document);
+    scrollTo(900);
+    expect(disconnect).toHaveBeenCalledTimes(1);
+    scroll.mockClear();
+    resized?.();
+    expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it("keeps holding through the scroll its own align() causes, to the pixel and one pixel over", () => {
+    const scroll = setUp();
+    scroll.mockImplementation(() => Object.defineProperty(window, "scrollY", { value: 300, configurable: true }));
+    bootInner(document);
+    scrollTo(300);
+    scrollTo(301);
+    scrollTo(299);
+    expect(disconnect).not.toHaveBeenCalled();
+    resized?.();
+    expect(scroll).toHaveBeenCalledTimes(2);
+    window.dispatchEvent(new Event("keydown"));
+  });
+
+  it("lets go by itself after one second", () => {
     vi.useFakeTimers();
     setUp();
     bootInner(document);
-    vi.advanceTimersByTime(1999);
+    vi.advanceTimersByTime(999);
     expect(disconnect).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(disconnect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("bootInner opens the tab a #fragment lives in", () => {
+  /* A fake tablist: clicking a tab shows its panel and hides the others, as tabs.ts does. */
+  const tabs = () => {
+    document.body.innerHTML = `
+      <div role="tablist"><button role="tab" id="tab-docker" aria-controls="panel-docker">Docker</button>
+        <button role="tab" id="tab-compose" aria-controls="panel-compose">Compose</button></div>
+      <div role="tabpanel" id="panel-docker"><p id="inner-docker">d</p></div>
+      <div role="tabpanel" id="panel-compose" hidden><p id="inner-compose">c</p></div>`;
+    for (const tab of document.querySelectorAll<HTMLElement>("[role=tab]")) {
+      tab.addEventListener("click", () => {
+        for (const panel of document.querySelectorAll<HTMLElement>("[role=tabpanel]")) {
+          panel.hidden = panel.id !== tab.getAttribute("aria-controls");
+        }
+      });
+    }
+    const scrolls: boolean[] = []; // whether the target was visible at each align
+    for (const id of ["panel-compose", "inner-compose", "inner-docker"]) {
+      document.getElementById(id)!.scrollIntoView = () => {
+        scrolls.push(!document.getElementById(id)!.closest("[hidden]"));
+      };
+    }
+    return scrolls;
+  };
+  let resized: (() => void) | undefined;
+
+  const hold = () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(cb: () => void) {
+          resized = cb;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+  };
+
+  afterEach(() => {
+    window.location.hash = "";
+    resized = undefined;
+    vi.unstubAllGlobals();
+    window.dispatchEvent(new Event("keydown")); // let go of any hold the test left
+  });
+
+  it("clicks the tab that controls a hidden panel the fragment names, then aligns on the visible target", () => {
+    const scrolls = tabs();
+    window.location.hash = "#panel-compose";
+    bootInner(document);
+    expect(document.getElementById("panel-compose")!.hidden).toBe(false);
+    expect(document.getElementById("panel-docker")!.hidden).toBe(true);
+    expect(scrolls.at(-1)).toBe(true);
+  });
+
+  it("does the same for a target inside a hidden panel", () => {
+    const scrolls = tabs();
+    window.location.hash = "#inner-compose";
+    bootInner(document);
+    expect(document.getElementById("panel-compose")!.hidden).toBe(false);
+    expect(scrolls.at(-1)).toBe(true);
+  });
+
+  it("opens the panel again when the tabs module hides it after the first align", () => {
+    const scrolls = tabs();
+    hold();
+    window.location.hash = "#panel-compose";
+    bootInner(document);
+    // initTabs arrives later and hides everything but the first panel:
+    document.getElementById("panel-compose")!.hidden = true;
+    document.getElementById("panel-docker")!.hidden = false;
+    resized?.();
+    expect(document.getElementById("panel-compose")!.hidden).toBe(false);
+    expect(scrolls.at(-1)).toBe(true);
+  });
+
+  it("leaves tabs alone when the target is in a visible panel or has no panel", () => {
+    const scrolls = tabs();
+    window.location.hash = "#inner-docker";
+    bootInner(document);
+    expect(document.getElementById("panel-compose")!.hidden).toBe(true);
+    expect(scrolls).toEqual([true]);
+  });
+
+  it("does not throw when the hidden panel has no tab", () => {
+    const scrolls = tabs();
+    document.getElementById("tab-compose")!.remove();
+    window.location.hash = "#panel-compose";
+    expect(() => bootInner(document)).not.toThrow();
+    expect(scrolls).toHaveLength(1);
   });
 });

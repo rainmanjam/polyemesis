@@ -44,7 +44,7 @@ describe("columnModel", () => {
 
 describe("statusText", () => {
   it("names none, one, two and three or more products", () => {
-    expect(statusText([])).toBe("Showing ");
+    expect(statusText([])).toBe("Showing nothing");
     expect(statusText(["polyemesis"])).toBe("Showing polyemesis");
     expect(statusText(["polyemesis", "Restreamer"])).toBe("Showing polyemesis and Restreamer");
     expect(statusText(["polyemesis", "Restreamer", "restream.io"])).toBe(

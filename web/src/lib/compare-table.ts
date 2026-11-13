@@ -34,6 +34,7 @@ export function columnModel(cols: Col[], rows: string[][]) {
 
 /** The chooser's status wording; the component renders it and the script keeps it. */
 export function statusText(names: string[]): string {
-  if (names.length < 2) return `Showing ${names[0] ?? ""}`;
+  if (names.length === 0) return "Showing nothing";
+  if (names.length === 1) return `Showing ${names[0]}`;
   return `Showing ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }

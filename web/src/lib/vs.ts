@@ -40,7 +40,7 @@ export interface VsWhichItem {
 }
 
 export interface VsData {
-  slug: "aitum-multistream" | "obs-multi-rtmp" | "restreamer" | "streamelements" | "streamlabs";
+  slug: (typeof VS_SLUGS)[number];
   /** Unchanged from the page as it was. */
   title: string;
   description: string;
@@ -71,7 +71,7 @@ export interface VsData {
   closing: { heading: string; accent?: string; lede?: string };
 }
 
-export const VS_SLUGS = ["aitum-multistream", "obs-multi-rtmp", "restreamer", "streamelements", "streamlabs"];
+export const VS_SLUGS = ["aitum-multistream", "obs-multi-rtmp", "restreamer", "streamelements", "streamlabs"] as const;
 
 /* Ids the template itself uses for its own sections. */
 const RESERVED_IDS = ["glance", "fits", "which", "does-well", "use-other", "others"];
@@ -79,8 +79,11 @@ const RESERVED_IDS = ["glance", "fits", "which", "does-well", "use-other", "othe
 const ALLOWED_TAGS = new Set(["a", "code", "em", "strong"]);
 const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^<>]*)>/g;
 const HREF_ATTR = /^ href="([^"]*)"$/;
-/* A path on this site (not protocol-relative), a fragment, or https. */
-const SAFE_HREF = /^(\/(?!\/)[^\s"<>]*|#[^\s"<>]*|https:\/\/[^\s"<>]+)$/;
+/* A path on this site, a fragment, or https. Refused inside any of them: `&`
+ * (an entity such as `&#x2f;` is decoded before the URL is parsed), `\` and
+ * control characters (the parser reads `\` as `/` and drops tabs), so a path
+ * cannot turn into `//evil.com`. A path may not start `//` or `/\`. */
+const SAFE_HREF = /^(\/(?![/\\])[^\s"<>\\&\x00-\x1f\x7f]*|#[^\s"<>&\x00-\x1f\x7f]*|https:\/\/[^\s"<>\\&\x00-\x1f\x7f]+)$/;
 
 /** Why a link target is refused; null when it is fine. */
 export function hrefProblem(href: string): string | null {
@@ -121,7 +124,7 @@ export function allowedTagProblems(s: string): string[] {
   }
   for (const name of open) out.push(`<${name}> is never closed`);
   // A `<` that starts a tag but never closes it is not matched above.
-  if (/<[a-zA-Z/]/.test(s.replace(TAG, ""))) out.push("an unterminated tag");
+  if (/<[a-zA-Z/!?]/.test(s.replace(TAG, ""))) out.push("an unterminated tag");
   return out;
 }
 

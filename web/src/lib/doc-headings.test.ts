@@ -76,6 +76,19 @@ describe("extractHeadings", () => {
     expect(d.text).toBe("&nbsp; &bogus;");
   });
 
+  it("reads a backslash escape as the punctuation it protects", () => {
+    const [a, b, c] = extractHeadings("## a\\_b\n## \\*not em\\* and a\\\\b\n## path\\x\n");
+    expect(a).toEqual({ depth: 2, text: "a_b", slug: "a_b" });
+    expect(b.text).toBe("*not em* and a\\b");
+    expect(c.text).toBe("path\\x"); // a backslash before a letter is a backslash
+  });
+
+  it("leaves a numeric entity beyond Unicode as written instead of throwing", () => {
+    const [a, b] = extractHeadings("## big &#99999999; and &#x110000;\n## ok &#65;\n");
+    expect(a.text).toBe("big &#99999999; and &#x110000;");
+    expect(b.text).toBe("ok A");
+  });
+
   it("reads only top-level ATX headings: setext, block quote, list and HTML block headings give no entry", () => {
     const md = [
       "Setext two",
