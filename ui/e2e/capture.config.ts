@@ -24,7 +24,6 @@ const scene = process.env.SHOT_SCENE === "sports" ? "sports" : "full";
 export default defineConfig({
   testDir: ".",
   testMatch: /capture\.spec\.ts/,
-  grep: titlesFor(scene),
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -63,6 +62,10 @@ export default defineConfig({
       name: "capture",
       dependencies: ["setup"],
       testMatch: /capture\.spec\.ts/,
+      // The scene filter belongs here, not at the top level: a top-level grep
+      // also filters the setup project's "authenticate" test out, so no session
+      // is written and every shot dies on a missing e2e/.auth/state.json.
+      grep: titlesFor(scene),
       use: { storageState: "e2e/.auth/state.json" },
     },
   ],
