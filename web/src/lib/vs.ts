@@ -34,7 +34,7 @@ export interface VsWhichItem {
   id?: string;
   body: string;
   verdict?: string;
-  then?: string;
+  outcome?: string;
   /** Label and value pairs shown under the card, such as Kind or Licence. */
   facts?: [string, string][];
 }
@@ -97,7 +97,7 @@ const HTML_PATHS = [
   /^fits\.poly\[\d+\]$/,
   /^fits\.other\.items\[\d+\]$/,
   /^which\.intro$/,
-  /^which\.items\[\d+\]\.(body|then)$/,
+  /^which\.items\[\d+\]\.(body|outcome)$/,
   /^sections\[\d+\]\.(intro|after\[\d+\]|paragraphs\[\d+\]|columns\[\d+\]\.steps\[\d+\])$/,
   /^(merits|sections\[\d+\])\.items\[\d+\]\.(p|more)$/,
   /^merits\.(note|after\[\d+\])$/,

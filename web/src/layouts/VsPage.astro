@@ -127,7 +127,7 @@ const glanceCaption = `polyemesis compared with ${data.products.map((p) => p.nam
                 {w.id && <p class="vs-id">{w.id}</p>}
                 <p set:html={w.body} />
                 {w.verdict && data.which?.verdict === "foot" && <p class="vs-verdict">{w.verdict}</p>}
-                {w.then && <p class="vs-then" set:html={w.then} />}
+                {w.outcome && <p class="vs-then" set:html={w.outcome} />}
                 {w.facts && (
                   <dl class="vs-facts">
                     {w.facts.map(([k, v]) => (
