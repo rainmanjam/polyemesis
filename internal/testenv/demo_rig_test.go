@@ -252,20 +252,27 @@ func TestDemoDriverRoutesByRole(t *testing.T) {
 }
 
 // The shell side of the same rule as TestDemoDriverNeverPrintsASecret: the demo
-// password goes to $WORK/admin.pw and is read back from there, so no line that
-// echoes or printf-s may expand it unless the line is the one that writes that
-// file. An xtrace would print every expansion, so the scripts may not turn it on.
+// password, the setup code, the publish token and the stream keys go to files
+// in $WORK and are read back from there. A statement that echoes or printf-s
+// (joined across backslash continuations) may expand one of them only when its
+// output is redirected to a file; `>&2` or no redirect is a print. An xtrace
+// would print every expansion, so the scripts may not turn it on.
 func TestDemoSeedNeverPrintsThePassword(t *testing.T) {
 	root := repoRootFromTest(t)
 	printer := regexp.MustCompile(`\b(echo|printf)\b`)
-	expands := regexp.MustCompile(`\$\{?E2E_PASSWORD`)
+	secret := regexp.MustCompile(`\$\{?(E2E_PASSWORD|POLYEMESIS_SETUP_CODE|PUB_TOKEN|PROOF_URL|token|TOKEN|key)\b|` +
+		`\bcat\b[^|;&]*(admin\.pw|setup\.code|secrets\.list)`)
+	toFile := regexp.MustCompile(`(^|[^&\d])\d?>>?\s*"?\$\{?(WORK|dir|f)\b`)
+	splitCommands := regexp.MustCompile(`\|\||&&|;|\{|\}`)
 	xtrace := regexp.MustCompile(`(^|[;&\s])set\s+-[a-zA-Z]*x|xtrace`)
-	checked := 0
+	checked, printers := 0, 0
 	for _, name := range []string{"demo-seed.sh", "lib-demo-sports.sh"} {
 		raw, err := os.ReadFile(filepath.Join(root, "scripts", name))
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
+		var stmt strings.Builder
+		start := 0
 		for i, line := range strings.Split(string(raw), "\n") {
 			code := strings.TrimSpace(line)
 			if strings.HasPrefix(code, "#") {
@@ -275,12 +282,30 @@ func TestDemoSeedNeverPrintsThePassword(t *testing.T) {
 			if xtrace.MatchString(code) {
 				t.Errorf("%s:%d turns on xtrace, which prints every expansion: %s", name, i+1, code)
 			}
-			if printer.MatchString(code) && expands.MatchString(code) && !strings.Contains(code, "admin.pw") {
-				t.Errorf("%s:%d prints the password: %s", name, i+1, code)
+			if stmt.Len() == 0 {
+				start = i + 1
+			}
+			if strings.HasSuffix(code, "\\") {
+				stmt.WriteString(strings.TrimSuffix(code, "\\") + " ")
+				continue
+			}
+			stmt.WriteString(code)
+			text := stmt.String()
+			stmt.Reset()
+			// One command at a time: `[ -n "$token" ] || { echo "no token" >&2; }`
+			// tests a credential and prints a constant.
+			for _, cmd := range splitCommands.Split(text, -1) {
+				if !printer.MatchString(cmd) {
+					continue
+				}
+				printers++
+				if secret.MatchString(cmd) && !toFile.MatchString(cmd) {
+					t.Errorf("%s:%d prints a credential: %s", name, start, strings.TrimSpace(cmd))
+				}
 			}
 		}
 	}
-	if checked == 0 {
-		t.Error("no script lines checked")
+	if checked == 0 || printers == 0 {
+		t.Errorf("nothing checked (lines %d, printing statements %d)", checked, printers)
 	}
 }

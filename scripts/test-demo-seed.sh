@@ -36,7 +36,7 @@ echo "$*" >> "$STUB_LOG"
 case "$1" in
   info) [ "${STUB_DOCKER_UP:-1}" = 1 ]; exit $? ;;
   ps) exit 0 ;;
-  network) [ "$2" = inspect ] && echo true; exit 0 ;;
+  network) [ "$2" = inspect ] && echo "${STUB_NET_INTERNAL:-true}"; exit 0 ;;
 esac
 case "$*" in
   *run*polyemesis-demo-sports-server*) exit 1 ;;
@@ -74,6 +74,19 @@ expect_rc() { [ "$RC" = "$1" ] || fail "exit $RC, want $1 (stderr: $(tail -n 3 "
 expect_err() { grep -q -- "$1" "$ERR" || fail "stderr lacks \"$1\" (stderr: $(tail -n 3 "$ERR" | tr '\n' ' '))"; }
 expect_no_call() { ! grep -q -- "$1" "$STUB_LOG" || fail "the stub log has \"$1\": $(grep -- "$1" "$STUB_LOG" | head -n 1)"; }
 
+# Portable (BSD and GNU stat differ): Python reads the mode.
+mode_of() { python3 -c 'import os,sys;print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$1"; }
+open_paths() {
+  python3 - "$1" <<'PY'
+import os, sys
+for d, dirs, files in os.walk(sys.argv[1]):
+    for n in dirs + files:
+        p = os.path.join(d, n)
+        if os.lstat(p).st_mode & 0o077:
+            print(p)
+PY
+}
+
 # 1
 begin docker-not-running
 export STUB_DOCKER_UP=0
@@ -89,7 +102,7 @@ begin port-busy
 python3 -m http.server "$DEMO_PORT" --bind 127.0.0.1 > /dev/null 2>&1 &
 LISTENER_PID=$!
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  lsof -nP -iTCP:"$DEMO_PORT" 2> /dev/null | grep -q LISTEN && break
+  ( exec 3<> "/dev/tcp/127.0.0.1/$DEMO_PORT" ) 2> /dev/null && break
   sleep 0.5
 done
 run_script --scene sports --no-capture
@@ -97,6 +110,7 @@ kill "$LISTENER_PID" 2> /dev/null; LISTENER_PID=""
 expect_rc 1
 expect_err "port $DEMO_PORT is already in use"
 expect_no_call "network create"
+[ ! -e "$DEMO_WORK" ] || fail "a refused run left $DEMO_WORK behind"
 pass
 
 # 3
@@ -166,6 +180,16 @@ RC=$?
 expect_rc 1
 expect_err "no release tag"
 expect_no_call "network create"
+# The full scene refuses the same way, and a run that will not capture does not.
+env -u DEMO_VERSION PATH="$TMP/bin:$PATH" DEMO_REUSE_IMAGE=1 \
+  bash "$SCRIPT" > "$OUT" 2> "$ERR" < /dev/null
+RC=$?
+expect_rc 1
+expect_err "no release tag"
+expect_no_call "network create"
+env -u DEMO_VERSION PATH="$TMP/bin:$PATH" DEMO_REUSE_IMAGE=1 \
+  bash "$SCRIPT" --scene sports --no-capture > "$OUT" 2> "$ERR" < /dev/null
+! grep -q "no release tag" "$ERR" || fail "--no-capture was refused for the missing tag"
 pass
 
 # 8
@@ -174,9 +198,11 @@ SENTINEL="sentinel-pass-123"
 E2E_PASSWORD="$SENTINEL" run_script --scene sports --no-capture
 [ -f "$DEMO_WORK/admin.pw" ] || fail "the run never reached the credential file"
 for f in admin.pw setup.code; do
-  mode="$(stat -f %Lp "$DEMO_WORK/$f" 2> /dev/null || stat -c %a "$DEMO_WORK/$f")"
+  mode="$(mode_of "$DEMO_WORK/$f")"
   [ "$mode" = 600 ] || fail "$f has mode $mode, want 600"
 done
+open="$(open_paths "$DEMO_WORK")"
+[ -z "$open" ] || fail "readable by group or others: $open"
 grep -q "$SENTINEL" "$DEMO_WORK/admin.pw" || fail "admin.pw does not hold the password"
 leak="$(grep -rl "$SENTINEL" "$OUT" "$ERR" "$STUB_LOG" "$DEMO_WORK" 2> /dev/null | grep -v '/admin\.pw$' || true)"
 [ -z "$leak" ] || fail "the password reached: $leak"
@@ -208,4 +234,50 @@ begin plan-line-keeps-empty-fields
 printf 'abc\tsecret-token-xyz\t\t9000\t\n' > "$TMP/plan.tsv"
 got="$( . "$LIB"; sports_plan_token "$TMP/plan.tsv" )"
 [ "$got" = secret-token-xyz ] || fail "the token read from a line with empty fields was \"$got\""
+pass
+
+# 12
+begin down-always-removes-the-work-directory
+mkdir -p "$TMP/bin-dead"
+printf '#!/bin/sh\nexit 1\n' > "$TMP/bin-dead/docker"
+chmod +x "$TMP/bin-dead/docker"
+for scene_args in "" "--scene sports"; do
+  mkdir -p "$DEMO_WORK/data"
+  printf x > "$DEMO_WORK/admin.pw"
+  # shellcheck disable=SC2086
+  PATH="$TMP/bin-dead:$PATH" bash "$SCRIPT" $scene_args --down > "$OUT" 2> "$ERR" < /dev/null
+  RC=$?
+  expect_rc 0
+  [ ! -e "$DEMO_WORK" ] || fail "--down ${scene_args} left $DEMO_WORK behind"
+done
+pass
+
+# 13
+begin network-not-internal-refused
+export STUB_NET_INTERNAL=false
+run_script --scene sports --no-capture
+unset STUB_NET_INTERNAL
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "run"
+# A rig that is already up is refused too, before anything acts on it.
+mkdir -p "$DEMO_WORK"; printf x > "$DEMO_WORK/admin.pw"
+: > "$STUB_LOG"
+STUB_NET_INTERNAL=false run_script --scene sports --state start
+expect_rc 1
+expect_err "REFUSING"
+for st in routing-final routing-initial; do
+  STUB_NET_INTERNAL=false run_script --scene sports --state "$st"
+  expect_rc 1
+done
+pass
+
+# 14
+begin plan-bitrate-is-field-4
+printf 'abc\tsecret-token-xyz\t\t9000\t\n' > "$TMP/plan.tsv"
+got="$( . "$LIB"; sports_plan_field "$TMP/plan.tsv" 4 )"
+[ "$got" = 9000 ] || fail "field 4 of a line with empty fields was \"$got\""
+# shellcheck disable=SC2016 # a literal search for the text
+grep -q 'sports_plan_field "\$1" 4' "$LIB" || fail "sports_publish does not read the bitrate from field 4"
+! grep -q '9000k' "$LIB" || fail "the bitrate is hard-coded in the library"
 pass

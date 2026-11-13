@@ -40,13 +40,20 @@ sports_configure() {
   NET_FLAGS="--internal"
 }
 
+# THE THIRD SAFETY LAYER, asked of Docker rather than assumed: the rig's network
+# must be internal. Used after creating it, and before anything acts on a rig
+# that is already running (--state start and routing, --proof).
+sports_require_internal_network() {
+  [ "$(docker network inspect -f '{{.Internal}}' "$NET" 2>/dev/null)" = true ] \
+    || { echo "REFUSING: network $NET is not internal (or cannot be inspected); it could route off this machine." >&2; exit 1; }
+}
+
 # The internal network, checked to BE internal, then the receiver on it.
 sports_network_and_receiver() {
   docker network create ${NET_FLAGS:+"$NET_FLAGS"} "$NET" >/dev/null \
     || { echo "could not create the network $NET" >&2; exit 1; }
   # Not trusting the flag: ask Docker what it made.
-  [ "$(docker network inspect -f '{{.Internal}}' "$NET" 2>/dev/null)" = true ] \
-    || { echo "REFUSING: network $NET is not internal; it could route off this machine." >&2; exit 1; }
+  sports_require_internal_network
   docker run -d --name "$RECV" --network "$NET" "$RECV_IMAGE" >/dev/null \
     || { echo "the receiver $RECV failed to start" >&2; exit 1; }
 }
@@ -77,28 +84,33 @@ sports_start_relay() {
 # fields). `read` with IFS=tab would collapse the empty fields and shift the
 # rest, so the token is taken by awk with an explicit tab separator, and nothing
 # else on the line is used.
-sports_plan_token() {
-  awk -F'\t' 'NR==1{print $2}' "$1"
+#   sports_plan_field <plan.tsv> <n>   field n of the first line, empty ones kept
+sports_plan_field() {
+  awk -F'\t' -v n="$2" 'NR==1{print $n}' "$1"
 }
+sports_plan_token() { sports_plan_field "$1" 2; }
 
 sports_publish() {
-  local token script
+  local token script kbps
   token="$(sports_plan_token "$1")"
   [ -n "$token" ] || { echo "the seeder returned no publish token" >&2; exit 1; }
-  mkdir -p "$WORK/pub"
+  # The video bitrate is the fixture's (video.kbps), carried in field 4.
+  kbps="$(sports_plan_field "$1" 4)"
+  case "$kbps" in ''|*[!0-9]*) echo "the plan line has no video bitrate in field 4" >&2; exit 1 ;; esac
+  ( umask 077; mkdir -p "$WORK/pub" )
   # shellcheck disable=SC2016 # expanded by the container's shell, from its environment
   script='ffmpeg -hide_banner -loglevel error -y -filter_complex_script /m/pitch.filter -map "[v]" -frames:v 1 /w/pitch.png &&
 exec ffmpeg -hide_banner -loglevel warning -nostats -progress /w/progress.txt -stats_period 5 \
   -loop 1 -framerate "$FPS" -i /w/pitch.png -filter_complex_script /m/match.filter \
   -map "[v]" -map "[a0]" -map "[a1]" -map "[a2]" -map "[a3]" -map "[a4]" -map "[a5]" \
   -c:v libx264 -preset veryfast -tune zerolatency -g "$GOP" -pix_fmt yuv420p \
-  -b:v 9000k -maxrate 9500k -bufsize 18000k -c:a aac -b:a 128k \
+  -b:v "${KBPS}k" -maxrate "${MAXKBPS}k" -bufsize "${BUFKBPS}k" -c:a aac -b:a 128k \
   -metadata:s:a:0 title=English -metadata:s:a:1 title=Español -metadata:s:a:2 title=Português \
   -metadata:s:a:3 title=Français -metadata:s:a:4 title=Arabic -metadata:s:a:5 title=Crowd \
   -f mpegts "srt://$SRV_HOST:$SRT_PORT?streamid=$PUB_TOKEN&mode=caller&transtype=live&latency=200000"'
   PUB_TOKEN="$token" docker run -d --name "$PUB_PREFIX-match" --network "$NET" \
     -v "$ROOT/scripts/demo-sports:/m:ro" -v "$WORK/pub:/w" \
-    -e PUB_TOKEN -e "FPS=${FPS:-60}" -e "GOP=$(( ${FPS:-60} * 2 ))" \
+    -e PUB_TOKEN -e "KBPS=$kbps" -e "MAXKBPS=$(( kbps * 19 / 18 ))" -e "BUFKBPS=$(( kbps * 2 ))" -e "FPS=${FPS:-60}" -e "GOP=$(( ${FPS:-60} * 2 ))" \
     -e "SRV_HOST=$SRV" -e "SRT_PORT=${SRT_PORT:-6000}" \
     --entrypoint sh "$IMAGE" -c "$script" >/dev/null \
     || { echo "the match publisher failed to start" >&2; exit 1; }
@@ -142,6 +154,7 @@ sports_prepare_capture() {
 #   sports_state routing-initial|routing-final|start|stop|status|guard|waitlive
 sports_state() {
   local name="$1"
+  umask 077
   if [ ! -s "$WORK/admin.pw" ]; then
     echo "no sports rig is running (there is no $WORK/admin.pw)." >&2
     echo "start one with: scripts/demo-seed.sh --scene sports --no-capture" >&2
@@ -149,6 +162,11 @@ sports_state() {
   fi
   E2E_PASSWORD="$(cat "$WORK/admin.pw")"
   export E2E_PASSWORD
+  case "$name" in
+    routing-initial|routing-final|start)
+      command -v docker >/dev/null 2>&1 || { echo "docker is required to check the rig's network" >&2; exit 1; }
+      sports_require_internal_network ;;
+  esac
   case "$name" in
     routing-initial) go run "$DRIVER" "$BASE_URL" routing "$FIXTURE" initial ;;
     routing-final) go run "$DRIVER" "$BASE_URL" routing "$FIXTURE" final ;;
@@ -169,7 +187,9 @@ sports_state() {
 sports_proof() {
   local dir="$WORK/proof" kind key lang
   local langs=(en es pt fr ar) i=0
+  umask 077
   [ -s "$WORK/secrets.list" ] || { echo "no $WORK/secrets.list: is the rig up?" >&2; exit 1; }
+  sports_require_internal_network
   command rm -rf "$dir"; mkdir -p "$dir"
   # The layout first: each path must carry exactly one H.264 1920x1080 video
   # stream and one audio stream, or the proof stops naming the path.

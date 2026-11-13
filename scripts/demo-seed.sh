@@ -137,16 +137,34 @@ teardown() {
   # Named one at a time rather than piped into xargs: BSD xargs has no -r, so
   # an empty list would run `docker rm -f` with no arguments and print an error
   # on the ordinary path where there is nothing to remove.
+  #
+  # NOTHING IN HERE MAY ABORT THE SCRIPT. Under `set -e` a failed `docker rm` (the
+  # daemon is down, the container is already gone) used to end a --down before it
+  # reached the work directory, leaving the credential files behind.
   local name
   while read -r name; do
-    [ -n "$name" ] && docker rm -f "$name" >/dev/null 2>&1
+    if [ -n "$name" ]; then docker rm -f "$name" >/dev/null 2>&1 || true; fi
   done < <(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^${PUB_PREFIX}-|^${SRV}\$" || true)
   # The sports rig's receiver and relay, by name: they are not publishers, and a
   # listing that came back empty must not leave them behind.
   for name in "$SRV" "$RECV" "$PROXY"; do
-    [ -n "$name" ] && docker rm -f "$name" >/dev/null 2>&1
+    if [ -n "$name" ]; then docker rm -f "$name" >/dev/null 2>&1 || true; fi
   done
   docker network rm "$NET" >/dev/null 2>&1 || true
+}
+
+# Is something listening on 127.0.0.1:$PORT? 0 yes, 1 no, 2 cannot tell. A bash
+# /dev/tcp connect, so no extra tool is needed; "cannot tell" is a refusal, never
+# a pass (a missing lsof used to read as "nothing listening").
+port_in_use() {
+  local err
+  if err="$( ( exec 3<>"/dev/tcp/127.0.0.1/$PORT" ) 2>&1 )"; then
+    return 0
+  fi
+  case "$err" in
+    *"onnection refused"*) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 
 if [ "$DOWN" = yes ]; then
@@ -170,8 +188,9 @@ if [ "$PROOF" = yes ]; then
 fi
 
 # THE HEADER READS "dev" WHEN THERE IS NO RELEASE TAG (a shallow clone), and the
-# screenshots exist to look like the product people install. Refuse to take them.
-if [ "$CAPTURE" = yes ] && [ "$DEMO_VERSION" = dev ]; then
+# screenshots exist to look like the product people install. Refuse to take them
+# (only when a capture will run: --no-capture and --base never photograph).
+if [ "$CAPTURE" = yes ] && [ -z "$BASE" ] && [ "$DEMO_VERSION" = dev ]; then
   echo "no release tag found (shallow clone?): the header would read \"dev\". git fetch --tags, or set DEMO_VERSION." >&2
   exit 1
 fi
@@ -253,6 +272,21 @@ if [ -d "$DATA" ] && [ "$RESET" != yes ]; then
   exit 1
 fi
 
+# EVERYTHING THAT COULD REFUSE HAS RUN BY NOW OR RUNS HERE, BEFORE ANYTHING IS
+# CREATED: a refusal that leaves a work directory behind makes the next run
+# refuse as a leftover. Only this rig's own containers are removed first (a
+# previous run's relay holds the port), then the port is checked.
+teardown
+if port_in_use; then
+  echo "port $PORT is already in use:" >&2
+  if command -v lsof >/dev/null 2>&1; then lsof -nP -iTCP:"$PORT" 2>/dev/null | grep LISTEN >&2 || true; fi
+  echo "stop it first, or set DEMO_PORT." >&2
+  exit 1
+elif [ "$?" = 2 ]; then
+  echo "cannot tell whether port $PORT is free (no /dev/tcp?); refusing rather than guessing." >&2
+  exit 1
+fi
+
 trap 'echo; echo "interrupted; run ./scripts/demo-seed.sh --down to clean up"' INT TERM
 
 # ABSOLUTE, always. capture.spec.ts resolves SHOT_DIR against ui/ and
@@ -265,21 +299,16 @@ case "$OUT" in
 esac
 
 echo "==> fresh data directory: $DATA"
-teardown
 command rm -rf "$WORK"
-mkdir -p "$DATA/recordings" "$STAGE" "$OUT"
+# THE WORK DIRECTORY IS PRIVATE (umask 077): the credential files, the stream
+# keys and the proof captures live in it. $OUT is not, and keeps the umask.
+( umask 077; mkdir -p "$DATA/recordings" "$STAGE" )
+mkdir -p "$OUT"
 # THE CREDENTIALS ARE FILES, mode 600, and nothing prints them: --state and
 # --proof read them back, and a password in an argument shows in `ps`.
 ( umask 077
   printf '%s' "$E2E_PASSWORD" > "$WORK/admin.pw"
   printf '%s' "$POLYEMESIS_SETUP_CODE" > "$WORK/setup.code" )
-
-if lsof -nP -iTCP:"$PORT" 2>/dev/null | grep -q LISTEN; then
-  echo "port $PORT is already in use:" >&2
-  lsof -nP -iTCP:"$PORT" | grep LISTEN >&2
-  echo "stop it first, or set DEMO_PORT." >&2
-  exit 1
-fi
 
 # BUILT EVERY RUN, never reused if present (DEMO_REUSE_IMAGE=1, which the script
 # never sets, is for iterating on this script and for its offline tests). capture-media.sh learned this the
@@ -484,7 +513,7 @@ fi
 echo "==> capturing into $OUT"
 # Only PNGs newer than this marker are this run's: the check, the compression and
 # the site refresh below leave every other file in $OUT alone.
-touch "$WORK/.started"
+( umask 077; touch "$WORK/.started" )
 ( cd "$ROOT/ui" && BASE_URL="$BASE_URL" SHOT_DIR="$OUT" SHOT_SCENE="$SCENE" \
     SHOT_SECRETS_FILE="$WORK/secrets.list" \
     npx --no-install playwright test --config=e2e/capture.config.ts )
