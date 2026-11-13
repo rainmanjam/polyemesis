@@ -17,22 +17,46 @@ import (
 // The sports scene of the demo rig: one match feed, five destinations that are
 // labelled YouTube but publish only to the local receiver.
 
+type sportsTrack struct {
+	Label    string `json:"label"`
+	Role     string `json:"role"`
+	Language string `json:"language"`
+}
+
+type sportsProfile struct {
+	Mode   string `json:"mode"`
+	Tracks []struct {
+		Track   int     `json:"track"`
+		Enabled bool    `json:"enabled"`
+		Gain    float64 `json:"gain"`
+	} `json:"tracks"`
+	Normalize    string   `json:"normalize"`
+	SampleRate   int      `json:"sampleRate"`
+	ExcludeRoles []string `json:"excludeRoles"`
+	Loudness     struct {
+		TargetLufs float64 `json:"targetLufs"`
+		TruePeakDb float64 `json:"truePeakDb"`
+	} `json:"loudness"`
+}
+
 type sportsFixture struct {
-	Scene   string `json:"scene"`
-	Sources []struct {
-		Name  string                     `json:"name"`
-		Video map[string]json.RawMessage `json:"video"`
-		Audio []struct {
-			Label string `json:"label"`
-		} `json:"audio"`
+	Scene      string            `json:"scene"`
+	Recordings []json.RawMessage `json:"recordings"`
+	Sources    []struct {
+		Name         string                     `json:"name"`
+		Video        map[string]json.RawMessage `json:"video"`
+		Audio        []sportsTrack              `json:"audio"`
+		Renditions   []json.RawMessage          `json:"renditions"`
 		Destinations []struct {
-			Name      string `json:"name"`
-			Kind      string `json:"kind"`
-			Platform  string `json:"platform"`
-			URL       string `json:"url"`
-			BackupURL string `json:"backupUrl"`
-			StreamKey string `json:"streamKey"`
-			Enabled   bool   `json:"enabled"`
+			Name         string        `json:"name"`
+			Kind         string        `json:"kind"`
+			Platform     string        `json:"platform"`
+			URL          string        `json:"url"`
+			BackupURL    string        `json:"backupUrl"`
+			StreamKey    string        `json:"streamKey"`
+			Enabled      bool          `json:"enabled"`
+			AudioBitrate int           `json:"audioBitrate"`
+			Profile      sportsProfile `json:"profile"`
 		} `json:"destinations"`
 	} `json:"sources"`
 }
@@ -58,20 +82,30 @@ func TestSportsFixtureIsOneProgrammeFiveLocalDestinations(t *testing.T) {
 	if fx.Scene != "sports" {
 		t.Errorf("scene = %q, want sports", fx.Scene)
 	}
+	if len(fx.Recordings) != 0 {
+		t.Errorf("recordings = %d, want none", len(fx.Recordings))
+	}
 	if len(fx.Sources) != 1 {
 		t.Fatalf("want one source, got %d", len(fx.Sources))
 	}
 	src := fx.Sources[0]
+	if len(src.Renditions) != 0 {
+		t.Errorf("renditions = %d, want none", len(src.Renditions))
+	}
 	if _, has := src.Video["lavfi"]; has {
 		t.Error("video must not carry lavfi: the media is scripts/demo-sports/")
 	}
-	var labels []string
-	for _, a := range src.Audio {
-		labels = append(labels, a.Label)
+	wantTracks := []sportsTrack{
+		{"English", "commentary", "en"}, {"Español", "commentary", "es"}, {"Português", "commentary", "pt"},
+		{"Français", "commentary", "fr"}, {"Arabic", "commentary", "ar"}, {"Crowd", "other", ""},
 	}
-	wantLabels := []string{"English", "Español", "Português", "Français", "Arabic", "Crowd"}
-	if strings.Join(labels, "|") != strings.Join(wantLabels, "|") {
-		t.Errorf("audio labels = %v, want %v", labels, wantLabels)
+	if len(src.Audio) != len(wantTracks) {
+		t.Fatalf("audio tracks = %d, want %d", len(src.Audio), len(wantTracks))
+	}
+	for i, w := range wantTracks {
+		if src.Audio[i] != w {
+			t.Errorf("audio %d = %+v, want %+v", i, src.Audio[i], w)
+		}
 	}
 	wantNames := []string{"YouTube · English", "YouTube · Español", "YouTube · Português", "YouTube · Français", "YouTube · Arabic"}
 	if len(src.Destinations) != len(wantNames) {
@@ -87,6 +121,31 @@ func TestSportsFixtureIsOneProgrammeFiveLocalDestinations(t *testing.T) {
 		}
 		if d.Kind != "rtmp" || d.Platform != "youtube" {
 			t.Errorf("%s: kind/platform = %s/%s, want rtmp/youtube", d.Name, d.Kind, d.Platform)
+		}
+		if d.URL != "rtmp://"+sportsReceiverHost+":1935/live" {
+			t.Errorf("%s: url = %q", d.Name, d.URL)
+		}
+		if d.AudioBitrate != 160 {
+			t.Errorf("%s: audioBitrate = %d, want 160", d.Name, d.AudioBitrate)
+		}
+		// The key carries the language of its own destination (en for English ...).
+		code := wantTracks[i].Language
+		if d.StreamKey != "demo-local-"+code+"-not-a-real-key" {
+			t.Errorf("%s: stream key does not carry %q", d.Name, code)
+		}
+		p := d.Profile
+		if p.Mode != "simple" || p.Normalize != "loudnorm" || p.SampleRate != 48000 ||
+			p.Loudness.TargetLufs != -14 || p.Loudness.TruePeakDb != -1 ||
+			len(p.ExcludeRoles) != 1 || p.ExcludeRoles[0] != "music" {
+			t.Errorf("%s: profile = %+v", d.Name, p)
+		}
+		if len(p.Tracks) != 6 {
+			t.Errorf("%s: profile has %d tracks, want 6", d.Name, len(p.Tracks))
+		}
+		for j, tr := range p.Tracks {
+			if tr.Track != j || !tr.Enabled || tr.Gain != 1 {
+				t.Errorf("%s: profile track %d = %+v, want enabled at gain 1", d.Name, j, tr)
+			}
 		}
 		rows = append(rows, demorig.DestRow{Name: d.Name, URL: d.URL, BackupURL: d.BackupURL})
 	}
@@ -135,7 +194,18 @@ func TestSportsMediaHasNoSweepingVibrato(t *testing.T) {
 	body := string(raw)
 	// A vibrato written (F+6*sin(..))*t makes the pitch sweep further from F every
 	// second, so the proof would pass for a minute and fail on a long run.
-	for _, hz := range []string{"118", "152", "186", "224", "98"} {
+	voices, err := os.ReadFile(filepath.Join(root, "scripts", "demo-sports", "voices.py"))
+	if err != nil {
+		t.Fatalf("read voices.py: %v", err)
+	}
+	var pitches []string
+	for _, m := range regexp.MustCompile(`\((\d+),`).FindAllStringSubmatch(string(voices), -1) {
+		pitches = append(pitches, m[1])
+	}
+	if len(pitches) != 5 {
+		t.Fatalf("read %d pitches from voices.py, want 5", len(pitches))
+	}
+	for _, hz := range pitches {
 		if !strings.Contains(body, "sin(2*PI*"+hz+"*t+12*sin(2*PI*0.3*t))") {
 			t.Errorf("voice %s Hz lacks the phase-modulated form", hz)
 		}

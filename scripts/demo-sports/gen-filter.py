@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes match.filter and pitch.filter: the -filter_complex_script for the synthetic match feed.
 
-Output labels: [v] (1920x1080, 60 fps) and [a0]..[a5] (stereo, 48 kHz):
+Output labels: [v] (1920x1080; the graph does not fix a frame rate) and [a0]..[a5] (stereo, 48 kHz):
 a0..a4 = English, Espanol, Portugues, Francais, Arabic commentary (synthetic
 speech-like bursts, each with its own fundamental and rhythm), a5 = crowd bed.
 Nothing here is real footage, real speech or a real club.
@@ -10,6 +10,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.dont_write_bytecode = True  # --check must write nothing, not even a __pycache__
 sys.path.insert(0, HERE)
 from voices import VOICES  # noqa: E402
 

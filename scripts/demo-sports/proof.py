@@ -5,8 +5,10 @@ Usage: python3 scripts/demo-sports/proof.py <dir>
 <dir> holds <en|es|pt|fr|ar>.pcm (s16le, stereo, 48 kHz, a capture of what the
 receiver got on that path) and ebur-<k>.log (ffmpeg ebur128 output for it).
 
-Exit 0 when, on every path, its own voice is at least 15 dB above the strongest
-other voice; exit 1 otherwise; exit 2 when numpy is missing.
+Exit codes: 0 on every path its own voice is at least 15 dB above the strongest
+other voice; 1 a margin is below 15 dB (the table is printed); 2 numpy is
+missing; 3 bad usage, or a capture is missing, unreadable or has an odd sample
+count (one line naming the file).
 """
 import math
 import os
@@ -19,6 +21,7 @@ except ImportError:
     print("numpy is required for the proof")
     sys.exit(2)
 
+sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from voices import VOICES  # noqa: E402
 
@@ -55,8 +58,26 @@ def correlation(a, b):
     return np.corrcoef(a[:m], b[:m])[0, 1]
 
 
+class CaptureError(Exception):
+    """A capture file that is missing, unreadable or malformed (exit 3)."""
+
+
+def read_text(path):
+    try:
+        with open(path, errors="replace") as f:
+            return f.read()
+    except OSError as e:
+        raise CaptureError("cannot read %s: %s" % (path, e.strerror or "error"))
+
+
 def load_mono(path):
-    x = np.fromfile(path, dtype="<i2").astype(np.float64) / 32768.0
+    try:
+        x = np.fromfile(path, dtype="<i2")
+    except OSError as e:
+        raise CaptureError("cannot read %s: %s" % (path, e.strerror or "error"))
+    if os.path.getsize(path) % 4:
+        raise CaptureError("%s is not whole stereo s16le frames (size is not a multiple of 4 bytes)" % path)
+    x = x.astype(np.float64) / 32768.0
     return x.reshape(-1, 2).mean(axis=1) if x.size else np.zeros(RATE)
 
 
@@ -66,7 +87,7 @@ def main(d):
     print("%-22s %-10s %-10s %-12s" % ("path", "LUFS", "peak dBTP", "own margin dB"))
     for k in CODES:
         x = load_mono(os.path.join(d, k + ".pcm"))
-        log = open(os.path.join(d, "ebur-" + k + ".log"), errors="replace").read()
+        log = read_text(os.path.join(d, "ebur-" + k + ".log"))
         lufs = re.findall(r"I:\s+(-?[\d.]+) LUFS", log)
         peak = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", log)
         m = margin_db(x, k)
@@ -80,6 +101,10 @@ def main(d):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("usage: proof.py <dir>")
-        sys.exit(2)
-    sys.exit(main(sys.argv[1]))
+        print("usage: proof.py <dir>  (dir holds <en|es|pt|fr|ar>.pcm and ebur-<k>.log)")
+        sys.exit(3)
+    try:
+        sys.exit(main(sys.argv[1]))
+    except CaptureError as e:
+        print(e)
+        sys.exit(3)
