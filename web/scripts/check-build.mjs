@@ -1363,7 +1363,14 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * reason: route -> [{ contains, why }]; any legacy sentence containing the
  * `contains` text is exempt. */
 const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
-const DROPPED = {};
+const DROPPED = {
+  "/calculator": [
+    {
+      contains: "bandwidth what a multistream actually costs your connection two different connections",
+      why: "The old page ran its 'Bandwidth' eyebrow straight into the h1 and lede, so the frozen sentence begins with that word. The eyebrow is gone (the breadcrumb trail precedes the h1 now); the lede itself is on the page word for word.",
+    },
+  ],
+};
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
