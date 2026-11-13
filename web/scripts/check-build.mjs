@@ -1341,12 +1341,27 @@ const legacyMain = (route) => {
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
 };
 {
+  const sentencesOf = (text) => text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
   for (const [route, legacy] of Object.entries(LEGACY)) {
     const built = norm(legacyMain(route).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " "));
-    const exempt = DROPPED[route] ?? [];
-    const sentences = legacy.text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
+    const sentences = sentencesOf(legacy.text);
+    // An exemption must be specific: long enough, explained, and naming exactly one legacy sentence.
+    const exempt = [];
+    for (const d of DROPPED[route] ?? []) {
+      const needle = norm(String(d.contains ?? ""));
+      const label = `DROPPED entry for ${route} (contains: "${d.contains ?? ""}")`;
+      if (needle.length < 25) {
+        fail.push(`${label} is too short: "contains" must be at least 25 characters once normalised.`);
+      } else if (typeof d.why !== "string" || d.why.trim() === "") {
+        fail.push(`${label} has no "why".`);
+      } else {
+        const hits = sentences.filter((t) => t.includes(needle)).length;
+        if (hits !== 1) fail.push(`${label} matches ${hits} legacy sentences; it must match exactly one.`);
+        else exempt.push(needle);
+      }
+    }
     for (const sentence of sentences) {
-      if (built.includes(sentence) || exempt.some((d) => sentence.includes(d.contains))) continue;
+      if (built.includes(sentence) || exempt.some((needle) => sentence.includes(needle))) continue;
       fail.push(`${route} lost legacy copy: "${sentence}". Keep it, or add it to DROPPED with a reason.`);
     }
   }
@@ -1375,15 +1390,16 @@ const legacyMain = (route) => {
 {
   const linksIn = (html, from) => {
     const tag = /^<([a-z0-9]+)/i.exec(html.slice(from))?.[1];
-    if (!tag) return 0;
+    if (!tag) return -1;
     const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
     re.lastIndex = from + 1;
     let depth = 1;
-    let end = html.length;
+    let end = -1;
     for (let m = re.exec(html); m; m = re.exec(html)) {
       depth += m[1] ? -1 : 1;
       if (depth === 0) { end = m.index; break; }
     }
+    if (end < 0) return -1; // never closed: fail rather than count to the end of the page
     return (html.slice(from, end).match(/<a\s[^>]*href=/g) || []).length;
   };
   for (const page of pages) {
@@ -1392,11 +1408,13 @@ const legacyMain = (route) => {
     if (labelled.length === 0) continue;
     for (const m of labelled) {
       const n = linksIn(html, m.index);
-      if (n < 2) fail.push(`${page} has an "On this page" index with ${n} link(s); it needs at least two or must not be rendered.`);
+      if (n < 0) fail.push(`${page} has an "On this page" element whose closing tag was not found.`);
+      else if (n < 2) fail.push(`${page} has an "On this page" index with ${n} link(s); it needs at least two or must not be rendered.`);
     }
     const article = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(html)?.[0];
-    if (page.startsWith("docs/") && article && !/<h[23][\s>]/.test(article)) {
-      fail.push(`${page} has an "On this page" index but its article has no h2 or h3.`);
+    if (page.startsWith("docs/")) {
+      if (!article) fail.push(`${page} has an "On this page" index but no article.doc-prose to index.`);
+      else if (!/<h[23][\s>]/.test(article)) fail.push(`${page} has an "On this page" index but its article has no h2 or h3.`);
     }
   }
 }

@@ -13,7 +13,8 @@
  * four viewport widths (rule 1 also for every bordered `.scroll-hint` table):
  *
  *   1. EDGES. The grid's left and right edges sit on the content column's
- *      edges, within 1px. The column is the `.wrap` content box, or the
+ *      edges, within 1px. The column is the content box of the nearest
+ *      `[data-column]` (rail layouts), else the `.wrap` content box, or the
  *      article on a documentation page. This is the rule a `max-w-5xl` on one
  *      grid broke on five pages: the row stopped 216px short of the grid above
  *      it on the same page.
