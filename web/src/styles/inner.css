@@ -626,6 +626,8 @@
   .longform .rows p:first-child { margin-top: 0; }
   .longform .rows p:last-child { margin-bottom: 0; }
 
+  /* Edges: reading text, the callout and link lists end at 39rem; row lists
+     (hairlines, wide tables) run the full column. Nothing ends in between. */
   /* A row split into a title and its body from tablet width up. */
   .lf-split { display: grid; gap: 8px 40px; }
   .lf-split > * { min-width: 0; }
@@ -663,7 +665,7 @@
     font-size: 0.8125rem;
     color: var(--color-muted);
   }
-  .longform .lf-callout { max-width: 42rem; margin-top: 2rem; padding: 4px 24px 8px; }
+  .longform .lf-callout { max-width: 39rem; margin-top: 2rem; padding: 4px 24px 8px; }
   .longform .lf-callout .lf-label { margin-top: 1.25rem; }
   .longform .scroll-hint { margin-top: 1.25rem; }
   .longform .cmp-wrap .cmp td { line-height: 1.5; }
@@ -680,7 +682,7 @@
     gap: 0 28px;
     list-style: none;
     padding-left: 0;
-    max-width: none;
+    max-width: 39rem;
     font-size: 0.9375rem;
   }
   .lf-links li { margin: 0; }

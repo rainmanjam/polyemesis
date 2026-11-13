@@ -30,6 +30,10 @@ describe.each(PAGES)("%s on the inner-page shell", (route, file) => {
     expect(src).not.toContain("Breadcrumbs");
   });
 
+  it("labels the primary action Install polyemesis, never Install it or a bare Install", () => {
+    expect(src).not.toMatch(/>\s*Install( it)?\s*</);
+  });
+
   it("keeps its path and the frozen h1", () => {
     expect(src).toContain(`path="${route}"`);
     expect(squash(src)).toContain(fixture[route].h1.replace(/\s+/g, " "));
