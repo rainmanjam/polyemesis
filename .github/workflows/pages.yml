@@ -350,6 +350,13 @@ jobs:
         timeout-minutes: 15
         run: npm run check:home
 
+      - name: Inner pages (browser)
+        # Twelve routes in six contexts (two widths, each with scripts on, scripts off and reduced motion): about
+        # 4 minutes on a many-core laptop with the contexts running side by side. The script's own deadline is 780 s
+        # (13 minutes), so 15 lets it stop and report before the step is killed.
+        timeout-minutes: 15
+        run: npm run check:inner
+
       - name: Publish to Cloudflare Pages
         # Both halves are load-bearing. The gate is the credential. refs/heads/
         # main is what keeps a pull_request run — including one from a fork,

@@ -64,7 +64,8 @@
   }
   .crumb a { text-decoration: none; }
   .crumb a:hover { color: var(--color-fg); }
-  .crumb li + li::before {
+  /* The separator belongs to the item before it, so a wrapped line never starts with "/". */
+  .crumb li:not(:last-child)::after {
     content: "/";
     padding-inline: 8px;
   }
@@ -731,6 +732,11 @@
     background: var(--color-surface);
   }
   .doc-prose [data-mermaid] svg { max-width: 100%; height: auto; }
+  /* On a phone a wide diagram keeps the size it was drawn at (mermaid-render.ts records it as --diagram-w) and the
+     frame scrolls, instead of shrinking the labels under 12px. */
+  @media (max-width: 767px) {
+    .doc-prose [data-mermaid] svg { min-width: var(--diagram-w, 0); }
+  }
   .doc-prose [data-mermaid="pending"] { min-height: 8rem; }
   .doc-prose :is([data-mermaid="pending"], [data-mermaid="failed"]) {
     font-family: var(--font-mono);
@@ -1271,7 +1277,7 @@
     line-height: 1.6;
     color: var(--color-muted);
   }
-  .cp-note .chip { margin-right: 8px; vertical-align: middle; }
+  .cp-note .chip { margin-right: 8px; vertical-align: middle; font-size: 0.75rem; }
   .cp-note a,
   .cp-loss a { text-decoration: underline; text-underline-offset: 3px; }
   .cp-note a:hover,

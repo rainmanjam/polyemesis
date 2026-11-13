@@ -966,46 +966,4 @@
     transform-origin: left;
     animation: loud 3.4s var(--ease-breath) infinite;
   }
-
-  /* MOMENTARY loudness, which is a different instrument from the one above.
-
-     .loud-bar is integrated LUFS: a long moving average that drifts, so it is
-     slow and barely moves. The hero panel shows MOMENTARY loudness — EBU R128's
-     400ms window — and that genuinely chases programme material. A mic hitting a
-     consonant moves it several LU inside a second.
-
-     So this is fast and has real amplitude, and both are honest rather than
-     decorative: it is what an M-scale readout does. The hero prints no LUFS
-     figure precisely so that this movement cannot be read as contradicting the
-     measured integrated numbers in LoudnessBars.astro further down the page.
-
-     BALLISTICS, NOT A SINE WAVE, and this is the surviving statement of a rule
-     the old hero meters also followed. A symmetric rise and fall is what no
-     meter does, and an audience of broadcast engineers reads it as a decorative
-     web animation — the one impression this page cannot afford. A real meter
-     chases a transient suddenly and falls back at a fixed rate, so the rise is
-     ~9% of the cycle and the decay is linear the rest of the way: a decay that
-     eases out looks animated rather than measured. */
-  @keyframes loud-momentary {
-    0%   { transform: scaleX(0.90); }
-    9%   { transform: scaleX(1); }      /* a transient arrives */
-    64%  { transform: scaleX(0.935); }  /* and falls back at a fixed rate */
-    100% { transform: scaleX(0.90); }
-  }
-
-  /* `meter`/.meter-live, `peak-hold`/.meter-peak-tick and `flow`/.route-live
-     stood here until the hero stopped drawing the six-track fan-out and the
-     signal path. They had no consumers left, and three animated classes with
-     nothing to animate is a false statement about the motion scale this file
-     documents. The ballistics rule they encoded is not lost — it is kept
-     in the loud-momentary keyframe above, which check-build.mjs guards.
-
-     The crosspoint's press used to be a `latch` keyframe here. It is now a
-     spring in MixMatrix.astro, because a keyframe restarts from scale(0.88)
-     every time it is retriggered — visible as a stutter when you toggle a row
-     quickly — whereas a spring retargets from wherever the cell currently is.
-     That difference is the entire reason a motion library is on this page.
-     Removed rather than left in place: two animations driving `transform` on
-     the same element is a race, and the one that loses is whichever the
-     browser applies first. */
 }
