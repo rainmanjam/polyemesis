@@ -1363,7 +1363,13 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * reason: route -> [{ contains, why }]; any legacy sentence containing the
  * `contains` text is exempt. */
 const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
-const DROPPED = {};
+const DROPPED = {
+  "/docs": [
+    { contains: "documentation the docs live with the code", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page now has a breadcrumb instead, and the h1 itself is kept." },
+    { contains: "getting it running the routing operating it automating it understanding it", why: "The old sidebar list ran straight into the first section's blurb; the list is now the in-page index and every blurb is kept beside its own heading." },
+    { contains: "the docs are in the same repository as the code, under docs/", why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the sentence is otherwise kept." },
+  ],
+};
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
