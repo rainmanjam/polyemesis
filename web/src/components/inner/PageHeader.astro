@@ -14,24 +14,19 @@ interface Props {
 
 const { crumbs, heading, accent, lede } = Astro.props;
 const [before, word, after] = splitAccent(heading, accent);
+
+/* InnerPage forwards both slots whether or not the page filled them, so
+ * `Astro.slots.has` is always true here. The rendered markup decides instead:
+ * an empty slot leaves no empty `div.acts` or `p.meta` behind. */
+const filled = async (name: string) => (Astro.slots.has(name) ? (await Astro.slots.render(name)).trim() : "");
+const actions = await filled("actions");
+const meta = await filled("meta");
 ---
 
 <header class="ph wrap">
   <Crumbs crumbs={crumbs} />
   <h1>{before}{word && <em class="it">{word}</em>}{after}</h1>
   <p class="lede">{lede}</p>
-  {
-    Astro.slots.has("actions") && (
-      <div class="acts">
-        <slot name="actions" />
-      </div>
-    )
-  }
-  {
-    Astro.slots.has("meta") && (
-      <p class="meta">
-        <slot name="meta" />
-      </p>
-    )
-  }
+  {actions && <div class="acts" set:html={actions} />}
+  {meta && <p class="meta" set:html={meta} />}
 </header>
