@@ -1,0 +1,249 @@
+---
+/* The one template behind the five /vs/<product> pages. Everything that varies
+ * between them is data (src/data/vs/<slug>.mjs, shaped by lib/vs.ts); what is
+ * fixed here is the order of the page: the at-a-glance table with its product
+ * chooser, which one fits, the optional "which one did you mean" block, the
+ * page's own sections, what the other product does well, when to use it
+ * instead, the other comparisons, and the closing band.
+ *
+ * String fields are rendered with `set:html`. lib/vs.ts `validateVs` (run here,
+ * so a bad data file fails the build) allows only <a href>, <code>, <em> and
+ * <strong> in them. */
+import InnerPage from "./InnerPage.astro";
+import CompareTable from "../components/inner/CompareTable.astro";
+import { VS_INDEX } from "../data/vs-index.mjs";
+import { latestRelease, releaseLine } from "../lib/release";
+import { validateVs, type VsData } from "../lib/vs";
+import type { Col } from "../lib/compare-table";
+
+interface Props {
+  data: VsData;
+}
+
+const { data } = Astro.props;
+const problems = validateVs(data);
+if (problems.length) throw new Error(`/vs/${data.slug} data is invalid:\n- ${problems.join("\n- ")}`);
+
+const self = VS_INDEX.find((v) => v.slug === data.slug);
+if (!self) throw new Error(`/vs/${data.slug} is not listed in VS_INDEX`);
+const others = VS_INDEX.filter((v) => v.slug !== data.slug);
+
+const release = releaseLine(latestRelease());
+const crumbs = [
+  { label: "polyemesis", href: "/" },
+  { label: "comparison", href: "/comparison" },
+  { label: self.name },
+];
+
+const cols: Col[] = [{ key: "polyemesis", name: "polyemesis", poly: true }, ...data.products];
+/* A table of the page's own with a column named for a product shares that
+ * product's key, so the chooser hides it there too. */
+const keyByName = new Map(cols.map((c) => [c.name, c.key]));
+const colsFor = (id: string, head: string[]): Col[] =>
+  head.slice(1).map((name, i) => ({
+    key: keyByName.get(name) ?? `${id}-${i}`,
+    name,
+    poly: name === "polyemesis",
+  }));
+
+const index = [
+  { id: "glance", label: "At a glance" },
+  { id: "fits", label: "Which one fits" },
+  ...(data.which ? [{ id: "which", label: data.which.heading }] : []),
+  ...data.sections.map((s) => ({ id: s.id, label: s.heading })),
+  ...(data.merits ? [{ id: "does-well", label: data.merits.heading }] : []),
+  ...(data.useOther ? [{ id: "use-other", label: data.useOther.heading }] : []),
+  { id: "others", label: "Also compared" },
+];
+
+const glanceCaption = `polyemesis compared with ${data.products.map((p) => p.name).join(" and ")}`;
+---
+
+<InnerPage
+  title={data.title}
+  description={data.description}
+  path={`/vs/${data.slug}`}
+  crumbs={crumbs}
+  heading={data.heading}
+  accent={data.accent}
+  lede={data.lede}
+  index={index}
+  band={{
+    heading: data.closing.heading,
+    accent: data.closing.accent,
+    lede: data.closing.lede,
+    secondary: { label: "All five compared", href: "/comparison" },
+  }}
+>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="#glance">See the table</a>
+  <Fragment slot="meta">{release && <>Here: {release} · </>}Claims about other products checked {data.checked}</Fragment>
+
+  <div class="vs">
+    {
+      data.callout && (
+        <div class="panel vs-callout">
+          <p>
+            <strong>{data.callout.lead}</strong> <Fragment set:html={data.callout.body} />
+          </p>
+        </div>
+      )
+    }
+
+    <section id="glance" class="vs-sec">
+      <h2>At a glance</h2>
+      <p class="vs-intro">Every figure about another product is dated {data.checked}.</p>
+      <CompareTable caption={glanceCaption} firstHeader="At a glance" cols={cols} rows={data.glance} chooser legend />
+    </section>
+
+    <section id="fits" class="vs-sec">
+      <h2>Which one fits</h2>
+      <div class="vs-fits">
+        <div>
+          <h3>polyemesis fits when</h3>
+          <ul class="vs-list vs-list-poly">
+            {data.fits.poly.map((t) => <li set:html={t} />)}
+          </ul>
+        </div>
+        <div>
+          <h3>{data.fits.other.heading}</h3>
+          <ul class="vs-list">
+            {data.fits.other.items.map((t) => <li set:html={t} />)}
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    {
+      data.which && (
+        <section id="which" class="vs-sec">
+          <h2>{data.which.heading}</h2>
+          {data.which.intro && <p class="vs-intro" set:html={data.which.intro} />}
+          <div class="vs-cards">
+            {data.which.items.map((w) => (
+              <div class="panel vs-card">
+                <h3>{w.name}</h3>
+                {w.verdict && data.which?.verdict !== "foot" && <p class="vs-verdict">{w.verdict}</p>}
+                {w.id && <p class="vs-id">{w.id}</p>}
+                <p set:html={w.body} />
+                {w.verdict && data.which?.verdict === "foot" && <p class="vs-verdict">{w.verdict}</p>}
+                {w.then && <p class="vs-then" set:html={w.then} />}
+                {w.facts && (
+                  <dl class="vs-facts">
+                    {w.facts.map(([k, v]) => (
+                      <div>
+                        <dt>{k}</dt>
+                        <dd>{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )
+    }
+
+    {
+      data.sections.map((s) => (
+        <section id={s.id} class="vs-sec">
+          <h2>{s.heading}</h2>
+          {s.intro && <p class="vs-intro" set:html={s.intro} />}
+          {s.kind === "prose" && s.paragraphs.map((p) => <p class="vs-p" set:html={p} />)}
+          {s.kind === "table" && (
+            <CompareTable caption={s.caption} firstHeader={s.head[0]} cols={colsFor(s.id, s.head)} rows={s.rows} />
+          )}
+          {s.kind === "steps" && (
+            <div class="vs-cards">
+              {s.columns.map((c) => (
+                <div class="panel vs-card">
+                  <h3>{c.title}</h3>
+                  {c.where && <p class="vs-id">{c.where}</p>}
+                  <ol class="vs-steps">
+                    {c.steps.map((t, i) => (
+                      <li>
+                        <span class="vs-n" aria-hidden="true">{i + 1}</span> <span set:html={t} />
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
+            </div>
+          )}
+          {s.kind === "items" && (
+            <div class="vs-cards">
+              {s.items.map((it) => (
+                <div class="panel vs-card">
+                  <h3>{it.h}</h3>
+                  <p set:html={it.p} />
+                  {it.more && <p class="vs-then" set:html={it.more} />}
+                </div>
+              ))}
+            </div>
+          )}
+          {s.after?.map((p) => <p class="vs-note" set:html={p} />)}
+        </section>
+      ))
+    }
+
+    {
+      data.merits && (
+        <section id="does-well" class="vs-sec">
+          <h2>{data.merits.heading}</h2>
+          {data.merits.note && <p class="vs-intro" set:html={data.merits.note} />}
+          <div class="vs-cards">
+            {data.merits.items.map((m) => (
+              <div class="panel vs-card">
+                <h3>{m.h}</h3>
+                <p set:html={m.p} />
+              </div>
+            ))}
+          </div>
+          {data.merits.after?.map((p) => <p class="vs-note" set:html={p} />)}
+        </section>
+      )
+    }
+
+    {
+      data.useOther && (
+        <section id="use-other" class="vs-sec">
+          <h2>{data.useOther.heading}</h2>
+          <ul class="vs-list vs-list-wide">
+            {data.useOther.items.map((t) => <li set:html={t} />)}
+          </ul>
+          {data.useOther.after?.map((p) => <p class="vs-note" set:html={p} />)}
+          {data.useOther.links && (
+            <p class="vs-links">
+              {data.useOther.links.map((l) => <a href={l.href}>{l.label}</a>)}
+            </p>
+          )}
+        </section>
+      )
+    }
+
+    <section id="others" class="vs-sec">
+      <h2>Also compared</h2>
+      <div class="rows">
+        {
+          others.map((c) => (
+            <a class="vs-row" href={c.href}>
+              <span class="vs-row-name">{c.name}</span>
+              <span class="vs-row-kind">{c.kind}</span>
+              <span class="vs-row-line">{c.line}</span>
+              <span class="more">Read the comparison</span>
+            </a>
+          ))
+        }
+        <a class="vs-row" href="/comparison">
+          <span class="vs-row-name">All five compared</span>
+          <span class="vs-row-kind">The full comparison</span>
+          <span class="vs-row-line"></span>
+          <span class="more">Back to the comparison</span>
+        </a>
+      </div>
+    </section>
+
+    {data.footer && <p class="vs-foot" set:html={data.footer} />}
+  </div>
+</InnerPage>

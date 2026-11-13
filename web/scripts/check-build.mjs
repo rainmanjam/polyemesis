@@ -1374,6 +1374,56 @@ const DROPPED = {
       why: "The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action.",
     },
   ],
+  "/vs/aitum-multistream": [
+    {
+      contains: "polyemesis / comparison / aitum multistream compared aitum multistream picks a mix.",
+      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
+    },
+    {
+      contains: "also compared: obs-multi-rtmp \u00b7 streamelements \u00b7 streamlabs \u00b7 restreamer and restream.io everything this page says about aitum",
+      why: "The old page ran the closing buttons, the Also compared link list and the checked-and-recorded note together as one unpunctuated run. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact), the closing band sits below it, and the other comparisons are the Also compared list above it; every link and button label is still on the page.",
+    },
+  ],
+  "/vs/obs-multi-rtmp": [
+    {
+      contains: "polyemesis / comparison / obs-multi-rtmp compared obs-multi-rtmp uploads once per platform.",
+      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
+    },
+    {
+      contains: "also compared: aitum multistream \u00b7 streamelements \u00b7 streamlabs \u00b7 restreamer and restream.io everything this page says about obs-multi-rtmp",
+      why: "The old page ran the closing buttons, the Also compared link list and the checked-and-recorded note together as one unpunctuated run. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact), the closing band sits below it, and the other comparisons are the Also compared list above it; every link and button label is still on the page.",
+    },
+  ],
+  "/vs/restreamer": [
+    {
+      contains: "polyemesis / comparison / restreamer and restream.io compared two products are called restream.",
+      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
+    },
+    {
+      contains: "install polyemesis all five compared also compared: aitum multistream \u00b7 obs-multi-rtmp \u00b7 streamelements \u00b7 streamlabs",
+      why: "The old page ran the closing buttons and the Also compared link list together as one unpunctuated run. Rebuilt, the buttons are in the closing band, which sits below the Also compared list; every link and button label is still on the page.",
+    },
+  ],
+  "/vs/streamelements": [
+    {
+      contains: "polyemesis / comparison / streamelements compared streamelements multistreaming is se.live.",
+      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
+    },
+    {
+      contains: "also compared: streamlabs \u00b7 restreamer and restream.io everything this page says about streamelements",
+      why: "The old page ran the closing buttons, the Also compared link list and the checked-and-recorded note together as one unpunctuated run. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact), the closing band sits below it, and the other comparisons are the Also compared list above it; every link and button label is still on the page.",
+    },
+  ],
+  "/vs/streamlabs": [
+    {
+      contains: "polyemesis / comparison / streamlabs compared streamlabs multistreams from their servers.",
+      why: "The old page ran its Compared eyebrow straight into the h1, so the frozen sentence is the breadcrumb, that word and the h1. The eyebrow is gone (the breadcrumb trail precedes the h1 and the h1 is on the page word for word).",
+    },
+    {
+      contains: "the three ways to multistream the full comparison how the mix works everything this page says about streamlabs",
+      why: "The old page ran its three footer links (kept as the links under Use Streamlabs, not this) into the checked-and-recorded note. Rebuilt, the note is the last paragraph of the page body (the real sentence is whole, date and citation intact); the three links are still on the page.",
+    },
+  ],
   "/calculator": [
     {
       contains: "bandwidth what a multistream actually costs your connection two different connections",

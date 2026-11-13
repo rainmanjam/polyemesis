@@ -668,6 +668,111 @@
 
   /* ===== vs ===== */
 
+  /* The /vs/<product> pages (layouts/VsPage.astro). One column of sections on
+     one rhythm; the tables are the shared .cmp-wrap, the lists of other
+     comparisons are the shared .rows. */
+  .vs-sec { margin-top: 72px; scroll-margin-top: 88px; }
+  .vs > :first-child { margin-top: 0; }
+  .vs-sec h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  .vs-intro,
+  .vs-p { max-width: 42rem; margin: 12px 0 24px; color: var(--color-muted); line-height: 1.6; }
+  .vs-p { margin-block: 16px 0; }
+  .vs-intro strong,
+  .vs-foot strong { font-family: var(--font-mono); font-size: 0.9em; font-weight: 400; color: var(--color-fg); }
+  .vs-intro a,
+  .vs-p a,
+  .vs-note a,
+  .vs-card a,
+  .vs-list a,
+  .vs-links a { text-decoration: underline; text-underline-offset: 3px; color: var(--color-primary-bright); }
+  .vs-note {
+    max-width: 44rem;
+    margin-top: 20px;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--color-muted);
+  }
+  .vs-callout { max-width: 44rem; padding: 20px 24px; margin-bottom: 8px; line-height: 1.6; color: var(--color-fg); }
+  .vs-callout em { font-style: italic; }
+
+  .vs-fits { display: grid; gap: 32px; grid-template-columns: minmax(0, 1fr); margin-top: 24px; }
+  @media (min-width: 768px) { .vs-fits { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px; } }
+  .vs-fits h3,
+  .vs-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.1875rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--color-fg);
+  }
+  .vs-list { display: grid; gap: 12px; margin-top: 14px; }
+  .vs-list li {
+    position: relative;
+    padding-left: 20px;
+    color: var(--color-muted);
+    line-height: 1.55;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .vs-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.55em;
+    width: 8px;
+    height: 8px;
+    border: 1px solid var(--color-muted);
+    border-radius: 1px;
+  }
+  .vs-list-poly li::before { background: var(--color-fg); border-color: var(--color-fg); }
+  .vs-list-wide { max-width: 44rem; margin-top: 20px; }
+
+  .vs-cards { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); margin-top: 24px; }
+  @media (min-width: 768px) { .vs-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .vs-card { padding: 20px; min-width: 0; color: var(--color-muted); line-height: 1.6; overflow-wrap: break-word; }
+  .vs-card > * + * { margin-top: 12px; }
+  .vs-card .vs-then { padding-top: 12px; border-top: 1px solid var(--color-line); }
+  .vs-verdict,
+  .vs-id { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-muted); overflow-wrap: anywhere; }
+  .vs-verdict { color: var(--color-fg); }
+  .vs-facts { padding-top: 12px; border-top: 1px solid var(--color-line); font-family: var(--font-mono); font-size: 0.8125rem; }
+  .vs-facts > div { display: flex; gap: 12px; padding-block: 3px; }
+  .vs-facts dt { width: 4.5rem; flex: none; color: var(--color-muted); }
+  .vs-facts dd { min-width: 0; color: var(--color-fg); }
+  .vs-steps { display: grid; gap: 12px; }
+  .vs-steps li { display: flex; gap: 12px; min-width: 0; }
+  .vs-n { flex: none; width: 1.25rem; font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-fg); padding-top: 0.2em; }
+
+  .vs-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 20px; }
+
+  .vs-row {
+    display: grid;
+    gap: 4px 24px;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: baseline;
+  }
+  .vs-row-name { font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; color: var(--color-fg); }
+  .vs-row-kind { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-muted); }
+  .vs-row-line { max-width: 40rem; color: var(--color-muted); line-height: 1.55; }
+  .vs-row:hover .vs-row-name { text-decoration: underline; text-underline-offset: 4px; }
+  .vs-row:focus-visible { outline: 2px solid var(--color-primary-bright); outline-offset: 2px; }
+  @media (min-width: 768px) {
+    .vs-row { grid-template-columns: 14rem minmax(0, 1fr) auto; }
+    .vs-row-name { grid-column: 1; grid-row: 1; }
+    .vs-row-kind { grid-column: 1; grid-row: 2; }
+    .vs-row-line { grid-column: 2; grid-row: 1 / span 2; }
+    .vs-row .more { grid-column: 3; grid-row: 1; }
+  }
+
+  .vs-foot { max-width: 44rem; margin-top: 56px; font-size: 0.875rem; line-height: 1.6; color: var(--color-muted); }
+  .vs-foot code { font-family: var(--font-mono); font-size: 0.9em; overflow-wrap: anywhere; }
 
 
 
