@@ -1450,6 +1450,45 @@ const legacyMain = (route) => {
   }
 }
 
+/* DOC TOC MATCHES THE ARTICLE. The "On this page" list of a documentation page
+ * is built from the markdown source (lib/doc-headings.ts) while the ids it links
+ * to are written onto the headings by the pipeline (lib/hast-heading-ids.mjs).
+ * Two readers of one document drift the day a file starts using a construct one
+ * of them skips, so every docs page is held to this: the rail's links equal, in
+ * order, the ids of the article's h2 and h3. An article with fewer than two
+ * such headings has no rail at all. */
+{
+  for (const page of pages.filter((p) => p.startsWith("docs/"))) {
+    const html = readFileSync(join(DIST, page), "utf8");
+    const article = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(html)?.[0] ?? "";
+    const ids = [...article.matchAll(/<h[23]\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]);
+    const rail = /<nav\b[^>]*aria-label="On this page"[^>]*>[\s\S]*?<\/nav>/.exec(
+      html.replace(/<details[\s\S]*?<\/details>/g, ""),
+    )?.[0];
+    const links = rail ? [...rail.matchAll(/<a\s[^>]*href="#([^"]*)"/g)].map((m) => m[1]) : [];
+    if (ids.length < 2 ? rail : JSON.stringify(links) !== JSON.stringify(ids)) {
+      fail.push(
+        `${page}: the "On this page" list does not match the article's h2/h3 ids.\n` +
+          `  list:    ${links.join(", ") || "(none)"}\n  article: ${ids.join(", ") || "(none)"}`,
+      );
+    }
+  }
+}
+
+/* TASK LIST. A `- [ ]` item in the markdown comes out as
+ * <li class="task-list-item"><input type="checkbox" disabled>. Every page's nav
+ * carries its own type="checkbox" (the phone menu toggle), so the page is read
+ * for the task-list item itself: docs/meta-app-review.html is the published
+ * document that has one. The checkbox must be styled by a .doc-prose rule, or
+ * it renders as a browser default. */
+{
+  const html = readFileSync(join(DIST, "docs/meta-app-review.html"), "utf8");
+  if (!/<li class="task-list-item"><input type="checkbox"/.test(html)) {
+    fail.push("docs/meta-app-review.html has no task-list checkbox: the task list is gone or the pipeline changed its markup.");
+  }
+  if (!/\.doc-prose[^{}]*checkbox[^{}]*\{/.test(css)) fail.push("the built CSS has no .doc-prose rule for the task-list checkbox.");
+}
+
 /* SITE FACTS: the numbers the site states about the server.
  *
  * src/data/facts.json is written by the Go test TestWireContract from routing.MaxTracks,
