@@ -910,7 +910,7 @@
 
   /* /comparison. Plain sections down a single column, one rhythm; the tables
      are the shared .cmp-wrap and the lists are the shared .rows. */
-  .cp-sec { margin-top: 72px; scroll-margin-top: 88px; }
+  .cp-sec { margin-top: 72px; }
   .cp-sec h2 {
     font-family: var(--font-display);
     font-weight: 600;
@@ -986,7 +986,7 @@
   /* ===== longform ===== */
 
   /* The four search pages: sections spaced as chapters, items as hairline rows. */
-  .longform section { margin-top: 4.5rem; scroll-margin-top: calc(var(--nav-h) + 24px); }
+  .longform section { margin-top: 4.5rem; }
   .longform > :first-child { margin-top: 0; }
   .longform .eyebrow { margin-bottom: 0.75rem; }
   .longform .eyebrow + h2 { margin-top: 0; }
