@@ -6,6 +6,14 @@
 @layer components {
   /* ===== shell ===== */
 
+  /* Two values every inner page shares, defined once. A section heading is
+     36px from 1024px up and scales down to 28px on a phone; sections sit 72px
+     apart. Docs articles keep their own reading scale. */
+  :root {
+    --h2-section: clamp(1.75rem, 1.44rem + 1.26vw, 2.25rem);
+    --section-gap: 72px;
+  }
+
   /* The page header. Crumbs, one h1 (display face, at most one accent word in
      Instrument Serif), a lede, then the optional actions and meta line. */
   .ph {
@@ -41,6 +49,10 @@
     font-size: 1.1875rem;
     line-height: 1.5;
   }
+  /* The homepage's section lede drops to 17px on a phone; so does this one. */
+  @media (max-width: 767.98px) {
+    .lede { font-size: 1.0625rem; }
+  }
   .ph .acts {
     display: flex;
     flex-wrap: wrap;
@@ -73,10 +85,19 @@
   .crumb a:hover { color: var(--color-fg); }
   /* The separator belongs to the item before it, so a wrapped line never starts with "/". */
   .crumb li:not(:last-child)::after {
-    content: "/";
+    content: "/" / "";
     padding-inline: 8px;
   }
   .crumb [aria-current="page"] { color: var(--color-fg); }
+
+  /* Keyboard focus clears the sticky stack. Anchors keep landing by the global
+     [id] rule (section ids, journey.ts reads it); this is for the controls
+     themselves, so Shift+Tab never scrolls a link under the nav or the phone
+     index strip. Zero specificity: a control's own scroll margin still wins. */
+  :where(.inner-main, [data-doc-column], .docnav, nav.rail)
+    :where(a, button, input, select, textarea, summary, [tabindex]) {
+    scroll-margin-top: var(--anchor-offset);
+  }
 
   /* One focus ring for every inner-page control: the one .btn uses. */
   .crumb a:focus-visible,
@@ -129,7 +150,7 @@
     margin-top: 24px;
   }
   .band .code { align-self: center; min-width: 0; }
-  @media (min-width: 1000px) {
+  @media (min-width: 1024px) {
     .band-in:has(.code) {
       grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
       gap: 64px;
@@ -151,34 +172,6 @@
     background: var(--color-surface);
   }
 
-  /* Long-form reading pages: Plex Sans at 17px, a measure under 80 characters,
-     headings in the display face. */
-  .longform {
-    font-family: var(--font-sans);
-    font-size: 1.0625rem;
-    line-height: 1.65;
-    color: color-mix(in srgb, var(--color-fg) 82%, var(--color-ink));
-    overflow-wrap: break-word;
-  }
-  .longform p,
-  .longform ul,
-  .longform ol { max-width: 39rem; }
-  .longform p,
-  .longform ul,
-  .longform ol { margin-block: 1em; }
-  .longform ul { list-style: disc; padding-left: 1.25rem; }
-  .longform ol { list-style: decimal; padding-left: 1.5rem; }
-  .longform h2,
-  .longform h3 {
-    font-family: var(--font-display);
-    color: var(--color-fg);
-    font-weight: 600;
-    line-height: 1.1;
-    letter-spacing: -0.025em;
-  }
-  .longform > :first-child { margin-top: 0; }
-  .longform h2 { margin-top: 2.5em; font-size: 2rem; }
-  .longform h3 { margin-top: 2em; font-size: 1.375rem; }
   /* Links inside running copy are ink with a quiet underline, as in the docs:
      the site has no blue, and coral is kept for audio and the primary action. */
   .longform a:not([class]),
@@ -221,7 +214,7 @@
     outline-offset: 2px;
   }
 
-  nav.rail { display: none; }
+  :where(.lay, .docgrid) nav.rail { display: none; }
   .idx-hd {
     padding-bottom: 10px;
     border-bottom: 1px solid var(--color-line);
@@ -229,17 +222,17 @@
     font-size: 0.75rem;
     color: var(--color-muted);
   }
-  nav.rail ol { font-family: var(--font-mono); font-size: 0.8125rem; }
-  nav.rail a {
+  :where(.lay, .docgrid) nav.rail ol { font-family: var(--font-mono); font-size: 0.8125rem; }
+  :where(.lay, .docgrid) nav.rail a {
     display: block;
     padding: 9px 0 9px 14px;
     border-left: 1px solid var(--color-line);
     color: var(--color-muted);
   }
-  nav.rail .d3 a { padding-left: 28px; }
-  nav.rail a:hover,
-  nav.rail a[aria-current="true"] { color: var(--color-fg); }
-  nav.rail a[aria-current="true"] { border-left-color: var(--color-fg); }
+  :where(.lay, .docgrid) nav.rail .d3 a { padding-left: 28px; }
+  :where(.lay, .docgrid) nav.rail a:hover,
+  :where(.lay, .docgrid) nav.rail a[aria-current="true"] { color: var(--color-fg); }
+  :where(.lay, .docgrid) nav.rail a[aria-current="true"] { border-left-color: var(--color-fg); }
   /* An index that has nothing to show at this width makes no box at all, so it
      leaves no empty grid item (and no gap) behind. */
   @media (max-width: 1023.98px) {
@@ -248,7 +241,7 @@
   @media (min-width: 1024px) {
     [data-index] { display: block; }
     [data-index][data-variant="phone"] { display: none; }
-    nav.rail {
+    :where(.lay, .docgrid) nav.rail {
       display: block;
       position: sticky;
       top: calc(var(--nav-h) + 24px);
@@ -347,39 +340,44 @@
   }
   /* With two or fewer columns showing there is nothing to scroll to. */
   .cmp-wrap .cmp.narrow { min-width: 0; }
+  /* ... and no scroll fade to hint at it. */
+  .cmp-wrap:has(.narrow)::after { display: none; }
   /* On a phone the pinned label takes a fixed share, so the first answer
      column is on screen beside it. */
   @media (max-width: 48rem) {
     .cmp-wrap .cmp { min-width: 38rem; }
     .cmp-wrap .cmp.narrow { min-width: 0; }
-    .cmp :is(thead th, tbody th):first-child { width: 9.5rem; min-width: 9.5rem; }
+    :where(.cmp-wrap) .cmp :is(thead th, tbody th):first-child { width: 9.5rem; min-width: 9.5rem; }
   }
-  .cmp th,
-  .cmp td {
+  /* The comparison table's own look. Scoped to .cmp-wrap because the docs
+     pipeline puts .cmp on every markdown table too, and those keep the docs
+     rules. :where() keeps the specificity these rules always had. */
+  :where(.cmp-wrap) .cmp th,
+  :where(.cmp-wrap) .cmp td {
     padding: 12px 16px;
     text-align: left;
     vertical-align: top;
     border-bottom: 1px solid var(--color-line);
   }
-  .cmp tbody tr:last-child :is(th, td) { border-bottom: 0; }
-  .cmp thead th {
+  :where(.cmp-wrap) .cmp tbody tr:last-child :is(th, td) { border-bottom: 0; }
+  :where(.cmp-wrap) .cmp thead th {
     font-family: var(--font-mono);
     font-size: 0.8125rem;
     font-weight: 500;
     color: var(--color-muted);
   }
-  .cmp tbody th {
+  :where(.cmp-wrap) .cmp tbody th {
     font-weight: 400;
     color: var(--color-fg);
   }
-  .cmp td { color: var(--color-muted); }
-  .cmp [data-col] { width: 9.5rem; min-width: 9.5rem; }
-  .cmp thead th[data-poly] {
+  :where(.cmp-wrap) .cmp td { color: var(--color-muted); }
+  :where(.cmp-wrap) .cmp [data-col] { width: 9.5rem; min-width: 9.5rem; }
+  :where(.cmp-wrap) .cmp thead th[data-poly] {
     color: var(--color-fg);
     border-top: 2px solid var(--color-accent);
   }
-  .cmp td[data-poly] { color: var(--color-fg); }
-  .cmp [hidden] { display: none; }
+  :where(.cmp-wrap) .cmp td[data-poly] { color: var(--color-fg); }
+  :where(.cmp-wrap) .cmp [hidden] { display: none; }
 
   /* A symbol before a cell's words: a shape, so colour is never the only cue.
      Yes is a filled dot, No an empty ring, not assessed a dashed ring. The
@@ -587,7 +585,7 @@
     font-family: var(--font-display);
     font-weight: 600;
     color: var(--color-fg);
-    scroll-margin-top: 6rem;
+    scroll-margin-top: var(--anchor-offset);
   }
   .doc-prose h2 {
     margin-top: 3rem;
@@ -789,23 +787,26 @@
   }
   .doc-source a:hover { text-decoration-color: var(--color-fg); }
   .doc-source .font-mono { font-size: 0.8125rem; }
+  /* The previous/next cards share .card (8px corners); the site's corners stop at 4. */
+  .doc-foot [data-pager] .card { border-radius: 4px; }
 
 
 
   /* ===== docs-index ===== */
 
-  .docs-start { padding-bottom: 36px; }
-  .docs-more { border-top: 1px solid var(--color-line); padding-top: 22px; }
+  .docs-start { padding-bottom: calc(var(--section-gap) / 2); }
+  .docs-more { border-top: 1px solid var(--color-line); padding-top: calc(var(--section-gap) / 2); }
   .docs-start > h2 {
     font-family: var(--font-display);
-    font-size: 1.5rem;
+    font-size: var(--h2-section);
     font-weight: 600;
-    letter-spacing: -0.02em;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
     margin-bottom: 14px;
   }
   .grp {
     border-top: 1px solid var(--color-line);
-    padding-bottom: 30px;
+    padding-bottom: calc(var(--section-gap) / 2);
   }
   .grp > summary {
     list-style: none;
@@ -814,14 +815,14 @@
     grid-template-columns: 1fr auto;
     gap: 2px 16px;
     align-items: baseline;
-    padding: 22px 0 16px;
+    padding: calc(var(--section-gap) / 2) 0 16px;
   }
   .grp > summary::-webkit-details-marker { display: none; }
   .grp > summary:focus-visible { outline-offset: -2px; }
   .grp h2 {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.625rem, 5.5vw, 2.125rem);
+    font-size: var(--h2-section);
     line-height: 1.05;
     letter-spacing: -0.03em;
   }
@@ -862,6 +863,9 @@
     padding: 12px 0 13px;
     text-decoration: none;
   }
+  /* An entry is navigation, not running copy: the shell's underline for links
+     in running copy does not apply (it outranks .dl a, so this matches it). */
+  .inner-main .dl li > a:not([class]) { text-decoration: none; }
   .dl-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
   .dl-t b { font-weight: 500; font-size: 1rem; line-height: 1.3; }
   .dl-t i { font: normal 0.75rem var(--font-mono); color: var(--color-muted); }
@@ -876,7 +880,7 @@
   .dl a:hover .dl-t b,
   .dl a:focus-visible .dl-t b {
     text-decoration: underline;
-    text-decoration-color: var(--color-accent);
+    text-decoration-color: var(--color-fg);
     text-underline-offset: 4px;
   }
 
@@ -885,18 +889,17 @@
 
   /* ===== install ===== */
 
-  .inst-acts { display: flex; flex-wrap: wrap; gap: 12px; }
-  .inst { scroll-margin-top: var(--anchor-offset); }
-  .inst + .inst { margin-top: 72px; }
-  .inst h2 {
+  :where(.inner-main) .inst-acts { display: flex; flex-wrap: wrap; gap: 12px; }
+  :where(.inner-main) .inst + .inst { margin-top: var(--section-gap); }
+  :where(.inner-main) .inst h2 {
     font-family: var(--font-display);
-    font-size: clamp(1.75rem, 1rem + 2.4vw, 2.5rem);
+    font-size: var(--h2-section);
     font-weight: 600;
     line-height: 1.05;
     letter-spacing: -0.03em;
     text-wrap: balance;
   }
-  .inst-sub {
+  :where(.inner-main) .inst-sub {
     margin: 36px 0 12px;
     font-family: var(--font-mono);
     font-size: 0.8125rem;
@@ -905,26 +908,26 @@
     text-transform: uppercase;
     color: var(--color-muted);
   }
-  .inst code {
+  :where(.inner-main) .inst code {
     font-family: var(--font-mono);
     font-size: 0.875em;
     color: var(--color-fg);
   }
-  .inst-note {
+  :where(.inner-main) .inst-note {
     margin-top: 12px;
     max-width: 44rem;
     font-size: 0.9375rem;
     line-height: 1.55;
     color: var(--color-muted);
   }
-  .inst-note a,
-  .inst-steps p a {
+  :where(.inner-main) .inst-note a,
+  :where(.inner-main) .inst-steps p a {
     color: var(--color-fg);
     text-decoration: underline;
     text-decoration-color: var(--color-line-strong);
     text-underline-offset: 3px;
   }
-  .inst-links {
+  :where(.inner-main) .inst-links {
     display: flex;
     flex-wrap: wrap;
     gap: 12px 28px;
@@ -933,7 +936,7 @@
 
   /* Methods. With script the tablist shows and one panel at a time; without,
      every panel stands under its own h3. */
-  .inst-tabs {
+  :where(.inner-main) .inst-tabs {
     display: flex;
     flex-wrap: wrap;
     margin: 28px 0 20px;
@@ -941,11 +944,11 @@
   }
   /* Four tabs do not fit one phone line; two even rows instead of a ragged wrap. */
   @media (max-width: 639.98px) {
-    .inst-tabs { display: grid; grid-template-columns: 1fr 1fr; }
-    .inst-tabs .inst-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; }
+    :where(.inner-main) .inst-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+    :where(.inner-main) .inst-tabs .inst-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; }
   }
-  .inst-tabs[hidden] { display: none; }
-  .inst-tab {
+  :where(.inner-main) .inst-tabs[hidden] { display: none; }
+  :where(.inner-main) .inst-tab {
     display: inline-flex;
     align-items: baseline;
     gap: 8px;
@@ -959,23 +962,24 @@
     color: var(--color-muted);
     cursor: pointer;
   }
-  .inst-tab i {
+  :where(.inner-main) .inst-tab i {
     font-family: var(--font-mono);
     font-size: 0.75rem;
     font-style: normal;
   }
-  .inst-tab:hover { color: var(--color-fg); }
-  .inst-tab[aria-selected="true"] {
+  :where(.inner-main) .inst-tab:hover { color: var(--color-fg); }
+  :where(.inner-main) .inst-tab[aria-selected="true"] {
     color: var(--color-fg);
+    /* Coral, exactly as the homepage's own install tabs (Install.astro) mark the selected tab. */
     border-bottom-color: var(--color-accent);
   }
-  .inst-tab:focus-visible {
+  :where(.inner-main) .inst-tab:focus-visible {
     outline: 2px solid var(--color-primary-bright);
     outline-offset: -2px;
   }
-  .inst-panel { margin-top: 36px; min-width: 0; }
-  .inst-panel[hidden] { display: none; }
-  .inst-panel-h {
+  :where(.inner-main) .inst-panel { margin-top: 36px; min-width: 0; }
+  :where(.inner-main) .inst-panel[hidden] { display: none; }
+  :where(.inner-main) .inst-panel-h {
     margin-bottom: 12px;
     font-family: var(--font-mono);
     font-size: 0.8125rem;
@@ -984,10 +988,10 @@
     text-transform: uppercase;
     color: var(--color-muted);
   }
-  [data-install][data-ready] .inst-panel { margin-top: 0; }
-  [data-install][data-ready] .inst-panel-h { display: none; }
-  .facts { margin-top: 16px; }
-  .facts > div {
+  :where(.inner-main) [data-install][data-ready] .inst-panel { margin-top: 0; }
+  :where(.inner-main) [data-install][data-ready] .inst-panel-h { display: none; }
+  :where(.inner-main) .facts { margin-top: 16px; }
+  :where(.inner-main) .facts > div {
     display: grid;
     grid-template-columns: 4.5rem minmax(0, 1fr);
     gap: 12px;
@@ -997,8 +1001,8 @@
     line-height: 1.5;
     color: var(--color-muted);
   }
-  .facts > div:last-child { border-bottom: 1px solid var(--color-line); }
-  .facts dt {
+  :where(.inner-main) .facts > div:last-child { border-bottom: 1px solid var(--color-line); }
+  :where(.inner-main) .facts dt {
     padding-top: 3px;
     font-family: var(--font-mono);
     font-size: 0.75rem;
@@ -1007,67 +1011,68 @@
   }
 
   /* Requirements: name, value, note. */
-  .inst-reqs { margin-top: 28px; }
-  .inst-req {
+  :where(.inner-main) .inst-reqs { margin-top: 28px; }
+  :where(.inner-main) .inst-req {
     display: grid;
     gap: 4px 24px;
   }
-  .inst-req h3 { font-weight: 600; color: var(--color-fg); }
-  .inst-req .v { color: var(--color-fg); }
-  .inst-req .n { font-size: 0.9375rem; line-height: 1.5; color: var(--color-muted); }
+  :where(.inner-main) .inst-req h3 { font-weight: 600; color: var(--color-fg); }
+  :where(.inner-main) .inst-req .v { color: var(--color-fg); }
+  :where(.inner-main) .inst-req .n { font-size: 0.9375rem; line-height: 1.5; color: var(--color-muted); }
   @media (min-width: 900px) {
-    .inst-req { grid-template-columns: 11rem minmax(0, 14rem) minmax(0, 1fr); }
+    :where(.inner-main) .inst-req { grid-template-columns: 11rem minmax(0, 14rem) minmax(0, 1fr); }
   }
-  .inst-ports th[scope="row"] { font-family: var(--font-mono); }
+  :where(.inner-main) .inst-ports th[scope="row"] { font-family: var(--font-mono); }
   /* Phone: tighten the pinned Port column and give the text columns room, so
      "What it is" sits beside Port and "When" wraps at a readable width. */
   @media (max-width: 48rem) {
-    .cmp.inst-ports { min-width: 34rem; }
-    .cmp.inst-ports :is(thead th, tbody th):first-child { width: 4.5rem; min-width: 4.5rem; }
-    .inst-ports th,
-    .inst-ports td { padding-inline: 10px; }
-    .inst-ports td:nth-child(2) { width: 3.5rem; }
-    .inst-ports td:nth-child(3) { width: 8rem; }
-    .inst-ports td:nth-child(4) { min-width: 14rem; }
+    :where(.inner-main) .cmp.inst-ports { min-width: 34rem; }
+    :where(.inner-main) .cmp.inst-ports :is(thead th,
+  :where(.inner-main) tbody th):first-child { width: 4.5rem; min-width: 4.5rem; }
+    :where(.inner-main) .inst-ports th,
+  :where(.inner-main) .inst-ports td { padding-inline: 10px; }
+    :where(.inner-main) .inst-ports td:nth-child(2) { width: 3.5rem; }
+    :where(.inner-main) .inst-ports td:nth-child(3) { width: 8rem; }
+    :where(.inner-main) .inst-ports td:nth-child(4) { min-width: 14rem; }
   }
-  .inst-ports td:nth-child(2) { font-family: var(--font-mono); font-size: 0.875rem; }
+  :where(.inner-main) .inst-ports td:nth-child(2) { font-family: var(--font-mono); font-size: 0.875rem; }
 
   /* The first stream: a real sequence, numbered. */
-  .inst-steps {
+  :where(.inner-main) .inst-steps {
     list-style: none;
     margin: 32px 0 0;
     padding: 0;
     counter-reset: inst;
   }
-  .inst-steps > li {
+  :where(.inner-main) .inst-steps > li {
     display: grid;
     grid-template-columns: 2rem minmax(0, 1fr);
     padding: 24px 0;
     border-top: 1px solid var(--color-line);
     counter-increment: inst;
   }
-  .inst-steps > li:last-child { border-bottom: 1px solid var(--color-line); }
-  .inst-steps > li::before {
+  :where(.inner-main) .inst-steps > li:last-child { border-bottom: 1px solid var(--color-line); }
+  :where(.inner-main) .inst-steps > li::before {
     content: counter(inst);
     grid-row: 1 / span 6;
     padding-top: 3px;
     font-family: var(--font-mono);
     font-size: 0.875rem;
-    color: var(--color-accent);
+    color: var(--color-fg);
   }
-  .inst-steps > li > * { grid-column: 2; min-width: 0; }
-  .inst-steps h3 { font-weight: 600; color: var(--color-fg); }
-  .inst-steps li > p:first-of-type {
+  :where(.inner-main) .inst-steps > li > * { grid-column: 2; min-width: 0; }
+  :where(.inner-main) .inst-steps h3 { font-weight: 600; color: var(--color-fg); }
+  :where(.inner-main) .inst-steps li > p:first-of-type {
     margin-top: 6px;
     max-width: 44rem;
     font-size: 0.9375rem;
     line-height: 1.55;
     color: var(--color-muted);
   }
-  .inst-steps .code,
-  .inst-steps .frame { margin-top: 16px; }
+  :where(.inner-main) .inst-steps .code,
+  :where(.inner-main) .inst-steps .frame { margin-top: 16px; }
 
-  .inst-seen {
+  :where(.inner-main) .inst-seen {
     list-style: disc;
     margin: 0 0 28px;
     padding-left: 1.25rem;
@@ -1076,36 +1081,39 @@
     line-height: 1.55;
     color: var(--color-muted);
   }
-  .inst-seen li + li { margin-top: 8px; }
+  :where(.inner-main) .inst-seen li + li { margin-top: 8px; }
 
   /* Problems and upkeep: a heading, a sentence, a link. */
-  .inst-prob {
+  :where(.inner-main) .inst-prob {
     display: grid;
     gap: 6px;
     justify-items: start;
   }
-  .inst-prob h3,
-  .inst-prob h4 { font-weight: 600; color: var(--color-fg); }
-  .inst-prob p {
+  :where(.inner-main) .inst-prob h3,
+  :where(.inner-main) .inst-prob h4 { font-weight: 600; color: var(--color-fg); }
+  :where(.inner-main) .inst-prob p {
     max-width: 44rem;
     font-size: 0.9375rem;
     line-height: 1.55;
     color: var(--color-muted);
   }
 
-  .inst-next { margin-top: 28px; }
-  .inst-next a {
+  :where(.inner-main) .inst-next { margin-top: 28px; }
+  :where(.inner-main) .inst-next a {
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
     gap: 4px 24px;
     color: var(--color-fg);
   }
-  .inst-next a b { font-weight: 500; }
-  .inst-next a span { font-size: 0.9375rem; color: var(--color-muted); }
-  .inst-next a:hover b,
-  .inst-next a:focus-visible b { color: var(--color-accent); }
-  .inst-next a:focus-visible {
+  :where(.inner-main) .inst-next a b { font-weight: 500; }
+  :where(.inner-main) .inst-next a span { font-size: 0.9375rem; color: var(--color-muted); }
+  :where(.inner-main) .inst-next a:hover b,
+  :where(.inner-main) .inst-next a:focus-visible b {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  :where(.inner-main) .inst-next a:focus-visible {
     outline: 2px solid var(--color-primary-bright);
     outline-offset: 2px;
   }
@@ -1116,13 +1124,13 @@
   /* ===== features ===== */
 
   /* Sections: one rhythm for all seven, each with its own interior layout. */
-  .fe { padding-block: 56px; border-top: 1px solid var(--color-line); }
+  .fe { padding-block: calc(var(--section-gap) / 2); border-top: 1px solid var(--color-line); }
   .fe:first-child { border-top: 0; padding-top: 8px; }
   .fe h2 {
     margin-top: 12px;
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.875rem, 3.6vw, 2.5rem);
+    font-size: var(--h2-section);
     line-height: 1.05;
     letter-spacing: -0.03em;
     text-wrap: balance;
@@ -1234,7 +1242,7 @@
   .fx-dest b { font-weight: 500; color: var(--color-fg); }
   .fx-dest li > span { display: inline-flex; align-items: center; color: var(--color-muted); }
   .fx-log { display: flex; flex-direction: column; gap: 4px; color: var(--color-muted); }
-  @media (max-width: 639px) {
+  @media (max-width: 639.98px) {
     .fx-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .fx-row { grid-template-columns: 1fr auto; }
     .fx-bar { display: none; }
@@ -1283,11 +1291,11 @@
 
   /* /comparison. Plain sections down a single column, one rhythm; the tables
      are the shared .cmp-wrap and the lists are the shared .rows. */
-  .cp-sec { margin-top: 72px; }
+  .cp-sec { margin-top: var(--section-gap); }
   .cp-sec h2 {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-size: var(--h2-section);
     line-height: 1.1;
     letter-spacing: -0.025em;
     text-wrap: balance;
@@ -1295,17 +1303,17 @@
   .cp-intro,
   .cp-after { max-width: 42rem; margin: 12px 0 24px; color: var(--color-muted); line-height: 1.6; }
   .cp-after { margin-bottom: 0; margin-top: 24px; }
-  .cp-note {
+  :where(.inner-main) .cp-note {
     max-width: 44rem;
     margin-top: 16px;
     font-size: 0.9375rem;
     line-height: 1.6;
     color: var(--color-muted);
   }
-  .cp-note .chip { margin-right: 8px; vertical-align: middle; font-size: 0.75rem; }
-  .cp-note a,
+  :where(.inner-main) .cp-note .chip { margin-right: 8px; vertical-align: middle; font-size: 0.75rem; }
+  :where(.inner-main) .cp-note a,
   .cp-loss a { text-decoration: underline; text-underline-offset: 3px; }
-  .cp-note a:hover,
+  :where(.inner-main) .cp-note a:hover,
   .cp-loss a:hover { color: var(--color-fg); }
   .cp-more { margin-top: 20px; }
 
@@ -1356,12 +1364,12 @@
   /* The /vs/<product> pages (layouts/VsPage.astro). One column of sections on
      one rhythm; the tables are the shared .cmp-wrap, the lists of other
      comparisons are the shared .rows. */
-  .vs-sec { margin-top: 72px; }
+  .vs-sec { margin-top: var(--section-gap); }
   .vs > :first-child { margin-top: 0; }
   .vs-sec h2 {
     font-family: var(--font-display);
     font-weight: 600;
-    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-size: var(--h2-section);
     line-height: 1.1;
     letter-spacing: -0.025em;
     text-wrap: balance;
@@ -1464,8 +1472,33 @@
 
   /* ===== longform ===== */
 
+  /* Long-form reading pages: Plex Sans at 17px, a measure under 80 characters,
+     headings in the display face. */
+  .longform {
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+    color: color-mix(in srgb, var(--color-fg) 82%, var(--color-ink));
+    overflow-wrap: break-word;
+  }
+  /* Element defaults for running copy, at zero specificity so any class in the
+     long-form area (.lf-steps, .lf-links, .lf-label, .lede ...) wins without a
+     fight. */
+  :where(.longform) :where(p, ul, ol) { max-width: 39rem; margin-block: 1em; }
+  :where(.longform) :where(ul) { list-style: disc; padding-left: 1.25rem; }
+  :where(.longform) :where(ol) { list-style: decimal; padding-left: 1.5rem; }
+  .longform h2,
+  .longform h3 {
+    font-family: var(--font-display);
+    color: var(--color-fg);
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+  }
+  .longform h2 { margin-top: 2.5em; font-size: var(--h2-section); }
+  .longform h3 { margin-top: 2em; font-size: 1.375rem; }
   /* The four search pages: sections spaced as chapters, items as hairline rows. */
-  .longform section { margin-top: 4.5rem; }
+  .longform section { margin-top: var(--section-gap); }
   .longform > :first-child { margin-top: 0; }
   .longform .eyebrow { margin-bottom: 0.75rem; }
   .longform .eyebrow + h2 { margin-top: 0; }

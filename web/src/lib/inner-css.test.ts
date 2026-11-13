@@ -45,3 +45,27 @@ describe("inner.css docs article rules", () => {
     expect(css).not.toContain(".reveal");
   });
 });
+
+describe("inner.css collisions between areas", () => {
+  it("defines the section heading size and the section gap once", () => {
+    expect(css.match(/--h2-section:/g)).toHaveLength(1);
+    expect(css.match(/--section-gap:/g)).toHaveLength(1);
+    expect(css).not.toMatch(/\.(fe|inst|cp-sec|vs-sec) h2 \{[^}]*font-size: clamp/);
+  });
+  it("scopes the comparison table's look to .cmp-wrap, so docs tables keep the docs rules", () => {
+    expect(css).not.toMatch(/^\s*\.cmp (td|th|thead|tbody|\[)/m);
+    expect(css).toContain(":where(.cmp-wrap) .cmp td { color: var(--color-muted); }");
+  });
+  it("writes the long-form element defaults at zero specificity, so any class wins", () => {
+    expect(css).toContain(":where(.longform) :where(p, ul, ol)");
+    expect(css).not.toMatch(/^\s*\.longform (p|ul|ol)\b/m);
+  });
+  it("gives focusable controls the anchor offset as a scroll margin", () => {
+    expect(css).toMatch(/:where\(\.inner-main, \[data-doc-column\], \.docnav, nav\.rail\)\s+:where\(a, button, input, select, textarea, summary, \[tabindex\]\) \{\s+scroll-margin-top: var\(--anchor-offset\)/);
+  });
+  it("uses ink, never coral, for the /docs entry hover and the /download steps and next links", () => {
+    expect(ruleFor(".dl a:hover .dl-t b")).toContain("var(--color-fg)");
+    expect(ruleFor(":where(.inner-main) .inst-steps > li::before")).toContain("var(--color-fg)");
+    expect(ruleFor(":where(.inner-main) .inst-next a:hover b")).not.toContain("accent");
+  });
+});
