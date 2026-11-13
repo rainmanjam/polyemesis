@@ -9,6 +9,7 @@ import { PUBLISHED } from "./src/data/docs.mjs";
 import { mdastDocLinks } from "./src/lib/mdast-doc-links.mjs";
 import { hastCodeBlock } from "./src/lib/hast-code-block.mjs";
 import { hastDocTables } from "./src/lib/hast-doc-tables.mjs";
+import { hastHeadingIds } from "./src/lib/hast-heading-ids.mjs";
 import { hastMermaid } from "./src/lib/hast-mermaid.mjs";
 
 /* lastmod, taken from git rather than from the clock.
@@ -148,7 +149,9 @@ export default defineConfig({
       // hastMermaid first: it turns a ```mermaid fence into a <div> before
       // hastCodeBlock could wrap it. hastCodeBlock also declines the node on its
       // own, so this order is a convenience rather than a dependency.
-      hastPlugins: [hastMermaid, hastCodeBlock, hastDocTables],
+      // hastHeadingIds is a factory (one slugger per document); it changes the
+      // content cache's output like any plugin here, see the note above.
+      hastPlugins: [hastMermaid, hastCodeBlock, hastDocTables, hastHeadingIds],
     }),
   },
   integrations: [
