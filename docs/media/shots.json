@@ -74,7 +74,10 @@
         "web/src/data/install-page.mjs"
       ],
       "exception": null,
-      "allowFailedWords": []
+      "allowFailedWords": [
+        "degraded"
+      ],
+      "caption": "The failover card's \"Leave a degraded link\" switch is a static setting label; no source is in a degraded state."
     },
     {
       "file": "06-renditions.png",
@@ -104,7 +107,7 @@
     },
     {
       "file": "08-mix-matrix.png",
-      "scene": "sports",
+      "scene": "full",
       "test": "routing mix matrix — channel-level control",
       "screen": "/routing",
       "site": false,
@@ -198,7 +201,10 @@
       "site": false,
       "usedBy": [],
       "exception": null,
-      "allowFailedWords": []
+      "allowFailedWords": [
+        "degraded"
+      ],
+      "caption": "The ingest tab's note \"Degraded-link thresholds are set for each programme on Sources\" is static help text."
     },
     {
       "file": "17-settings-full.png",
@@ -244,7 +250,10 @@
       "site": false,
       "usedBy": [],
       "exception": null,
-      "allowFailedWords": []
+      "allowFailedWords": [
+        "fail"
+      ],
+      "caption": "The Model checker card's fallback help text (\"Asked about a message only when the primary times out, fails ... A message passes unchecked only when both fail.\") is static copy; no checker is failing."
     },
     {
       "file": "21-platforms.png",
@@ -254,7 +263,10 @@
       "site": false,
       "usedBy": [],
       "exception": null,
-      "allowFailedWords": []
+      "allowFailedWords": [
+        "reconnecting"
+      ],
+      "caption": "The Google setup note (\"Read this first: an app left in Testing disconnects itself every 7 days ... reconnecting resets the same clock\") is static help text; nothing is reconnecting."
     },
     {
       "file": "22-platforms-connected.png",

@@ -143,7 +143,16 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // renders perfectly and demonstrates nothing.
   await expect(page.getByText("no signal")).toHaveCount(0, { timeout: 60_000 });
   await settle(page);
+  // The sports scene has six tracks, and at 900 px the sixth row (Crowd, ticked
+  // for every destination) falls below the frame. A taller window shows all six
+  // rows, the ticks and the output after routing.
+  const routingViewport = page.viewportSize()!;
+  if (SCENE === "sports") {
+    await page.setViewportSize({ width: routingViewport.width, height: 1100 });
+    await settle(page, 600);
+  }
   await snap(page, "02-routing.png", { fullPage: false });
+  if (SCENE === "sports") await page.setViewportSize(routingViewport);
 
   // The compiled filtergraph, which is the claim this product makes about
   // being inspectable. Worth its own frame rather than being cropped out.
@@ -152,7 +161,11 @@ test("routing — the thing nothing else does", async ({ page }) => {
   await page.locator('[data-testid="routing-advanced"] summary').first().click().catch(() => {});
   await page.getByRole("button", { name: "Show FFmpeg graph" }).first().click().catch(() => {});
   const graph = page.locator("text=/pan=stereo/").first();
-  if (await graph.isVisible().catch(() => false)) {
+  const graphShown = await graph.isVisible().catch(() => false);
+  // The manifest expects this file from the sports scene, so its absence there
+  // is a failure and not a skipped frame.
+  if (SCENE === "sports") expect(graphShown, "the FFmpeg graph (pan=stereo) is not on the page").toBe(true);
+  if (graphShown) {
     await graph.scrollIntoViewIfNeeded();
     await settle(page, 400);
     await snap(page, "03-routing-filtergraph.png");
@@ -293,7 +306,15 @@ test("meters — loudness measured after routing", async ({ page }) => {
   ).toHaveCount(0, { timeout: 60_000 });
 
   await settle(page, 800);
+  // Five destinations' compliance rows, not two and a half: taller in the
+  // sports scene so every "PASS" row is in the frame.
+  const metersViewport = page.viewportSize()!;
+  if (SCENE === "sports") {
+    await page.setViewportSize({ width: metersViewport.width, height: 1300 });
+    await settle(page, 600);
+  }
   await snap(page, "04-meters.png");
+  if (SCENE === "sports") await page.setViewportSize(metersViewport);
 });
 
 test("sources — one port, many programmes", async ({ page }) => {
@@ -309,7 +330,13 @@ test("sources — one port, many programmes", async ({ page }) => {
   // one of those per source whatever state it is in, whereas the URL rows
   // themselves are one per protocol and would reach two on a single source.
   const perSource = page.locator('[data-tour="source-publish-urls"]');
-  await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
+  // The sports scene is the opposite claim: one match feed, one source. Exactly
+  // one is expected there, so a stray second source is a failure too.
+  if (SCENE === "sports") {
+    await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBe(1);
+  } else {
+    await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
+  }
   // RE-AIMED. Each programme's card now carries its caption track and caption
   // words above the ingest fields, so a card is about a thousand pixels tall
   // and the 900px frame at the top of the page held the first programme's
@@ -319,16 +346,25 @@ test("sources — one port, many programmes", async ({ page }) => {
   // whole card to the third programme's header: three programmes, two of their
   // per-programme publish URLs, one port.
   const fullViewport = page.viewportSize()!;
-  await page.setViewportSize({ width: fullViewport.width, height: 1500 });
-  const names = page.locator("[data-slot=card-title]");
-  await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
-  await topOfFrame(page, page.getByText("Signal detected").first());
-  // Clear of the sticky header, which would otherwise sit on the line framed.
-  await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
-  await settle(page);
-  // The third programme's name has to be in the frame, or this is two.
-  const third = (await names.nth(2).boundingBox())!;
-  expect(third.y + third.height, "the third programme is below the frame").toBeLessThan(1500);
+  if (SCENE === "sports") {
+    // One source: from the top of its card (name, DEFAULT, RUNNING) down through
+    // the ingest, "Signal detected", the publish URL and the PUBLISHING line.
+    await page.setViewportSize({ width: fullViewport.width, height: 1500 });
+    await expect(page.getByText("Signal detected").first()).toBeVisible({ timeout: 30_000 });
+    await page.locator("main").evaluate((m) => m.scrollTo(0, 0));
+    await settle(page);
+  } else {
+    await page.setViewportSize({ width: fullViewport.width, height: 1500 });
+    const names = page.locator("[data-slot=card-title]");
+    await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
+    await topOfFrame(page, page.getByText("Signal detected").first());
+    // Clear of the sticky header, which would otherwise sit on the line framed.
+    await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
+    await settle(page);
+    // The third programme's name has to be in the frame, or this is two.
+    const third = (await names.nth(2).boundingBox())!;
+    expect(third.y + third.height, "the third programme is below the frame").toBeLessThan(1500);
+  }
   // Masked last, right before the shutter: the resize and the scroll above
   // re-render the cards, and a re-render can put a token back.
   await maskPublishTokens(page);
@@ -587,11 +623,10 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
     const rows = (await res.json()) as { destination?: { name?: string; profile?: { mode?: string } } }[];
     return rows.find((r) => r.destination?.profile?.mode === "matrix")?.destination?.name ?? null;
   });
-  if (!matrixName) {
-    // Nothing to photograph, and saying so beats writing a picture of an empty
-    // grid that looks exactly like the feature not working.
-    test.skip(true, "no destination on this install uses the mix matrix");
-  }
+  // The manifest expects 08-mix-matrix.png from the full scene, which seeds a
+  // matrix destination. A missing one is a failure, never a quiet skip, and
+  // never a picture of an empty grid that looks like the feature not working.
+  expect(matrixName, "no destination on this install uses the mix matrix").not.toBeNull();
   await page.getByText(matrixName!.slice(0, 12), { exact: false }).first().click();
   await settle(page, 500);
 
@@ -815,7 +850,11 @@ test("automod — the rules, and the matrix that grants them", async ({ page }) 
   // Clear of the tab's sticky save bar, which otherwise covers the titles.
   await page.locator("main").evaluate((m) => m.scrollBy(0, -88));
   await settle(page);
-  await expect(page.getByText("Pattern rules", { exact: true }).first()).toBeInViewport();
+  // The frame is the Model checker beside the Automatic moderation card, whose
+  // platform rows are the matrix. "Pattern rules" is not asserted: it sits a
+  // screen above, in the card pair before this one, and the demo seed writes no
+  // rules, so it reads "No rules yet".
+  await expect(page.locator("[data-slot=card-title]", { hasText: "Automatic moderation" }).first()).toBeInViewport();
   await snap(page, "20-automod.png");
 });
 
