@@ -677,4 +677,12 @@
 
 
   /* ===== calculator ===== */
+  /* The pressed mode button is ink on the foreground tone, never coral:
+     coral is audio and the primary action. */
+  .mode-btn[aria-pressed="true"] {
+    background: var(--color-fg);
+    border-color: var(--color-fg);
+    color: var(--color-ink);
+    font-weight: 600;
+  }
 }

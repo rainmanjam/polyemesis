@@ -73,6 +73,8 @@ const REQUIRED = {
   "/docs/platforms": 1,
   "/docs/configuration": 1,
   "/docs/connecting-platforms": 1,
+  "/calculator": 0,
+  "/404": 0,
 };
 
 /* How many cards the FIRST row of each variant holds at a viewport width --

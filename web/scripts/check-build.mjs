@@ -1374,6 +1374,12 @@ const DROPPED = {
       why: "The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action.",
     },
   ],
+  "/calculator": [
+    {
+      contains: "bandwidth what a multistream actually costs your connection two different connections",
+      why: "The old page ran its 'Bandwidth' eyebrow straight into the h1 and lede, so the frozen sentence begins with that word. The eyebrow is gone (the breadcrumb trail precedes the h1 now); the lede itself is on the page word for word.",
+    },
+  ],
 };
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
@@ -1413,13 +1419,17 @@ const legacyMain = (route) => {
  * must still be an h1 or h2 of the rebuilt page (tags stripped, whitespace
  * collapsed, same case-insensitive typography as the copy check). */
 {
+  // Compared with every space removed: an accent word is an inline element, and
+  // stripping its tags leaves a space before the punctuation that follows it
+  // ("the code</em>." reads "the code ."), which is the same heading.
+  const key = (s) => norm(s).replace(/\s+/g, "");
   const headings = (html, tag) =>
-    (html.match(new RegExp(`<${tag}[\\s\\S]*?</${tag}>`, "g")) || []).map(norm);
+    (html.match(new RegExp(`<${tag}[\\s\\S]*?</${tag}>`, "g")) || []).map(key);
   for (const [route, legacy] of Object.entries(LEGACY)) {
     const main = legacyMain(route);
     const have = new Set([...headings(main, "h1"), ...headings(main, "h2")]);
     for (const wanted of [legacy.h1, ...legacy.h2]) {
-      if (!have.has(norm(wanted))) fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
+      if (!have.has(key(wanted))) fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
     }
   }
 }
