@@ -19,14 +19,43 @@ export interface SecretEntry {
  *  match innocent text ("1234567" inside a timestamp). */
 const MIN_SECRET_LENGTH = 8;
 
-/** Kinds (never values) of the secrets whose value appears in the text. Values under 8 characters are ignored. */
+/** Whitespace and case do not change whether a value is legible: a long token
+ *  wraps across lines, a stream key is shown upper-cased. */
+const squash = (t: string) => t.replace(/\s+/g, "").toLowerCase();
+
+function percentDecoded(t: string): string {
+  try {
+    return decodeURIComponent(t);
+  } catch {
+    return t; // a stray % in ordinary text
+  }
+}
+
+/** Kinds (never values) of the secrets whose value appears in the text, once
+ *  whitespace and case are ignored, in the text as shown and as percent-decoded
+ *  (a URL on screen). Values under 8 characters are ignored. A MASKED value
+ *  (dots and the last four characters) does not contain the value, so it is
+ *  not a leak. */
 export function findLegibleSecrets(visibleText: string, secrets: SecretEntry[]): string[] {
+  const shown = squash(visibleText);
+  const decoded = squash(percentDecoded(visibleText));
   const kinds: string[] = [];
   for (const s of secrets) {
-    if (s.value.length < MIN_SECRET_LENGTH || !visibleText.includes(s.value)) continue;
+    const v = squash(s.value);
+    if (v.length < MIN_SECRET_LENGTH || !(shown.includes(v) || decoded.includes(v))) continue;
     if (!kinds.includes(s.kind)) kinds.push(s.kind);
   }
   return kinds;
+}
+
+/** The secrets named by SHOT_SECRETS_FILE. Required in every scene: a scene
+ *  with a password on its sign-in page and no list of what to look for would
+ *  pass every shot. A run with truly nothing to check says `none`. */
+export function secretsFromEnv(spec: string | undefined, read: (path: string) => string): SecretEntry[] {
+  if (!spec) {
+    throw new Error("SHOT_SECRETS_FILE is required (set it to none when this run has nothing to check)");
+  }
+  return spec === "none" ? [] : parseSecretsFile(read(spec));
 }
 
 /** Parses the rig's secrets file: one `kind<TAB>value` per line, blank lines
@@ -47,67 +76,43 @@ export function parseSecretsFile(text: string): SecretEntry[] {
  *
  * The console's `--down` colour is close to the site's accent, and a failed
  * card in a hero shot reads as design. So the capture refuses a frame whose
- * visible text SAYS failed. Two classes of word, because the console prints
- * them differently:
+ * visible text SAYS a bad state: the words the console prints as badges and
+ * verdicts (state.* , chatpage.stateDegraded, rend.signalError, the OBS bridge
+ * states), matched as whole words, any case, in a badge OR a sentence -- an
+ * error banner is a sentence.
  *
- *  - STATE words (failed, fail, crashed, unreachable) are a badge or a verdict
- *    pill: present at all means a failure on screen.
- *  - COUNT words (errors, stopped) are also plain labels ("Errors" filter,
- *    "Stopped" in a legend), so only a non-zero count beside them is a failure.
+ * Only zero counts are stripped ("0 failed", "Errors: 0", a tile "Failed" over
+ * "0"; a zero on the next line only counts when it is alone on that line, so
+ * the previous tile's zero cannot hide the next tile's failure). Failover is a
+ * feature name, not a state: word boundaries keep it out, as they do
+ * "download" and "shutdown".
  *
- * Neither is matched inside prose. A settings page explains "failed attempts"
- * and "Failing step" in sentences; a line is prose when it ends in a full stop
- * or runs past MAX_LABEL_WORDS words. Failover is a feature name, not a state:
- * word boundaries keep it out ("Failover" does not contain the word "fail").
- * Zero counts ("0 failed", "Errors: 0", a tile "Failed" over "0") are removed
- * first; a zero on the next line only counts when it is alone on that line, so
- * the previous tile's zero cannot hide the next tile's failure. */
-const MAX_LABEL_WORDS = 10;
-const STATE_WORD_LIST = "failed|fail|crashed|unreachable";
-const COUNT_WORD_LIST = "errors?|stopped";
-const ALL_WORDS = `${STATE_WORD_LIST}|${COUNT_WORD_LIST}`;
+ * Where a screen legitimately carries one of these words as STATIC copy (a
+ * column header "Errors", help text, a viewer readout of a demo account), that
+ * shot's manifest entry lists the word in allowFailedWords with a caption. */
+const WORD_LIST = "failed|fail|crashed|unreachable|offline|degraded|reconnecting|errors?|stopped";
 
-const ZERO_BEFORE = new RegExp(String.raw`\b0[ \t]+(?:${ALL_WORDS})\b`, "gi");
+const ZERO_BEFORE = new RegExp(String.raw`\b0[ \t]+(?:${WORD_LIST})\b`, "gi");
 const ZERO_AFTER = new RegExp(
-  String.raw`\b(?:${ALL_WORDS})\b[ \t]*[:=]?[ \t]*\n?[ \t]*0(?![\d.])(?=[ \t]*(?:$|\n|[·|,;)]))`,
+  String.raw`\b(?:${WORD_LIST})\b[ \t]*[:=]?[ \t]*\n?[ \t]*0(?![\d.])(?=[ \t]*(?:$|\n|[·|,;)]))`,
   "gim",
 );
-const STATE_RE = new RegExp(String.raw`\b(${STATE_WORD_LIST})\b`, "gi");
-const COUNT_BEFORE = new RegExp(String.raw`\b(\d+(?:\.\d+)?)[ \t]+(${COUNT_WORD_LIST})\b`, "gi");
-const COUNT_AFTER = new RegExp(String.raw`\b(${COUNT_WORD_LIST})\b[ \t]*[:=]?[ \t]*\n?[ \t]*(\d+(?:\.\d+)?)`, "gi");
+const WORD_RE = new RegExp(String.raw`\b(${WORD_LIST})\b`, "gi");
 
 function normalise(word: string): string {
   const w = word.toLowerCase();
   return w === "error" ? "errors" : w;
 }
 
-/** True when the match sits on a short line that is not a sentence. */
-function isLabelLine(text: string, index: number): boolean {
-  const start = text.lastIndexOf("\n", index) + 1;
-  const nl = text.indexOf("\n", index);
-  const line = text.slice(start, nl === -1 ? text.length : nl);
-  if (/[.!?]\s*$/.test(line)) return false;
-  const words = line.split(/\s+/).filter((w) => w !== "" && w !== "·" && w !== "|");
-  return words.length <= MAX_LABEL_WORDS;
-}
-
 /** Failed-state words on screen, after removing zero counts ("0 failed", "0 stopped", "errors: 0").
- *  `allow` names words the shot's manifest entry declares as its subject. */
+ *  `allow` names words the shot's manifest entry declares as static copy. */
 export function failedStateWords(visibleText: string, allow: string[] = []): string[] {
   const text = visibleText.replace(ZERO_BEFORE, "").replace(ZERO_AFTER, "");
-  const hits: { index: number; word: string }[] = [];
-  for (const m of text.matchAll(STATE_RE)) hits.push({ index: m.index, word: normalise(m[1]) });
-  for (const m of text.matchAll(COUNT_BEFORE)) {
-    if (Number(m[1]) > 0) hits.push({ index: m.index, word: normalise(m[2]) });
-  }
-  for (const m of text.matchAll(COUNT_AFTER)) {
-    if (Number(m[2]) > 0) hits.push({ index: m.index, word: normalise(m[1]) });
-  }
   const allowed = new Set(allow.map(normalise));
   const words: string[] = [];
-  for (const h of hits.sort((a, b) => a.index - b.index)) {
-    if (allowed.has(h.word) || words.includes(h.word) || !isLabelLine(text, h.index)) continue;
-    words.push(h.word);
+  for (const m of text.matchAll(WORD_RE)) {
+    const w = normalise(m[1]);
+    if (!allowed.has(w) && !words.includes(w)) words.push(w);
   }
   return words;
 }
@@ -124,12 +129,12 @@ export interface DestProgress {
 }
 
 /** One destination's live-mix loudness report, as GET /api/v1/loudness returns
- *  it (reports[].integrated, .verdict, .destination). `name` is optional so a
- *  caller that has only the two fields still works; it only improves the message. */
+ *  it (reports[].integrated, .verdict, .destination as `name`). Rows are
+ *  matched to destinations by name. */
 export interface LoudnessRow {
   integrated: boolean;
   verdict: string;
-  name?: string;
+  name: string;
 }
 
 /** The speed window that is neither amber nor a catch-up burst. */
@@ -152,13 +157,13 @@ export function destinationsSettled(
     if (r.dropped > 0) return no(`${r.name} has dropped ${r.dropped} frames`);
     if (r.duplicated > 0) return no(`${r.name} has duplicated ${r.duplicated} frames`);
   }
-  if (loudness.length < rows.length) {
-    return no(`${loudness.length} loudness rows for ${rows.length} destinations`);
-  }
-  for (const [i, l] of loudness.entries()) {
-    const who = l.name ?? `loudness row ${i + 1}`;
-    if (!l.integrated) return no(`${who} loudness is not yet integrated`);
-    if (l.verdict !== "pass") return no(`${who} loudness verdict is ${l.verdict}, not pass`);
+  for (const r of rows) {
+    const mine = loudness.filter((l) => l.name === r.name);
+    if (mine.length === 0) return no(`${r.name} has no loudness row`);
+    for (const l of mine) {
+      if (!l.integrated) return no(`${r.name} loudness is not yet integrated`);
+      if (l.verdict !== "pass") return no(`${r.name} loudness verdict is ${l.verdict}, not pass`);
+    }
   }
   return { ok: true, why: "" };
 }

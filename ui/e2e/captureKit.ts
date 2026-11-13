@@ -1,11 +1,11 @@
 import { expect } from "@playwright/test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { basename } from "node:path";
 
 import {
   destinationsSettled,
   loudnessRowsFromFeed,
-  parseSecretsFile,
+  secretsFromEnv,
   progressFromStatus,
   shootProblems,
   type SecretEntry,
@@ -44,18 +44,11 @@ export const SCENE: "full" | "sports" = process.env.SHOT_SCENE === "sports" ? "s
 
 let secretEntries: SecretEntry[] | undefined;
 
-/** The rig's secrets (`kind<TAB>value` per line), read once from the file named
- *  by SHOT_SECRETS_FILE. The sports scene refuses to run without it: a scene
- *  with a password on its sign-in page and no list of what to look for would
- *  pass every shot. */
+/** The rig's secrets (`kind<TAB>value` per line) from the file named by
+ *  SHOT_SECRETS_FILE, read once. Required in every scene; `none` says a run has
+ *  nothing to check. The decisions are in captureGuards.ts. */
 function secrets(): SecretEntry[] {
-  if (secretEntries) return secretEntries;
-  const file = process.env.SHOT_SECRETS_FILE;
-  if (!file) {
-    if (SCENE === "sports") throw new Error("SHOT_SECRETS_FILE is required for the sports scene");
-    return (secretEntries = []);
-  }
-  return (secretEntries = parseSecretsFile(readFileSync(file, "utf8")));
+  return (secretEntries ??= secretsFromEnv(process.env.SHOT_SECRETS_FILE, (f) => readFileSync(f, "utf8")));
 }
 
 /** Throws unless the page, as it is NOW, may be photographed as `file`: dark
@@ -67,7 +60,7 @@ export async function assertShootable(page: import("@playwright/test").Page, fil
     theme: document.documentElement.getAttribute("data-theme"),
     visibleText: [
       document.body.innerText,
-      ...Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type=password]), textarea")).map(
+      ...Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type=password]):not([type=hidden]), textarea")).map(
         (el) => el.value,
       ),
     ].join("\n"),
@@ -84,7 +77,32 @@ export async function snap(
   opts: { clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean } = {},
 ) {
   await assertShootable(page, file);
-  await page.screenshot({ path: `${OUT}/${file}`, ...opts });
+  await shutter(page, `${OUT}/${file}`, opts, async () => {
+    await assertShootable(page, file);
+    return null;
+  });
+}
+
+/** Writes the PNG under a temporary name beside the target and renames it into
+ *  place only if `check` finds nothing wrong after the shutter. A refused frame
+ *  therefore never exists under its real name, where the post-capture check
+ *  (scripts/check-shots.mjs) would count it as fresh. Returns what `check`
+ *  found; a throw from `check` leaves no file either. */
+async function shutter(
+  page: import("@playwright/test").Page,
+  path: string,
+  shotOpts: { clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean },
+  check: () => Promise<string | null>,
+): Promise<string | null> {
+  const partial = path.replace(/\.png$/, ".partial.png");
+  try {
+    await page.screenshot({ path: partial, ...shotOpts });
+    const problem = await check();
+    if (problem === null) renameSync(partial, path);
+    return problem;
+  } finally {
+    rmSync(partial, { force: true });
+  }
 }
 
 /** Blocks until every enabled destination has run for minUptimeSec at a steady
@@ -262,15 +280,16 @@ export async function shoot(
     // Light, a legible secret or a failure on screen will not mend by waiting:
     // thrown, not retried.
     await assertShootable(page, basename(path));
-    await page.screenshot({ path, ...shotOpts });
 
     // And still true after the shutter. A screenshot is not instantaneous, and
-    // the frame that matters is the one on disk.
-    const broke = await present();
-    if (!broke) {
-      await assertShootable(page, basename(path));
-      return;
-    }
+    // the frame that matters is the one on disk -- so it is checked BEFORE the
+    // file takes its real name.
+    const broke = await shutter(page, path, shotOpts, async () => {
+      const b = await present();
+      if (b === null) await assertShootable(page, basename(path));
+      return b;
+    });
+    if (!broke) return;
     console.warn(`re-shooting ${path}: "${broke}" reappeared during the capture`);
   }
   throw new Error(

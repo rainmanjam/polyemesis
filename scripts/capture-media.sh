@@ -87,6 +87,14 @@ docker info >/dev/null 2>&1 || { echo "docker is not running"; exit 1; }
 echo "==> fresh data directory"
 rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
 
+# What the capture must refuse to show (ui/e2e/captureKit.ts requires this list
+# in every scene): `kind<TAB>value`, mode 600, never printed. Publish tokens are
+# appended once seeding has produced them.
+SHOT_SECRETS_FILE="$WORK/secrets.tsv"
+export SHOT_SECRETS_FILE
+( umask 077
+  printf 'password\t%s\nsetupCode\t%s\n' "$E2E_PASSWORD" "$POLYEMESIS_SETUP_CODE" > "$SHOT_SECRETS_FILE" )
+
 # Refuse to run against a server this script did not start. Without this the
 # seeder happily talks to a leftover instance -- different data directory,
 # different admin password -- and reports "incorrect username or password",
@@ -142,6 +150,9 @@ SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT")"
 RELAY="$(printf '%s\n' "$SEEDED" | sed -n 1p)"
 TOKEN="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
 TOKEN2="$(printf '%s\n' "$SEEDED" | sed -n 3p)"
+for t in "$TOKEN" "$TOKEN2"; do
+  if [ -n "$t" ]; then printf 'token\t%s\n' "$t" >> "$SHOT_SECRETS_FILE"; fi
+done
 # A relay port is a number. Anything else means the seeder failed partway and
 # printed a diagnostic, which would otherwise be handed to ffmpeg as a port.
 case "$RELAY" in

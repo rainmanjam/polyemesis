@@ -7,6 +7,7 @@ import {
   loudnessRowsFromFeed,
   parseSecretsFile,
   progressFromStatus,
+  secretsFromEnv,
   shootProblems,
   type DestProgress,
   type LoudnessRow,
@@ -44,86 +45,116 @@ describe("findLegibleSecrets", () => {
   });
 });
 
-describe("failedStateWords", () => {
-  it("finds Failed, FAIL, Crashed and Unreachable", () => {
-    expect(failedStateWords("Failed\nFAIL\nCrashed\nUnreachable")).toEqual([
-      "failed",
-      "fail",
-      "crashed",
-      "unreachable",
+describe("findLegibleSecrets, however the page shows the value", () => {
+  const SECRET = ["Zq9", "Xw-long", "-value-1234"].join("");
+  const entry = [{ kind: "password", value: SECRET }];
+
+  it("finds a value wrapped across lines or spaces", () => {
+    const wrapped = `${SECRET.slice(0, 6)}\n${SECRET.slice(6, 12)} ${SECRET.slice(12)}`;
+    expect(findLegibleSecrets(`x ${wrapped} y`, entry)).toEqual(["password"]);
+  });
+
+  it("finds a value shown in other case", () => {
+    expect(findLegibleSecrets(SECRET.toUpperCase(), entry)).toEqual(["password"]);
+  });
+
+  it("finds a value that is percent-encoded", () => {
+    expect(findLegibleSecrets(`https://x/?k=${encodeURIComponent(SECRET + "/é")}`, [{ kind: "token", value: SECRET + "/é" }])).toEqual([
+      "token",
     ]);
   });
 
-  it("reports a word once", () => {
-    expect(failedStateWords("Failed\nFailed")).toEqual(["failed"]);
+  it("does not throw on a malformed percent sequence", () => {
+    expect(findLegibleSecrets("100% sure %E0%A4%A", entry)).toEqual([]);
+  });
+
+  it("does not count a masked value (dots and the last four characters) as a leak", () => {
+    expect(findLegibleSecrets(`••••••••••••${SECRET.slice(-4)}`, entry)).toEqual([]);
+  });
+
+  it("ignores a value that is shorter than 8 once its whitespace is gone", () => {
+    expect(findLegibleSecrets("a b c d e f g h", [{ kind: "x", value: "a b c d" }])).toEqual([]);
+  });
+});
+
+describe("failedStateWords", () => {
+  const words: [string, string][] = [
+    ["Failed", "failed"],
+    ["FAIL", "fail"],
+    ["Crashed", "crashed"],
+    ["Unreachable", "unreachable"],
+    ["Offline", "offline"],
+    ["Degraded", "degraded"],
+    ["Reconnecting", "reconnecting"],
+    ["Error", "errors"],
+    ["Errors", "errors"],
+    ["Stopped", "stopped"],
+  ];
+  for (const [shown, found] of words) {
+    it(`finds ${shown}, as a badge and inside a sentence`, () => {
+      expect(failedStateWords(shown)).toEqual([found]);
+      expect(failedStateWords(`Connection ${shown.toLowerCase()}.`)).toEqual([found]);
+      expect(failedStateWords(`Ingest ${shown} for the last ten seconds and still going on`)).toEqual([found]);
+    });
+  }
+
+  it("finds Reconnecting with its ellipsis", () => {
+    expect(failedStateWords("Reconnecting…")).toEqual(["reconnecting"]);
+  });
+
+  it("reports a word once, in order of appearance", () => {
+    expect(failedStateWords("Offline\nFailed\nOffline")).toEqual(["offline", "failed"]);
+  });
+
+  it("does not match Failover, download, shutdown or other words that merely contain one", () => {
+    expect(failedStateWords("Failover\nFailover on\nFailovers: 2\nDownload\nShutdown\nUnfailed\nOfflined")).toEqual([]);
   });
 
   it("ignores zero counts", () => {
     expect(failedStateWords("0 failed · 0 stopped")).toEqual([]);
+    expect(failedStateWords("0 errors")).toEqual([]);
     expect(failedStateWords("errors: 0")).toEqual([]);
     expect(failedStateWords("sessions with errors: 0")).toEqual([]);
     expect(failedStateWords("Errors 0")).toEqual([]);
+    expect(failedStateWords("5 live · 0 stopped · 0 off")).toEqual([]);
   });
 
   it("ignores a zero on the line under its label (a stat tile)", () => {
-    expect(failedStateWords("Failed\n0\nCompleted\n12")).toEqual([]);
+    expect(failedStateWords("FAILED\n0\nCompleted\n12")).toEqual([]);
   });
 
   it("does not let a zero from the previous tile hide a failure", () => {
     expect(failedStateWords("Dropped\n0\nFailed\n3")).toEqual(["failed"]);
   });
 
-  it("reports a non-zero count of errors or stopped", () => {
+  it("does not let a zero that starts the next line hide a failure", () => {
+    expect(failedStateWords("Failed\n0 dropped")).toEqual(["failed"]);
+  });
+
+  it("reports a non-zero count", () => {
     expect(failedStateWords("2 errors")).toEqual(["errors"]);
     expect(failedStateWords("Errors 3")).toEqual(["errors"]);
     expect(failedStateWords("5 live · 1 stopped · 0 off")).toEqual(["stopped"]);
-    expect(failedStateWords("Stopped\n2")).toEqual(["stopped"]);
-  });
-
-  it("reports a singular error under the plural name, and reads 00 as zero", () => {
-    expect(failedStateWords("1 error")).toEqual(["errors"]);
-    expect(failedStateWords("00 errors")).toEqual([]);
-    expect(failedStateWords("errors: 00")).toEqual([]);
-  });
-
-  it("does not match Failover", () => {
-    expect(failedStateWords("Failover\nFailover on\nFailovers: 2")).toEqual([]);
-  });
-
-  it("does not match a bare Errors label or filter", () => {
-    expect(failedStateWords("Errors\nWarnings\nAll")).toEqual([]);
-  });
-
-  it("does not match a bare Stopped label with no count", () => {
-    expect(failedStateWords("Stopped")).toEqual([]);
-  });
-
-  it("does not match prose in a settings label", () => {
-    const text =
-      "Let's Encrypt limits failed attempts to five per hostname per hour. Clear what is flagged first.\n" +
-      "Failing step not reported\nOnly failures worth retrying are retried.";
-    expect(failedStateWords(text)).toEqual([]);
-  });
-
-  it("does not match a long line even without a full stop", () => {
-    expect(failedStateWords("one two three four five six seven eight nine ten eleven failed")).toEqual([]);
-  });
-
-  it("does not count the dot separators as words", () => {
     expect(failedStateWords("5 live · 0 starting · 1 failed · 0 blocked")).toEqual(["failed"]);
   });
 
-  it("does not take a decimal for a zero", () => {
+  it("does not take a decimal or a longer number for a zero", () => {
     expect(failedStateWords("errors: 0.5")).toEqual(["errors"]);
+    expect(failedStateWords("errors: 05")).toEqual(["errors"]);
+    expect(failedStateWords("0.5 failed")).toEqual(["failed"]);
   });
 
-  it("does not take a 0 that begins a longer number for a zero", () => {
-    expect(failedStateWords("errors: 05")).toEqual(["errors"]);
+  it("flags a sentence too: an error banner must not pass", () => {
+    expect(failedStateWords("The destination crashed and will not restart.")).toEqual(["crashed"]);
+    expect(
+      failedStateWords("Let's Encrypt limits failed attempts to five per hostname per hour. Clear what is flagged first."),
+    ).toEqual(["failed"]);
   });
 
   it("does not report a word the shot declares as its subject", () => {
     expect(failedStateWords("Failed\nCrashed", ["failed"])).toEqual(["crashed"]);
     expect(failedStateWords("2 errors", ["errors"])).toEqual([]);
+    expect(failedStateWords("1 error", ["Error"])).toEqual([]);
   });
 
   it("is case-insensitive about the allowance", () => {
@@ -140,10 +171,10 @@ const row = (over: Partial<DestProgress> = {}): DestProgress => ({
   duplicated: 0,
   ...over,
 });
-const loud = (over: Partial<LoudnessRow> = {}): LoudnessRow => ({ integrated: true, verdict: "pass", ...over });
+const loud = (over: Partial<LoudnessRow> = {}): LoudnessRow => ({ name: "YouTube · English", integrated: true, verdict: "pass", ...over });
 const five = (over: Partial<DestProgress> = {}) =>
   ["English", "Spanish", "French", "German", "Arabic"].map((l) => row({ name: `YouTube · ${l}`, ...over }));
-const fiveLoud = () => [0, 1, 2, 3, 4].map(() => loud());
+const fiveLoud = () => five().map((r) => loud({ name: r.name }));
 
 describe("destinationsSettled refuses", () => {
   it("an empty list", () => {
@@ -186,22 +217,35 @@ describe("destinationsSettled refuses", () => {
     expect(r.why).toContain("YouTube · German");
   });
 
-  it("a loudness row with no name, by its position", () => {
+  it("a destination with no loudness row of its own, even when the count matches", () => {
     const l = fiveLoud();
-    l[3] = loud({ verdict: "fail" });
+    l[2] = loud({ name: "Something else" });
     const r = destinationsSettled(five(), l, 30);
     expect(r.ok).toBe(false);
-    expect(r.why).toContain("loudness row 4");
+    expect(r.why).toContain("YouTube · French");
+    expect(r.why).toMatch(/no loudness row/);
   });
 
-  it("fewer loudness rows than destinations", () => {
-    const r = destinationsSettled(five(), [loud(), loud()], 30);
+  it("no loudness rows at all", () => {
+    const r = destinationsSettled(five(), [], 30);
     expect(r.ok).toBe(false);
-    expect(r.why).toMatch(/2 loudness rows for 5 destinations/);
+    expect(r.why).toContain("YouTube · English");
+  });
+
+  it("a destination whose second row for the same name is not passing", () => {
+    const l = [...fiveLoud(), loud({ name: "YouTube · English", verdict: "warn" })];
+    const r = destinationsSettled(five(), l, 30);
+    expect(r.ok).toBe(false);
+    expect(r.why).toContain("YouTube · English");
   });
 });
 
 describe("destinationsSettled accepts", () => {
+  it("and ignores a row for something that is not one of the destinations", () => {
+    const l = [...fiveLoud(), loud({ name: "Not a destination", integrated: false, verdict: "fail" })];
+    expect(destinationsSettled(five(), l, 30)).toEqual({ ok: true, why: "" });
+  });
+
   it("five rows at uptime 40, speed 1.0, nothing dropped, five integrated passing rows", () => {
     expect(destinationsSettled(five(), fiveLoud(), 30)).toEqual({ ok: true, why: "" });
   });
@@ -232,6 +276,23 @@ describe("parseSecretsFile", () => {
 
   it("refuses a line with an empty kind", () => {
     expect(() => parseSecretsFile(`\t${PW}`)).toThrow(/line 1/);
+  });
+});
+
+describe("secretsFromEnv", () => {
+  it("refuses an unset or empty variable, saying how to opt out", () => {
+    expect(() => secretsFromEnv(undefined, () => "")).toThrow(/SHOT_SECRETS_FILE is required.*none/);
+    expect(() => secretsFromEnv("", () => "")).toThrow(/SHOT_SECRETS_FILE is required/);
+  });
+
+  it("reads nothing for an explicit none", () => {
+    expect(secretsFromEnv("none", () => "never read")).toEqual([]);
+  });
+
+  it("parses the named file", () => {
+    expect(secretsFromEnv("/w/secrets.tsv", (p) => (p === "/w/secrets.tsv" ? `password\t${PW}\n` : ""))).toEqual([
+      { kind: "password", value: PW },
+    ]);
   });
 });
 
