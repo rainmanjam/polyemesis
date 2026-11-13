@@ -1,6 +1,9 @@
 ---
-import Base from "../layouts/Base.astro";
+import InnerPage from "../layouts/InnerPage.astro";
 import CodeBlock from "../components/CodeBlock.astro";
+import CompareTable from "../components/inner/CompareTable.astro";
+import { VS_INDEX } from "../data/vs-index.mjs";
+import { latestRelease, releaseLine, fillRelease } from "../lib/release";
 
 /* Sourced from docs/COMPARISON.md, which is itself sourced from a survey of
  * Restreamer's issue trackers.
@@ -79,8 +82,11 @@ const wins = [
   // apply a per-destination loudness filter. What it does not offer is a
   // configurable target -- its control is an on/off checkbox emitting the bare
   // string `loudnorm`, taking FFmpeg's defaults for I, LRA and TP. That is the
-  // real difference, so the row states it and leaves their cell alone.
-  ["Per-destination loudness TARGET you set — I, LRA and TP, measured after routing", "Yes", "", ""],
+  // real difference. The two cells were blank, and a blank in a table that shows
+  // a glyph per cell reads as "no" without saying so; they now carry the
+  // document's own words (docs/COMPARISON.md: Restreamer "Filter only", with
+  // footnote 4 above, restream.io "No").
+  ["Per-destination loudness TARGET you set — I, LRA and TP, measured after routing", "Yes", "Filter only", "No"],
   // "not assessed" ON FOUR ROWS BELOW, and it is not timidity.
   //
   // The copy rule this project holds itself to is explicit: if we cannot source
@@ -133,6 +139,7 @@ const wins = [
  * quietly opt out of it. Cards carry the same rows without either problem.
  *
  * @type {{who: string, what: string, rows: [string, string][], tail?: string}[]} */
+const release = latestRelease();
 const losses = [
   {
     who: "the OBS plugins",
@@ -154,7 +161,7 @@ const losses = [
       ["Multi-input compositing / video grid", "Not in polyemesis. Natural once multi-source is settled."],
       ["HDR 10-bit HEVC", "Partial in polyemesis. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
       ["LL-HLS", "Declined in polyemesis, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
-      ["Maturity", "Restreamer is established. polyemesis is still pre-release."],
+      ["Maturity", "Restreamer is established. polyemesis is at {release}."],
     ],
   },
   {
@@ -162,7 +169,7 @@ const losses = [
     what: "The one tool here that is a peer rather than a different shape, at a scale and protocol breadth this project does not approach.",
     rows: [
       ["Protocol breadth", "A directory of muxers, including WebRTC and its own SRT output. Here: SRT, SRTLA and RTMP in, RTMP/SRT out, HLS for preview."],
-      ["Years of production deployment, and a commercial vendor behind it", "Here: still pre-release."],
+      ["Years of production deployment, and a commercial vendor behind it", "Here: {release}."],
       ["Selection without decoding", "A push target that only selects tracks is a pure copy end to end. Every polyemesis destination decodes and re-encodes its audio, always, because that is what mixing is."],
     ],
   },
@@ -228,6 +235,19 @@ const selectors = [
     note: "It selects, and selects well. Its ROUTING SERVER has no amix, no loudnorm, no ebur128, but an external Stream Process (MistProcAV, an FFmpeg pipeline) can decode, filter and inject a track back into the buffer, so mixing is reachable, just not where the routing happens.",
   },
 ];
+const cols = [
+  { key: "polyemesis", name: "polyemesis", poly: true },
+  { key: "restreamer", name: "Restreamer" },
+  { key: "restream-io", name: "restream.io" },
+];
+const crumbs = [{ label: "polyemesis", href: "/" }, { label: "comparison" }];
+const index = [
+  { id: "glance", label: "Where they differ" },
+  { id: "one", label: "Compared one at a time" },
+  { id: "mixes", label: "They select a track" },
+  { id: "shared", label: "What all three do" },
+  { id: "other", label: "Choose another tool when" },
+];
 ---
 
 {/* The title used to lead with "polyemesis vs", which is a brand nobody is
@@ -240,338 +260,207 @@ const selectors = [
     "The audio is the difference." with a keyword string; it was rejected then
     and would be worse now that this page has four children carrying the
     long-tail terms. */}
-<Base
+<InnerPage
   title="Multistream tools compared: polyemesis vs the alternatives"
   description="Multistream to Twitch, YouTube and Kick from one ingest. Restreamer, restream.io, obs-multi-rtmp, Aitum, StreamElements and Streamlabs compared on audio."
   path="/comparison"
+  crumbs={crumbs}
+  heading="The audio is the difference."
+  accent="audio"
+  lede="polyemesis is built for one case, completely: this platform gets the clean mix, that one gets the full mix, from a single upload and a single video encode, with the picture never re-encoded to do it."
+  index={index}
+  band={{
+    heading: "Still the right problem?",
+    lede: "Then the next thing to read is the one that tells you what running it is actually like, and that is the quickstart rather than the download page.",
+    secondary: { label: "This page, with its sources", href: "/docs/comparison" },
+  }}
 >
-  <section class="wrap py-16 sm:py-20">
-    <p class="eyebrow">Comparison</p>
-    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      The audio is the difference.
-    </h1>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="#glance">See the table</a>
+  {releaseLine(release) && <Fragment slot="meta">Here: {releaseLine(release)}</Fragment>}
 
-    {/* Primary, not amber. This is the thesis of the whole page, and amber
-        means warn and nothing else. */}
-    <div class="mt-8 max-w-3xl rounded-token border-l-2 border-primary bg-surface/60 py-4 pl-5 pr-4">
-      <p class="text-pretty leading-relaxed text-fg">
-        <strong>polyemesis is built for one case, completely:</strong>
-        <em>this</em> platform gets the clean mix, <em>that</em> one gets the
-        full mix, from a single upload and a single video encode, with the
-        picture never re-encoded to do it.
-      </p>
-      <p class="mt-3 text-pretty leading-relaxed text-muted">
-        That is the case the whole product is arranged around: the routing
-        matrix, the per-destination loudness targets, the multitrack archive and
-        the stems all exist because the audio is the hard part, and because
-        everywhere else it is a track you pick rather than a mix you build.
-      </p>
-    </div>
-
+  <div class="cp">
     {/* THE PAGE SAYS "USE SOMETHING ELSE" BEFORE IT SAYS ANYTHING ELSE, and it
         is deliberately the second thing a reader meets rather than a footnote at
         the bottom. README.md and docs/COMPARISON.md both open on this sentence;
         a comparison page that carries the argument and drops the concession is
         not the same document with better styling, it is a less honest one.
 
-        NOT the primary border the box above uses. Primary is this site's "act
-        here" accent, and this block exists to tell a particular reader not to.
-        Line-strong is as loud as it needs to be without borrowing the colour
-        that means the opposite thing. */}
-    <div class="mt-5 max-w-3xl rounded-token border-l-2 border-line-strong bg-surface/40 py-4 pl-5 pr-4">
-      <p class="eyebrow">The short version</p>
-      <p class="mt-2.5 text-pretty leading-relaxed text-fg">
-        If you do not need different audio per platform, Restreamer is a more
-        mature product and you should probably use it.
+        NOT the coral the rest of the page uses for audio. Coral is this site's
+        "act here" accent, and this block exists to tell a particular reader not
+        to. */}
+    <div class="cp-lead">
+      <p>
+        That is the case the whole product is arranged around: the routing
+        matrix, the per-destination loudness targets, the multitrack archive and
+        the stems all exist because the audio is the hard part, and because
+        everywhere else it is a track you pick rather than a mix you build.
       </p>
-      <p class="mt-3 text-pretty text-sm leading-relaxed text-muted">
-        Multistreaming from the stream PC: obs-multi-rtmp is free, mature and
-        enough. A server instead: Restreamer is more mature and far more widely
-        deployed than this. No server at all: restream.io. An industrial-strength
-        media server with real track selection: MistServer. polyemesis exists for
-        the one case none of them serve. If that is not your problem, one of the
-        tools above is the better fit.
+      <div class="panel cp-short">
+        <p class="eyebrow">The short version</p>
+        <p class="cp-short-main">
+          If you do not need different audio per platform, Restreamer is a more
+          mature product and you should probably use it.
+        </p>
+        <p>
+          Multistreaming from the stream PC: obs-multi-rtmp is free, mature and
+          enough. A server instead: Restreamer is more mature and far more widely
+          deployed than this. No server at all: restream.io. An industrial-strength
+          media server with real track selection: MistServer. polyemesis exists for
+          the one case none of them serve. If that is not your problem, one of the
+          tools above is the better fit.
+        </p>
+      </div>
+    </div>
+
+    <section id="glance" class="cp-sec">
+      <h2>Where they differ</h2>
+      <p class="cp-intro">
+        One axis, and it is the one this project exists for. The shared ground
+        (everything all three do) is in the table below this one.
       </p>
-    </div>
-  </section>
-
-  {/* ------------------------------------------------------------- the hub -- */}
-  {/* HIGH ON THE PAGE, and that placement is the point.
-
-      Most people arriving here typed a product name, not a category — they
-      already have one of these installed and want to know what changes. Making
-      them read a nine-row capability table before they find the page about the
-      tool they actually use is answering a question they did not ask.
-
-      Each page is linked with the argument it makes rather than a bare product
-      name, because the three arguments are genuinely different and a reader
-      choosing between them should be able to tell which one is theirs. They are
-      also the reason these are separate pages instead of three more columns
-      here: a Yes/No grid cannot say "both do this, and one costs more to
-      change", which is the true shape of the plugin comparison. */}
-  <section class="wrap pb-16">
-    <h2 class="text-2xl font-medium">Compared one at a time</h2>
-    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-      If you already run something, start here. Each page compares polyemesis
-      against one of them in full, with that tool's strengths stated and every
-      claim dated against its own sources.
-    </p>
-    {/* Two by two rather than a row of three, now that there is a fourth. A
-        four-item row is unreadable at this card width and a 3+1 orphan looks
-        like something failed to load.
-
-        THE FIFTH SPANS BOTH COLUMNS, for the same reason. Five cards in a
-        two-column grid leave one alone on the last row, which is the orphan this
-        layout was built to avoid. Spanning it is not a workaround: Streamlabs is
-        the only cloud relay in the set -- the other four run on your own
-        machine, as a plugin or a server -- so the card that looks different is
-        the one that IS different. */}
-    <div class="card-grid card-grid--2 mt-6" data-foot="required">
-      {
-        [
-          {
-            href: "/vs/aitum-multistream",
-            name: "Aitum Multistream",
-            kind: "OBS plugin · free · GPL-2.0",
-            line: "It already sends different audio per platform. The argument is about where the mix gets built, and what a third one costs.",
-          },
-          {
-            href: "/vs/obs-multi-rtmp",
-            name: "obs-multi-rtmp",
-            kind: "OBS plugin · free · GPL-2.0",
-            line: "Get from OBS means fanning out costs one encode, not four. What it cannot share is your uplink: the same bytes, sent once per platform.",
-          },
-          {
-            href: "/vs/restreamer",
-            name: "Restreamer and restream.io",
-            kind: "Server · SaaS · two different products",
-            line: "Two unrelated things share the name. Neither can build a second mix at all, and one of them bills per channel.",
-          },
-          {
-            href: "/vs/streamelements",
-            name: "StreamElements",
-            kind: "OBS plugin · free · Windows only",
-            line: "The dashboard everyone knows sends no video at all. The multistreaming is SE.Live, which is Windows-only and speaks no SRT.",
-          },
-          {
-            href: "/vs/streamlabs",
-            name: "Streamlabs",
-            kind: "Cloud relay · Ultra subscription",
-            line: "Their servers do the fan-out, and multistreaming proper is behind the paid tier. The free path stops at two destinations.",
-            wide: true,
-          },
-        ].map((c) => (
-          <a
-            href={c.href}
-            class:list={["card p-6 transition-colors hover:border-primary", c.wide && "card-span-full"]}
-          >
-            <p class="font-medium text-fg">{c.name}</p>
-            <p class="mt-1 font-mono text-[11px] text-subtle">{c.kind}</p>
-            <p class="mt-3 text-sm leading-relaxed text-muted">{c.line}</p>
-            <p class="card-foot text-sm text-primary-bright">Read the comparison</p>
-          </a>
-        ))
-      }
-    </div>
-    <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
-      Twitch multistreaming is the case most of these are bought for, and all
-      five do it. The tables below are what separates them once that is assumed.
-    </p>
-  </section>
-
-  <section class="wrap pb-16">
-    <h2 class="text-2xl font-medium">Where they differ</h2>
-    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-      One axis, and it is the one this project exists for. The shared ground
-      (everything all three do) is in the table below this one.
-    </p>
-    <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
-      <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
-        <thead class="bg-surface">
-          <tr class="border-b border-line">
-            <th scope="col" class="px-4 py-3 text-left font-medium">Capability</th>
-            {/* polyemesis first, and in the primary colour. The table used to
-                list only the other two and leave the reader to infer who did
-                these things from a column of "No" — which reads as a table
-                ABOUT the competitors. The subject of a comparison should be in
-                it. */}
-            <th scope="col" class="w-32 px-4 py-3 text-center font-medium text-primary-bright">polyemesis</th>
-            <th scope="col" class="w-32 px-4 py-3 text-center font-medium">Restreamer</th>
-            <th scope="col" class="w-32 px-4 py-3 text-center font-medium">restream.io</th>
-          </tr>
-        </thead>
-        <tbody>
-          {
-            wins.map(([cap, poly, a, b]) => (
-              <tr class="border-b border-line/60 last:border-0">
-                <td class="px-4 py-3 text-fg">{cap}</td>
-                <td class:list={[
-                  "px-4 py-3 text-center font-mono text-xs",
-                  poly === "Yes" ? "text-ok" : "text-subtle",
-                ]}>{poly}</td>
-                <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{a}</td>
-                <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{b}</td>
-              </tr>
-            ))
-          }
-        </tbody>
-      </table>
-    </div>
-    {/* The second-audio-mix row's caveat, in the same convention the product
-        uses: name the specific claim without evidence, and do not gate. */}
-    <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
-      <span class="chip align-middle">experimental</span>
-      <span class="ml-2">
-        On the second-audio-mix row, and only where the destination is Twitch. The
-        negotiation itself is proven: polyemesis’s tests reach ingest.twitch.tv on
-        every run, and Twitch accepts a supported-GPU inventory, grants the VOD
-        audio track and mints a key. What nobody has watched yet is a broadcast
-        published through that key. Off Twitch the two-mix egress is a different
-        mechanism and is not covered by this. Nothing is gated either way: a
-        negotiation that does not succeed falls back to the ordinary Twitch ingest.
-      </span>
-    </p>
-    <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
-      The multitrack ask is not hypothetical. “Multiple audio tracks for Twitch”
-      was an open request on{" "}
-      <a href="https://github.com/datarhei/restreamer/issues" rel="noopener"
-        class="underline underline-offset-2 hover:text-fg">Restreamer's own tracker</a>{" "}
-      when this was surveyed in July 2026: users asking it for the thing
-      polyemesis was built to be.
-    </p>
-  </section>
-
-  {/* -------------------------------------------- choose another tool when -- */}
-  {/* IMMEDIATELY AFTER THE WIN TABLE, which is the whole point of the placement.
-      Put the concessions at the bottom and they read as small print somebody was
-      forced to include; put them next to the wins and they read as the same
-      person writing with the same care, which is the only thing that makes the
-      wins worth anything.
-
-      THE HEADING NAMES A CHOICE, NOT A DEFEAT (2026-11 design review). It was
-      "Where polyemesis loses"; it is "Choose another tool when", and each card
-      says when that tool is the better pick. The content is unchanged: the
-      same rows, the same honesty, framed as advice to the reader. */}
-  <section class="border-y border-line bg-surface/30 py-16">
-    <div class="wrap">
-      <h2 class="text-2xl font-medium">Choose another tool when</h2>
-      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-        Each of these is a job another tool is built for. They are worth reading
-        before you spend an evening on an install: they follow from design
-        decisions and the project's age, not from a roadmap, so the right tool
-        for these jobs today is the one named.
+      {/* The chooser here controls both tables: same column keys in both. */}
+      <CompareTable
+        caption="Where polyemesis, Restreamer and restream.io differ"
+        firstHeader="Capability"
+        cols={cols}
+        rows={wins}
+        chooser
+        legend
+      />
+      {/* The second-audio-mix row's caveat, in the same convention the product
+          uses: name the specific claim without evidence, and do not gate. */}
+      <p class="cp-note">
+        <span class="chip">experimental</span>
+        <span>
+          On the second-audio-mix row, and only where the destination is Twitch. The
+          negotiation itself is proven: polyemesis’s tests reach ingest.twitch.tv on
+          every run, and Twitch accepts a supported-GPU inventory, grants the VOD
+          audio track and mints a key. What nobody has watched yet is a broadcast
+          published through that key. Off Twitch the two-mix egress is a different
+          mechanism and is not covered by this. Nothing is gated either way: a
+          negotiation that does not succeed falls back to the ordinary Twitch ingest.
+        </span>
       </p>
-      <div class="card-grid card-grid--2 mt-8" data-foot="optional">
+      {/* Footnote 4 of docs/COMPARISON.md, which explains the "Filter only" cell. */}
+      <p class="cp-note">
+        On the loudness-target row, “Filter only” for Restreamer: it mounts a
+        filter select per publication service, and <code>loudnorm</code> is one of
+        the filters it offers, so it does apply a per-destination loudness filter.
+        What it does not offer is a target you set: its control is an on/off
+        checkbox that emits the bare string <code>loudnorm</code> with no I, LRA or
+        TP, so it takes FFmpeg’s defaults and an operator cannot ask for −16 LUFS
+        rather than −24.
+      </p>
+      <p class="cp-note">
+        The multitrack ask is not hypothetical. “Multiple audio tracks for Twitch”
+        was an open request on{" "}
+        <a href="https://github.com/datarhei/restreamer/issues" rel="noopener">Restreamer's own tracker</a>{" "}
+        when this was surveyed in July 2026: users asking it for the thing
+        polyemesis was built to be.
+      </p>
+      <p class="cp-more"><a class="more" href="/#matrix">Try the routing matrix</a></p>
+    </section>
+
+    {/* HIGH ON THE PAGE, and that placement is the point.
+
+        Most people arriving here typed a product name, not a category — they
+        already have one of these installed and want to know what changes. Each
+        page is linked with the argument it makes rather than a bare product
+        name, because the arguments are genuinely different and a reader
+        choosing between them should be able to tell which one is theirs. They
+        are also the reason these are separate pages instead of more columns
+        here: a Yes/No grid cannot say "both do this, and one costs more to
+        change", which is the true shape of the plugin comparison. */}
+    <section id="one" class="cp-sec">
+      <h2>Compared one at a time</h2>
+      <p class="cp-intro">
+        If you already run something, start here. Each page compares polyemesis
+        against one of them in full, with that tool's strengths stated and every
+        claim dated against its own sources.
+      </p>
+      <div class="rows">
         {
-          losses.map((l) => (
-            <div class="card p-6">
-              <h3 class="font-medium text-fg">Choose {l.who} for</h3>
-              <p class="mt-2 text-sm leading-relaxed text-subtle">{l.what}</p>
-              <dl class="mt-4 divide-y divide-line border-y border-line">
-                {l.rows.map(([has, here]) => (
-                  <div class="py-3">
-                    <dt class="text-sm font-medium text-fg">{has}</dt>
-                    <dd class="mt-1 text-sm leading-relaxed text-muted">{here}</dd>
-                  </div>
-                ))}
-              </dl>
-              {l.tail && <p class="card-foot text-sm leading-relaxed text-subtle">{l.tail}</p>}
+          VS_INDEX.map((c) => (
+            <a class="cp-vs" href={c.href}>
+              <span class="cp-vs-name">{c.name}</span>
+              <span class="cp-vs-kind">{c.kind}</span>
+              <span class="cp-vs-line">{c.line}</span>
+              <span class="more">Read the comparison</span>
+            </a>
+          ))
+        }
+      </div>
+      <p class="cp-note">
+        Twitch multistreaming is the case most of these are bought for, and all
+        five do it. The tables below are what separates them once that is assumed.
+      </p>
+    </section>
+
+    {/* The tools a reader is most likely to already have installed, and the one
+        distinction that holds against all of them.
+
+        These get a section rather than more table columns: seven columns does
+        not survive a phone, and the argument against a plugin is not row-shaped
+        anyway. It is a single sentence about select versus mix, and it is worth
+        more with the line of source that proves it attached. */}
+    <section id="mixes" class="cp-sec">
+      <h2>They select a track. polyemesis mixes.</h2>
+      <p class="cp-intro">
+        Most people weighing this up already have one of these installed. The
+        distinction against every one of them is the same narrow one, and it is
+        narrow enough to be worth checking rather than believing: they decide{" "}
+        <em>which</em> track leaves for a destination. None of them decides what
+        is in it.
+      </p>
+      <div class="cp-sel">
+        {
+          selectors.map((s) => (
+            <div class="panel cp-card">
+              <p class="cp-card-name">{s.name}</p>
+              <p>{s.what}</p>
+              {s.src && <CodeBlock code={s.src} variant="quote" />}
+              {s.src && <p class="cp-src">{s.file} · read 2026-08-09</p>}
+              {s.source && <p class="cp-src">{s.source}</p>}
+              <p>{s.note}</p>
+              {s.href && (
+                <p>
+                  <a class="more" href={s.href}>Full comparison against {s.name}</a>
+                </p>
+              )}
             </div>
           ))
         }
       </div>
-      <p class="mt-6 max-w-3xl text-sm leading-relaxed text-subtle">
-        These come from{" "}
-        <a href="/docs/comparison" class="underline underline-offset-2 hover:text-fg"
-          >docs/COMPARISON.md</a
-        >, which carries the same rows with their evidence, their issue numbers
-        and the date each was checked, including the footnotes recording the
-        rows that were wrong and were corrected, in both directions: some had
-        gone stale understating this product, and twice a cell asserted a
-        competitor lacked something they ship.
+      <p class="cp-after">
+        polyemesis sums instead: the tracks you chose, with a gain per
+        input-channel-to-output-channel cell, and a loudness target measured after
+        the routing rather than before it. That is a different operation, which is
+        why per-destination audio is not a small patch to an OBS plugin.
       </p>
-    </div>
-  </section>
+      <p class="cp-note">
+        It costs something, and the cost belongs on this page too. Selecting a
+        track is a copy; mixing means decoding the audio and encoding it again on
+        every destination. Only the video is copied straight through. If one mix
+        for everyone is fine, a plugin is free and you should use one.
+      </p>
+    </section>
 
-  {/* --------------------------------------------- select versus mix ------ */}
-  <section class="wrap pb-16">
-    <h2 class="text-2xl font-medium">They select a track. polyemesis mixes.</h2>
-    <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
-      Most people weighing this up already have one of these installed. The
-      distinction against every one of them is the same narrow one, and it is
-      narrow enough to be worth checking rather than believing: they decide{" "}
-      <em>which</em> track leaves for a destination. None of them decides what
-      is in it.
-    </p>
-    <div class="card-grid card-grid--3 mt-6" data-foot="optional">
-      {
-        selectors.map((s) => (
-          <div class="card p-6">
-            <p class="font-medium text-fg">{s.name}</p>
-            <p class="mt-2 text-sm leading-relaxed text-muted">{s.what}</p>
-            {s.src && <CodeBlock code={s.src} variant="quote" />}
-            {s.src && <p class="mt-2 font-mono text-[11px] text-subtle">{s.file} · read 2026-08-09</p>}
-            {s.source && <p class="mt-2 font-mono text-[11px] text-subtle">{s.source}</p>}
-            <p class="mt-3 text-sm leading-relaxed text-muted">{s.note}</p>
-            {s.href && (
-              <p class="card-foot">
-                <a href={s.href} class="tap text-sm text-primary-bright underline-offset-4 hover:underline">
-                  Full comparison against {s.name}
-                </a>
-              </p>
-            )}
-          </div>
-        ))
-      }
-    </div>
-    <p class="mt-6 max-w-3xl text-sm leading-relaxed text-muted">
-      polyemesis sums instead: the tracks you chose, with a gain per
-      input-channel-to-output-channel cell, and a loudness target measured after
-      the routing rather than before it. That is a different operation, which is
-      why per-destination audio is not a small patch to an OBS plugin.
-    </p>
-    <p class="mt-3 max-w-3xl text-sm leading-relaxed text-subtle">
-      It costs something, and the cost belongs on this page too. Selecting a
-      track is a copy; mixing means decoding the audio and encoding it again on
-      every destination. Only the video is copied straight through. If one mix
-      for everyone is fine, a plugin is free and you should use one.
-    </p>
-  </section>
-
-  <section class="border-t border-line bg-surface/30 py-16">
-    <div class="wrap">
-      <h2 class="text-2xl font-medium">What all three do</h2>
-      <p class="mt-3 max-w-2xl text-sm leading-relaxed text-muted">
+    <section id="shared" class="cp-sec">
+      <h2>What all three do</h2>
+      <p class="cp-intro">
         The basic job is table stakes everywhere: ingest once, fan out, reconnect
         when a platform drops, show you whether it is working. Worth stating
         plainly: it means the choice between these three comes down to the
         audio, and not to whether the fundamentals are there.
       </p>
-      <div class="scroll-hint mt-6 overflow-x-auto rounded-token border border-line">
-        <table class="cmp w-full min-w-[46rem] border-collapse text-sm">
-          <thead class="bg-surface">
-            <tr class="border-b border-line">
-              <th scope="col" class="px-4 py-3 text-left font-medium">&nbsp;</th>
-              <th scope="col" class="w-44 px-4 py-3 text-center font-medium text-primary-bright">polyemesis</th>
-              <th scope="col" class="w-36 px-4 py-3 text-center font-medium">Restreamer</th>
-              <th scope="col" class="w-36 px-4 py-3 text-center font-medium">restream.io</th>
-            </tr>
-          </thead>
-          <tbody>
-            {
-              shared.map(([row, poly, a, b]) => (
-                <tr class="border-b border-line/60 last:border-0">
-                  <td class="px-4 py-3 text-fg">{row}</td>
-                  <td class="px-4 py-3 text-center font-mono text-xs text-muted">{poly}</td>
-                  <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{a}</td>
-                  <td class="px-4 py-3 text-center font-mono text-xs text-subtle">{b}</td>
-                </tr>
-              ))
-            }
-          </tbody>
-        </table>
-      </div>
-      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+      <CompareTable
+        caption="What polyemesis, Restreamer and restream.io all do"
+        firstHeader="Shared ground"
+        cols={cols}
+        rows={shared}
+      />
+      <p class="cp-note">
         Two rows are not a tie and are left that way: restream.io needs no server
         from you at all, and Restreamer has a far longer public release history.
         Both are real advantages, and neither changes what happens to your audio.
@@ -579,9 +468,9 @@ const selectors = [
       {/* The hardware-encoding row's caveat. It is not in the cell because the
           cell would then be false in the other direction: all five ARE offered
           and all five are probed. Mirrors the footnote in docs/COMPARISON.md. */}
-      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
-        <span class="chip align-middle">experimental</span>
-        <span class="ml-2">
+      <p class="cp-note">
+        <span class="chip">experimental</span>
+        <span>
           On the hardware-encoding row: all five encoders are offered, and each is
           probed with a real one-frame encode at startup so one that is listed but
           unusable is caught before a broadcast is. What is unverified is narrower:
@@ -591,48 +480,65 @@ const selectors = [
           every build.
         </span>
       </p>
-      <p class="mt-4 max-w-3xl text-sm leading-relaxed text-subtle">
+      <p class="cp-note">
         The recording row said “Yes” for Restreamer until 9 August 2026 and was
         wrong. Recording is an open request on{" "}
-        <a href="https://github.com/datarhei/restreamer/issues/692" rel="noopener"
-          class="underline underline-offset-2 hover:text-fg">their own tracker</a>,
+        <a href="https://github.com/datarhei/restreamer/issues/692" rel="noopener">their own tracker</a>,
         opened February 2024 and still open when it was checked. The datarhei
         Core underneath can write files; the Restreamer product does not put
         recording in front of you, which is why the request exists.
       </p>
-      <p class="mt-3 max-w-3xl text-xs leading-relaxed text-subtle">
+      <p class="cp-note">
         Rows and cards carry their own check date where one exists. The oldest
         reads here are from July 2026, re-checked 9 August 2026; the MistServer,
         StreamElements and Streamlabs material was read 15–16 August 2026. These
         products move independently of this page, so check them before deciding on
         the strength of a row.
       </p>
-    </div>
-  </section>
+    </section>
 
-  <section class="wrap py-20 text-center">
-    <h2 class="text-balance text-3xl font-medium">Still the right problem?</h2>
-    {/* The quickstart rather than the install page, for the same reason the home
-        page leads with it: a reader who has just weighed five products against
-        each other is deciding whether they can OPERATE this one, and that is a
-        question only the documentation answers. The install page is still one
-        click away and is not what anyone needs first. */}
-    <p class="mx-auto mt-4 max-w-xl text-pretty leading-relaxed text-muted">
-      Then the next thing to read is the one that tells you what running it is
-      actually like, and that is the quickstart rather than the download page.
-    </p>
-    <div class="mt-7 flex flex-wrap justify-center gap-3">
-      <a href="/docs/quickstart" class="btn btn-primary">Read the quickstart</a>
-      <a href="/docs/comparison" class="btn btn-ghost">This page, with its sources</a>
-    </div>
-    <p class="mt-5 text-sm text-subtle">
-      <a href="/features#matrix" class="tap underline decoration-line underline-offset-4 hover:text-fg"
-        >Try the routing matrix</a
-      >
-      ·
-      <a href="/download" class="tap underline decoration-line underline-offset-4 hover:text-fg"
-        >Install options</a
-      >
-    </p>
-  </section>
-</Base>
+    {/* LIMITS STAY ON THE PAGE, in a lower section than the table.
+
+        THE HEADING NAMES A CHOICE, NOT A DEFEAT (2026-11 design review). It was
+        "Where polyemesis loses"; it is "Choose another tool when", and each
+        block says when that tool is the better pick. The content is unchanged:
+        the same rows, the same honesty, framed as advice to the reader. */}
+    <section id="other" class="cp-sec">
+      <h2>Choose another tool when</h2>
+      <p class="cp-intro">
+        Each of these is a job another tool is built for. They are worth reading
+        before you spend an evening on an install: they follow from design
+        decisions and the project's age, not from a roadmap, so the right tool
+        for these jobs today is the one named.
+      </p>
+      <div class="rows">
+        {
+          losses.map((l) => (
+            <div class="cp-loss">
+              <h3>Choose {l.who} for</h3>
+              <p class="cp-loss-what">{l.what}</p>
+              <dl>
+                {l.rows.map(([has, here]) => (
+                  <div>
+                    <dt>{has}</dt>
+                    <dd>{fillRelease(here, release)}</dd>
+                  </div>
+                ))}
+              </dl>
+              {l.tail && <p class="cp-loss-tail">{l.tail}</p>}
+            </div>
+          ))
+        }
+      </div>
+      <p class="cp-note">
+        These come from{" "}
+        <a href="/docs/comparison">docs/COMPARISON.md</a>, which carries the same
+        rows with their evidence, their issue numbers and the date each was
+        checked, including the footnotes recording the rows that were wrong and
+        were corrected, in both directions: some had gone stale understating this
+        product, and twice a cell asserted a competitor lacked something they ship.
+      </p>
+      <p class="cp-more"><a class="more" href="/docs/quickstart">Read the quickstart</a></p>
+    </section>
+  </div>
+</InnerPage>
