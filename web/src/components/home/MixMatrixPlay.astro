@@ -1,0 +1,383 @@
+---
+/* "Route it yourself": the playable mix matrix. Destinations down, audio tracks
+ * across, a switch per cell, and a preset row to start from. One video goes to
+ * every destination; the audio is what the visitor chooses.
+ *
+ * The table markup comes from tableHtml() in matrix.ts, the same function the
+ * client re-renders with when a preset swaps the grid, so the server render and
+ * the interactive page cannot drift. It renders the sports case: with
+ * JavaScript off the section still reads correctly (cells marked, "what it
+ * receives" filled in); the buttons simply do nothing.
+ *
+ * The grid scrolls sideways inside its own frame with the destination column
+ * pinned, so a phone never scrolls the page sideways. The tracks, names and
+ * "what it receives" text all come from cases.mjs. The mockup's "Listen" demo
+ * tones are deliberately not built: they were never checked by ear.
+ *
+ * The table is injected with set:html, so its styles are global but all keyed
+ * to #matrix. */
+import { CASES, CASE_ORDER } from "../../data/cases.mjs";
+import { fromCase, summary, tableHtml } from "../../scripts/home/matrix";
+
+const first = CASES.sports;
+const initial = fromCase(first);
+---
+
+<section id="matrix" class="mx" data-matrix data-journey-stage="understand" aria-labelledby="h-matrix">
+  <div class="wrap">
+    <p class="eyebrow"><b>02</b> Understand</p>
+    <h2 id="h-matrix">Route it <em class="it it-hot">yourself</em>.</h2>
+    <p class="sec-lede">
+      One video in, and each destination picks its own audio tracks. Click a cell to send a track to a destination, or
+      start from a preset, and see what each one receives.
+    </p>
+
+    <div class="frame mx-panel">
+      <div class="frame-bar mx-strip">
+        <span>Mix matrix · demo</span>
+        <span>tracks across, destinations down, as in the console's Overview</span>
+      </div>
+      <div class="mx-presets" role="group" aria-label="Presets">
+        <span class="mx-plabel" aria-hidden="true">presets</span>
+        {
+          CASE_ORDER.map((key) => (
+            <button type="button" class="mx-chip" data-preset={key} aria-pressed={key === "sports"}>
+              {CASES[key].tab}
+            </button>
+          ))
+        }
+        <button type="button" class="mx-chip" data-preset="same" aria-pressed="false">Same mix everywhere</button>
+        <button type="button" class="mx-chip mx-quiet" data-reset>Reset</button>
+      </div>
+      <div class="mx-scroll" data-mx-table set:html={tableHtml(initial)} />
+      <div class="mx-foot">
+        <b data-mx-summary>{summary(initial)}</b>
+        <span>demo: on or off per track. The console adds a gain per track, and a mix matrix with a gain per cell and a mute per track.</span>
+      </div>
+      <p class="sr-only" aria-live="polite" data-mx-live></p>
+    </div>
+
+    <div class="mx-links">
+      <a class="more" href="/docs/audio-routing">How audio routing works</a>
+      <a class="more" href="/features">See every feature</a>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  #matrix {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+  }
+  #matrix h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  #matrix .mx-panel {
+    margin-top: 2.25rem;
+  }
+  #matrix .mx-strip {
+    justify-content: space-between;
+    flex-wrap: wrap;
+    min-height: 42px;
+    align-items: center;
+  }
+  #matrix .mx-strip span:first-child {
+    color: var(--color-fg);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  #matrix .mx-presets {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 14px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  #matrix .mx-plabel {
+    margin-right: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  #matrix .mx-chip {
+    min-height: 40px;
+    padding: 0 14px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--color-fg);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    cursor: pointer;
+  }
+  #matrix .mx-chip:hover {
+    border-color: var(--color-fg);
+  }
+  /* A pressed preset is audio routing in the accent: it reads as chosen. */
+  #matrix .mx-chip[aria-pressed="true"] {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+  #matrix .mx-chip.mx-quiet {
+    margin-left: auto;
+    border-color: transparent;
+    color: var(--color-muted);
+  }
+  #matrix .mx-chip.mx-quiet:hover {
+    color: var(--color-fg);
+  }
+  #matrix :is(.mx-chip, .mx-cell):focus-visible {
+    outline: 2px solid var(--color-fg);
+    outline-offset: 2px;
+  }
+
+  /* The grid scrolls inside this box; the page never does. */
+  #matrix .mx-scroll {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  #matrix .mx-table {
+    width: 100%;
+    min-width: 860px;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  #matrix .mx-table th,
+  #matrix .mx-table td {
+    padding: 8px 6px;
+    border-top: 1px solid var(--color-line);
+    text-align: left;
+    vertical-align: middle;
+    font-weight: 400;
+  }
+  #matrix .mx-table thead th {
+    border-top: 0;
+    padding-block: 12px 8px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+    letter-spacing: 0.04em;
+  }
+  #matrix .mx-col small {
+    display: block;
+    font-size: 0.75rem;
+  }
+  #matrix .mx-col span {
+    display: block;
+    margin-top: 3px;
+    color: var(--color-fg);
+    overflow-wrap: anywhere;
+  }
+  /* The destination column stays put while the tracks scroll under it. */
+  #matrix .mx-dest {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    width: 188px;
+    padding-left: 14px;
+    background: var(--color-surface);
+    font-family: var(--font-display);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--color-fg);
+  }
+  #matrix thead .mx-dest {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    color: var(--color-muted);
+  }
+  #matrix .mx-rcv {
+    width: 230px;
+    padding-right: 14px;
+  }
+  #matrix .mx-hears {
+    padding-right: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--color-fg);
+  }
+  #matrix .mx-video .mx-hears {
+    color: var(--color-muted);
+  }
+  /* The video row: off-white, because off-white is video, and locked. */
+  #matrix .mx-vbar {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 14px;
+    background: var(--color-fg);
+    color: var(--color-ink);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  #matrix .mx-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 0 12px;
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+    background: var(--color-ink);
+    color: var(--color-muted);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    text-align: left;
+    cursor: pointer;
+  }
+  #matrix .mx-cell:hover {
+    border-color: var(--color-line-strong);
+  }
+  #matrix .mx-sq {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--color-faint);
+  }
+  /* Lit means audio, so lit is coral. */
+  #matrix .mx-cell[aria-pressed="true"] {
+    border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+    background: color-mix(in srgb, var(--color-accent) 9%, var(--color-ink));
+    color: var(--color-accent);
+  }
+  #matrix .mx-cell[aria-pressed="true"] .mx-sq {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+  /* The track's name inside a cell is for the phone's card layout; the wide table names the track in its header. */
+  #matrix .mx-tn {
+    display: none;
+  }
+  #matrix .mx-cell.mx-flip {
+    animation: mx-flip 0.5s ease-out;
+  }
+  @keyframes mx-flip {
+    from {
+      background: color-mix(in srgb, var(--color-accent) 40%, var(--color-ink));
+    }
+  }
+  #matrix .mx-foot {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px 20px;
+    padding: 12px 14px;
+    border-top: 1px solid var(--color-line-strong);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  #matrix .mx-foot b {
+    font-weight: 500;
+    color: var(--color-accent);
+  }
+  #matrix .mx-foot span {
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  #matrix .mx-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 32px;
+    margin-top: 2.25rem;
+  }
+  @media (max-width: 759px) {
+    #matrix .mx-chip.mx-quiet {
+      margin-left: 0;
+    }
+    #matrix .mx-plabel {
+      width: 100%;
+    }
+    #matrix .mx-dest {
+      width: 132px;
+      padding-left: 12px;
+      font-size: 1rem;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #matrix .mx-cell.mx-flip {
+      animation: none;
+    }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    #matrix .mx-panel { margin-top: 1.25rem; }
+    #matrix .mx-links { margin-top: 1.25rem; }
+    #matrix .mx-presets { padding: 10px 12px; gap: 6px; }
+    #matrix .mx-foot { padding-block: 8px; }
+  }
+
+  /* PHONE: the same table, re-laid out as one card per destination (the approved mockup): the destination's
+     name, a "hears:" line, then the tracks as a two-across grid of toggle cells, each with its checkbox and the
+     track's NAME. No horizontal scrolling at 390, 360 or 320. The table's boxes become blocks, which would drop
+     its semantics, so matrix.ts writes the ARIA roles out; every cell stays a real button named "<track> to
+     <destination>". The header row stays in the accessibility tree and leaves the screen. */
+  @media (max-width: 767px) {
+    #matrix .mx-scroll { overflow: visible; padding: 0; }
+    #matrix .mx-table,
+    #matrix .mx-table tbody,
+    #matrix .mx-table tr,
+    #matrix .mx-table th,
+    #matrix .mx-table td { display: block; min-width: 0; width: auto; }
+    #matrix .mx-table { width: 100%; }
+    #matrix .mx-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+    #matrix .mx-table tbody { display: grid; gap: 12px; padding: 12px; }
+    #matrix .mx-table th,
+    #matrix .mx-table td { padding: 0; border-top: 0; }
+    #matrix .mx-dest { position: static; width: auto; padding: 0; background: transparent; font-size: 1.125rem; }
+
+    /* Video: one line above the cards. */
+    #matrix .mx-table .mx-video { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    #matrix .mx-video .mx-dest { font-size: 1rem; }
+    #matrix .mx-video .mx-dest::after { content: ":"; }
+    #matrix .mx-video > td:not(.mx-hears) { flex: 1 1 14rem; }
+    #matrix .mx-video .mx-hears { display: none; }
+    #matrix .mx-vbar { min-height: 44px; padding: 8px 12px; line-height: 1.35; }
+
+    /* A destination: name, "hears:", then its tracks two across. */
+    #matrix .mx-table .mx-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid var(--color-line);
+      background: var(--color-ink);
+    }
+    #matrix .mx-row .mx-dest { grid-column: 1 / -1; order: 0; }
+    #matrix .mx-row .mx-hears {
+      grid-column: 1 / -1;
+      order: 1;
+      padding: 0 0 4px;
+      font-size: 0.8125rem;
+      color: var(--color-fg);
+      overflow-wrap: anywhere;
+    }
+    #matrix .mx-row .mx-hears::before { content: "hears: "; color: var(--color-muted); }
+    #matrix .mx-row .mx-c { order: 2; }
+    #matrix .mx-cell { min-height: 44px; gap: 8px; padding: 0 10px; }
+    /* At 320 two cells would break "Português" mid-word: one across. */
+    @media (max-width: 359px) {
+      #matrix .mx-table .mx-row { grid-template-columns: minmax(0, 1fr); }
+    }
+    #matrix .mx-st { display: none; }
+    #matrix .mx-tn { display: inline; min-width: 0; overflow-wrap: anywhere; }
+  }
+</style>

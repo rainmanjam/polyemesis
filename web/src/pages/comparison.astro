@@ -154,7 +154,7 @@ const losses = [
       ["Multi-input compositing / video grid", "Not in polyemesis. Natural once multi-source is settled."],
       ["HDR 10-bit HEVC", "Partial in polyemesis. libx265 and hevc_nvenc exist; there is no HDR tone-map path."],
       ["LL-HLS", "Declined in polyemesis, not built. FFmpeg cannot emit LL-HLS partial segments at all, so the protocol would need a Go-side packager. Tuning instead took preview latency from 4.2–6.2 s to 2.2–3.2 s, measured."],
-      ["Maturity", "Restreamer is established. polyemesis is pre-release with one maintainer."],
+      ["Maturity", "Restreamer is established. polyemesis is still pre-release."],
     ],
   },
   {
@@ -162,7 +162,7 @@ const losses = [
     what: "The one tool here that is a peer rather than a different shape, at a scale and protocol breadth this project does not approach.",
     rows: [
       ["Protocol breadth", "A directory of muxers, including WebRTC and its own SRT output. Here: SRT, SRTLA and RTMP in, RTMP/SRT out, HLS for preview."],
-      ["Years of production deployment, and a commercial vendor behind it", "Here: pre-release, one maintainer."],
+      ["Years of production deployment, and a commercial vendor behind it", "Here: still pre-release."],
       ["Selection without decoding", "A push target that only selects tracks is a pure copy end to end. Every polyemesis destination decodes and re-encodes its audio, always, because that is what mixing is."],
     ],
   },
@@ -241,7 +241,6 @@ const selectors = [
     and would be worse now that this page has four children carrying the
     long-tail terms. */}
 <Base
-  grid
   title="Multistream tools compared: polyemesis vs the alternatives"
   description="Multistream to Twitch, YouTube and Kick from one ingest. Restreamer, restream.io, obs-multi-rtmp, Aitum, StreamElements and Streamlabs compared on audio."
   path="/comparison"

@@ -68,17 +68,21 @@ on:
       - "integrations/streamdeck/README.md"
       - "integrations/streamdeck/package.json"
       - "integrations/streamdeck/com.polyemesis.streamdeck.sdPlugin/manifest.json"
+      - "integrations/streamdeck/com.polyemesis.streamdeck.sdPlugin/imgs/**"
+      - "integrations/streamdeck/src/**"
+      - "integrations/streamdeck/scripts/keyPalette.mjs"
       - "internal/routing/profile.go"
       - "internal/ffmpeg/detect.go"
       - "go.mod"
       - "ui/package.json"
+      - "CHANGELOG.md"
       - ".github/workflows/pages.yml"
   # A RELEASE REDEPLOYS THE SITE (#559). Tagging used to rebuild nothing:
   # `branches` and `paths` are AND-ed, so a tag push matched no filter here at
   # all, and Footer.astro's `git describe --tags` plus every "latest release"
   # claim on the site stayed at whatever the last web/- or docs/-touching commit
-  # had produced. CHANGELOG.md is not in the paths list either, so the document
-  # the advisories point at could not reach the site. That is #499's "the
+  # had produced. CHANGELOG.md was not in the paths list either, so the document
+  # the advisories point at could not reach the site (it is listed now). That is #499's "the
   # correction cannot reach the site", one mechanism narrower.
   #
   # workflow_run RATHER THAN `tags:` ON THE PUSH ABOVE, because a second `push:`
@@ -165,13 +169,15 @@ jobs:
           echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
           # The globs the `pull_request:` filter used to carry, plus the files
           # web/scripts/check-build.mjs reads from outside web/ and docs/ (the
-          # root README, go.mod, ui/package.json, the routing and ffmpeg constants and the
-          # Stream Deck plugin's three Node-floor files); the
+          # root README, CHANGELOG.md (web/src/lib/release.ts reads it for the hero's version and date), go.mod, ui/package.json, the routing and ffmpeg constants, the
+          # Stream Deck plugin's three Node-floor files, and the plugin's key-layout code
+          # (src/, scripts/keyPalette.mjs and its key images) that the homepage's Stream Deck
+          # section imports); the
           # push: paths above list the same ones. Note
           # docs/** is load-bearing and not a courtesy -- astro.config.mjs maps
           # /docs/${slug} onto the repository's own docs/, so a docs-only change
           # IS a site change. See the comment on the triggers above.
-          if grep -qE '^(web/|docs/|README\.md$|go\.mod$|ui/package\.json$|internal/routing/profile\.go$|internal/ffmpeg/detect\.go$|integrations/streamdeck/(README\.md|package\.json|com\.polyemesis\.streamdeck\.sdPlugin/manifest\.json)$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
+          if grep -qE '^(web/|docs/|README\.md$|go\.mod$|ui/package\.json$|CHANGELOG\.md$|internal/routing/profile\.go$|internal/ffmpeg/detect\.go$|integrations/streamdeck/(README\.md|package\.json|scripts/keyPalette\.mjs|src/.*|com\.polyemesis\.streamdeck\.sdPlugin/(manifest\.json|imgs/.*))$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
             echo "site=true" >> "$GITHUB_OUTPUT"
             echo "touches the site: building"
           else
@@ -202,9 +208,10 @@ jobs:
     needs: site-scope
     if: needs.site-scope.outputs.site == 'true'
     runs-on: ubuntu-latest
-    # The build measures at ~5s after install; 15 minutes is almost entirely
-    # headroom for `npm ci` on a cold cache and for the upload.
-    timeout-minutes: 15
+    # Step limits below: apt mirror 3 + Chromium 8 + layout check 3 + home check 15 = 29 minutes at most.
+    # The steps without a limit of their own (npm ci ~3, unit tests ~1, build ~1, publish ~1, setup ~1)
+    # add ~7 typically, so every step can run to its limit and the job still ends by its own limit: 29 + 7 = 36 <= 40.
+    timeout-minutes: 40
     defaults:
       run:
         # Every path in this job is relative to web/, which is what makes
@@ -319,7 +326,8 @@ jobs:
           fi
 
       - name: Install Chromium
-        timeout-minutes: 10
+        # install-deps is capped at 360 s (6 minutes) by the `timeout` below; the browser download needs ~2 more.
+        timeout-minutes: 8
         run: |
           # install-deps is apt, and apt can be down on its own: on 2026-11-11
           # every *.ubuntu.com host failed DNS on the runners for over an hour
@@ -332,11 +340,14 @@ jobs:
           npx --no-install playwright install chromium
 
       - name: Card layout (browser)
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: npm run check:layout
 
       - name: Home page (browser)
-        timeout-minutes: 5
+        # Seventeen units of browser work plus the stability pass, software WebGL and 13 s idle windows: ~3.5
+        # minutes on a many-core laptop, 604.8 s (10 minutes) measured on 2 CPUs in a container. The script's own deadline is 780 s (13 minutes), so
+        # 15 lets it stop and report before the step is killed.
+        timeout-minutes: 15
         run: npm run check:home
 
       - name: Publish to Cloudflare Pages

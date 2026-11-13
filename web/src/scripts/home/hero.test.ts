@@ -1,399 +1,363 @@
 // @vitest-environment jsdom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { CASE_ORDER, CASES } from "../../data/cases.mjs";
 import type { MotionGate } from "./motion";
-import { initHero, upgradeToButton, type HeroController } from "./hero";
-import { STORIES, STORY_ORDER, destLabel, statusFor, type StoryKey } from "./stories";
+import { initHero } from "./hero";
+import { heroModel } from "./hero-model";
+import { mountGlobe, type GlobeHandle } from "./globe";
+
+/* The globe module is mocked: three.js and WebGL are not what these tests are
+ * about. They check how the hero wires the globe, not how it draws. */
+vi.mock("./globe", () => ({ mountGlobe: vi.fn() }));
 
 let allowed: boolean;
-let userPaused: boolean;
 let subs: Array<(a: boolean) => void>;
 let gate: MotionGate;
-let observers: Array<{ el: Element; cb: (e: Array<{ isIntersecting: boolean }>) => void }>;
-let hero: HeroController | null;
+let root: HTMLElement;
+let stop: (() => void) | null;
 
-class StubIO {
-  constructor(private cb: (e: Array<{ isIntersecting: boolean }>) => void) {}
-  observe(el: Element) {
-    observers.push({ el, cb: this.cb });
-  }
-  disconnect() {
-    observers = observers.filter((o) => o.cb !== this.cb);
-  }
-  unobserve() {}
-}
-
-function panelHtml(k: StoryKey): string {
-  const s = STORIES[k];
-  const chips = [`<li class="si" data-src="0"></li>`]
-    .concat(s.tracks.map((_, i) => `<li class="si" data-src="${i + 1}"></li>`))
-    .join("");
-  const lines = [0, 1, 2, 3, 4].map((i) => `<path class="ln" data-from="${i}" data-to="hub"></path>`).join("") +
-    s.dests.map((d) => `<path class="ln" data-from="hub" data-to="${d.id}"></path>`).join("");
-  const dests = s.dests
-    .map(
-      (d) =>
-        `<li><div class="dest" data-dest="${d.id}" data-on="1" data-label="${destLabel(s, d)}">` +
-        `<span class="dest-name">${d.name}</span><span class="dest-sub">${d.sub}</span><i class="pip"></i></div></li>`,
-    )
-    .join("");
-  return `<div class="dg" data-dg data-story="${k}"><svg>${lines}</svg><ul>${chips}</ul><ul>${dests}</ul></div>`;
-}
-
-function build(): HTMLElement {
+/* The same markup contract Hero.astro renders: a tablist, one panel per case
+ * (only the first visible) and a fine-print line holding the first case's text. */
+function mount(): HTMLElement {
   document.body.innerHTML = `
     <section data-hero>
-      <div role="tablist" data-story-tabs hidden>
-        ${STORY_ORDER.map((k) => `<button type="button" role="tab" id="tab-${k}" data-story="${k}" aria-controls="panel-${k}" aria-selected="${k === "streamer"}">${STORIES[k].tab}</button>`).join("")}
+      <div role="tablist" data-case-tabs>
+        ${CASE_ORDER.map(
+          (k, i) =>
+            `<button type="button" role="tab" id="tab-${k}" data-key="${k}" aria-controls="panel-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}">${CASES[k].tab}</button>`,
+        ).join("")}
       </div>
-      ${STORY_ORDER.map((k) => `<div role="tabpanel" id="panel-${k}" aria-labelledby="tab-${k}"${k === "streamer" ? "" : " hidden"}>${panelHtml(k)}</div>`).join("")}
-      <p data-status aria-live="polite"></p>
-      <p data-fine></p>
-      <button type="button" data-pause hidden aria-pressed="false">Pause motion</button>
+      ${CASE_ORDER.map(
+        (k, i) =>
+          `<div role="tabpanel" id="panel-${k}" aria-labelledby="tab-${k}"${i === 0 ? "" : " hidden"}>
+            <p data-clock>ON AIR 00:14:35</p>
+            ${CASES[k].dests.map(() => `<div class="meter"><i data-meter></i></div>`).join("")}
+          </div>`,
+      ).join("")}
+      <p data-fine>${CASES.sports.fine}</p>
+      <div data-globe></div>
     </section>`;
   return document.querySelector<HTMLElement>("[data-hero]")!;
 }
 
-const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
-const dest = (k: StoryKey, id: string) => $<HTMLButtonElement>(`#panel-${k} .dest[data-dest="${id}"]`);
-const status = () => $("[data-status]");
-/** Returns false when a listener called preventDefault. */
-const key = (el: Element, k: string) => el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
-const hover = (el: Element, type: "pointerover" | "pointerout", relatedTarget: Element | null = null) => {
-  const e = new MouseEvent(type, { bubbles: true, relatedTarget });
-  Object.defineProperty(e, "pointerType", { value: "mouse" });
-  el.dispatchEvent(e);
-};
+const selected = () => root.querySelector('[role="tab"][aria-selected="true"]')!.getAttribute("data-key");
+const fine = () => root.querySelector("[data-fine]")!.textContent;
+
+let globe: { setCase: Mock<GlobeHandle["setCase"]>; destroy: Mock<GlobeHandle["destroy"]> };
 
 beforeEach(() => {
+  globe = { setCase: vi.fn<GlobeHandle["setCase"]>(), destroy: vi.fn<GlobeHandle["destroy"]>() };
+  vi.mocked(mountGlobe).mockReset();
+  vi.mocked(mountGlobe).mockResolvedValue(globe);
+  vi.useFakeTimers();
   allowed = true;
-  userPaused = false;
   subs = [];
-  observers = [];
-  vi.stubGlobal("IntersectionObserver", StubIO);
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-    cb(0);
-    return 0;
-  });
-  vi.stubGlobal("scrollTo", vi.fn());
-  vi.stubGlobal("matchMedia", (q: string) => ({ media: q, matches: false, addEventListener() {}, removeEventListener() {} }));
   gate = {
     allowed: () => allowed,
-    userPaused: () => userPaused,
-    setUserPaused: (p) => {
-      userPaused = p;
-      allowed = !p;
-      subs.forEach((f) => f(allowed));
-    },
+    userPaused: () => !allowed,
+    setUserPaused: () => {},
     subscribe: (fn) => {
       subs.push(fn);
       return () => {
-        subs = subs.filter((f) => f !== fn);
+        subs = subs.filter((s) => s !== fn);
       };
     },
   };
-  hero = null;
+  // Visible the moment it is observed.
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(private cb: (e: Array<{ isIntersecting: boolean; intersectionRatio: number }>) => void) {}
+      observe() {
+        this.cb([{ isIntersecting: true, intersectionRatio: 1 }]);
+      }
+      disconnect() {}
+    },
+  );
+  root = mount();
+  stop = null;
 });
 
 afterEach(() => {
-  hero?.destroy();
+  stop?.();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
 
-function start(): HTMLElement {
-  const root = build();
-  hero = initHero(root, gate);
-  return root;
-}
-
 describe("initHero", () => {
-  it("un-hides the tablist and pause only once JS runs", () => {
-    const root = build();
-    expect($("[data-story-tabs]").hidden).toBe(true);
-    expect($("[data-pause]").hidden).toBe(true);
-    hero = initHero(root, gate);
-    expect($("[data-story-tabs]").hidden).toBe(false);
-    expect($("[data-pause]").hidden).toBe(false);
+  it("starts on the sports case", () => {
+    stop = initHero(root, gate);
+    expect(selected()).toBe("sports");
+    expect(fine()).toBe(CASES.sports.fine);
   });
 
-  it("upgrades destinations to buttons, keeping classes, data and label", () => {
-    const root = build();
-    const before = root.querySelector<HTMLElement>("#panel-worship .dest")!;
-    const label = before.getAttribute("data-label");
-    const kids = before.children.length;
-    hero = initHero(root, gate);
-    const after = root.querySelector<HTMLElement>("#panel-worship .dest")!;
-    expect(after.tagName).toBe("BUTTON");
-    expect(after.getAttribute("type")).toBe("button");
-    expect(after.getAttribute("aria-pressed")).toBe("false");
-    expect(after.getAttribute("aria-label")).toBe(label);
-    expect(after.className).toBe("dest");
-    expect(after.dataset.dest).toBe("en");
-    expect(after.children.length).toBe(kids);
-    expect(root.querySelectorAll("div.dest").length).toBe(0);
+  it("advances to the next case after 12 seconds, and wraps", () => {
+    stop = initHero(root, gate);
+    vi.advanceTimersByTime(11_999);
+    expect(selected()).toBe("sports");
+    vi.advanceTimersByTime(1);
+    expect(selected()).toBe("worship");
+    vi.advanceTimersByTime(12_000);
+    expect(selected()).toBe("streamer");
+    vi.advanceTimersByTime(12_000);
+    expect(selected()).toBe("sports");
   });
 
-  it("upgradeToButton keeps the element's place in the DOM", () => {
-    const root = build();
-    const el = root.querySelector<HTMLElement>(".dest")!;
-    const parent = el.parentElement!;
-    const btn = upgradeToButton(el);
-    expect(btn.parentElement).toBe(parent);
-    expect(el.isConnected).toBe(false);
-  });
-
-  it("plays the visible diagram only while it intersects", () => {
-    start();
-    const dg = $("#panel-streamer .dg");
-    expect(dg.classList.contains("is-playing")).toBe(false);
-    const io = () => observers.find((o) => o.el === dg)!;
-    io().cb([{ isIntersecting: true }]);
-    expect(dg.classList.contains("is-playing")).toBe(true);
-    io().cb([{ isIntersecting: false }]);
-    expect(dg.classList.contains("is-playing")).toBe(false);
-
-    io().cb([{ isIntersecting: true }]);
-    vi.useFakeTimers();
-    hero!.setStory("sports");
-    vi.advanceTimersByTime(150);
-    expect(dg.classList.contains("is-playing")).toBe(false);
-    const dg2 = $("#panel-sports .dg");
-    observers.find((o) => o.el === dg2)!.cb([{ isIntersecting: true }]);
-    expect(dg2.classList.contains("is-playing")).toBe(true);
-  });
-
-  it("writes the caption plus hint on init", () => {
-    start();
-    expect(status().textContent).toBe(statusFor(STORIES.streamer, null, true).text);
-    expect(status().textContent).toContain("Tap a destination");
-  });
-
-  it("pins on click and reports YouTube's mix", () => {
-    start();
-    dest("streamer", "youtube").click();
-    expect(dest("streamer", "youtube").getAttribute("aria-pressed")).toBe("true");
-    expect(status().querySelector("b")!.textContent).toBe("YouTube");
-    expect(status().textContent).toContain("Music stays off.");
-    expect(dest("streamer", "twitch").classList.contains("dim")).toBe(true);
-    expect(dest("streamer", "youtube").classList.contains("is-solo")).toBe(true);
-  });
-
-  it("Enter and Space pin, Escape clears", () => {
-    start();
-    const yt = dest("streamer", "youtube");
-    // A real button turns Enter and Space into a click; jsdom does not, so the
-    // click stands in for the browser's synthesis. That holds only for a real
-    // button whose keydown nobody cancelled, so both are asserted.
-    expect(yt.tagName).toBe("BUTTON");
-    yt.focus();
-    expect(key(yt, "Enter")).toBe(true);
-    yt.click();
-    expect(yt.getAttribute("aria-pressed")).toBe("true");
-    key(yt, "Escape");
-    expect(yt.getAttribute("aria-pressed")).toBe("false");
-    expect(status().textContent).toBe(statusFor(STORIES.streamer, null, true).text);
-    expect(key(yt, " ")).toBe(true);
-    yt.click();
-    expect(yt.getAttribute("aria-pressed")).toBe("true");
-    expect(dest("streamer", "twitch").classList.contains("dim")).toBe(true);
-    key(yt, "Escape");
-    expect(dest("streamer", "twitch").classList.contains("dim")).toBe(false);
-  });
-
-  it("clicking the pinned destination again unpins it", () => {
-    start();
-    const yt = dest("streamer", "youtube");
-    yt.click();
-    yt.click();
-    expect(yt.getAttribute("aria-pressed")).toBe("false");
-    expect(status().querySelector("b")).toBeNull();
-  });
-
-  it("previews on mouse hover without pinning", () => {
-    start();
-    const yt = dest("streamer", "youtube");
-    const over = new MouseEvent("pointerover", { bubbles: true });
-    Object.defineProperty(over, "pointerType", { value: "mouse" });
-    yt.dispatchEvent(over);
-    expect(status().querySelector("b")!.textContent).toBe("YouTube");
-    expect(yt.getAttribute("aria-pressed")).toBe("false");
-    yt.dispatchEvent(new MouseEvent("pointerout", { bubbles: true }));
-    expect(status().querySelector("b")).toBeNull();
-  });
-
-  it("a hover sweep across cards writes the status once per card", () => {
-    start();
-    const yt = dest("streamer", "youtube");
-    const tw = dest("streamer", "twitch");
-    const writes = vi.spyOn(status(), "replaceChildren");
-    hover(tw, "pointerover");
-    hover(tw.querySelector(".dest-name")!, "pointerout", tw); // within the card
-    hover(tw, "pointerout", yt); // straight onto the next card
-    hover(yt, "pointerover");
-    expect(writes).toHaveBeenCalledTimes(2);
-    expect(status().querySelector("b")!.textContent).toBe("YouTube");
-    hover(yt, "pointerout", document.body); // off the cards
-    expect(writes).toHaveBeenCalledTimes(3);
-    expect(status().querySelector("b")).toBeNull();
-  });
-
-  it("previews on keyboard focus only when :focus-visible matches", () => {
-    start();
-    const yt = dest("streamer", "youtube");
-    const matches = vi.spyOn(Element.prototype, "matches").mockImplementation(function (this: Element, s: string) {
-      return s === ":focus-visible";
-    });
-    yt.focus();
-    expect(status().querySelector("b")!.textContent).toBe("YouTube");
-    yt.blur();
-    expect(status().querySelector("b")).toBeNull();
-    // A browser that cannot parse :focus-visible throws; that is "not visible".
-    matches.mockImplementation(() => {
-      throw new SyntaxError("unsupported");
-    });
-    yt.focus();
-    expect(status().querySelector("b")).toBeNull();
-    matches.mockRestore();
-  });
-
-  it("re-selecting the shown story keeps the pin", () => {
-    start();
-    dest("streamer", "youtube").click();
-    $("#tab-streamer").click();
-    expect(dest("streamer", "youtube").getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("makes the fading panel inert during the swap", () => {
-    vi.useFakeTimers();
-    start();
-    hero!.setStory("sports");
-    expect($("#panel-streamer").inert).toBe(true);
-    vi.advanceTimersByTime(150);
-    expect($("#panel-streamer").inert).toBe(false);
-    expect($("#panel-streamer").hidden).toBe(true);
-  });
-
-  it("dims the music chip when YouTube is soloed", () => {
-    start();
-    dest("streamer", "youtube").click();
-    expect($('#panel-streamer li.si[data-src="2"]').classList.contains("dim")).toBe(true);
-    expect($('#panel-streamer li.si[data-src="1"]').classList.contains("dim")).toBe(false);
-    expect($('#panel-streamer .ln[data-from="2"]').classList.contains("dim")).toBe(true);
-    expect($('#panel-streamer .ln[data-to="twitch"]').classList.contains("dim")).toBe(true);
-    expect($('#panel-streamer .ln[data-to="youtube"]').classList.contains("dim")).toBe(false);
-  });
-
-  it("dims the video chip for a destination without video", () => {
-    start();
+  it("does not advance while the gate disallows motion, and resumes when it allows", () => {
     allowed = false;
-    hero!.setStory("worship");
-    dest("worship", "audio").click();
-    expect($('#panel-worship li.si[data-src="0"]').classList.contains("dim")).toBe(true);
+    stop = initHero(root, gate);
+    vi.advanceTimersByTime(60_000);
+    expect(selected()).toBe("sports");
+    allowed = true;
+    subs.forEach((fn) => fn(true));
+    vi.advanceTimersByTime(12_000);
+    expect(selected()).toBe("worship");
   });
 
-  it("ArrowRight moves to Sports, selects it and shows its panel", () => {
-    vi.useFakeTimers();
-    start();
-    const streamer = $("#tab-streamer");
-    streamer.focus();
-    key(streamer, "ArrowRight");
-    vi.advanceTimersByTime(150);
-    const sports = $("#tab-sports");
-    expect(sports.getAttribute("aria-selected")).toBe("true");
-    expect(streamer.getAttribute("aria-selected")).toBe("false");
-    expect(document.activeElement).toBe(sports);
-    expect($("#panel-sports").hidden).toBe(false);
-    expect($("#panel-streamer").hidden).toBe(true);
-    expect(sports.getAttribute("tabindex")).toBe("0");
-    expect(streamer.getAttribute("tabindex")).toBe("-1");
-    expect($("#tab-worship").getAttribute("tabindex")).toBe("-1");
-    expect(hero!.story()).toBe("sports");
-  });
-
-  it("ArrowLeft and ArrowRight wrap", () => {
+  it("stops advancing when the gate turns motion off", () => {
+    stop = initHero(root, gate);
     allowed = false;
-    start();
-    key($("#tab-streamer"), "ArrowLeft");
-    expect(hero!.story()).toBe("worship");
-    key($("#tab-worship"), "ArrowRight");
-    expect(hero!.story()).toBe("streamer");
+    subs.forEach((fn) => fn(false));
+    vi.advanceTimersByTime(60_000);
+    expect(selected()).toBe("sports");
   });
 
-  it("End/Home jump to Worship/Streamer", () => {
+  it("stops advancing for good after a click on a tab", () => {
+    stop = initHero(root, gate);
+    root.querySelector<HTMLElement>("#tab-streamer")!.click();
+    expect(selected()).toBe("streamer");
+    vi.advanceTimersByTime(120_000);
+    expect(selected()).toBe("streamer");
+    // not even when motion goes off and on again
+    subs.forEach((fn) => fn(false));
+    subs.forEach((fn) => fn(true));
+    vi.advanceTimersByTime(120_000);
+    expect(selected()).toBe("streamer");
+  });
+
+  it("keeps advancing after Pause then Resume (the Pause button is not a take-over)", () => {
+    root.insertAdjacentHTML("beforeend", '<button type="button" data-pause aria-pressed="false">Pause motion</button>');
+    const pause = root.querySelector<HTMLElement>("[data-pause]")!;
+    stop = initHero(root, gate);
+    // boot() wires Pause to the gate; here the same effect is the gate callbacks.
+    pause.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    pause.click();
     allowed = false;
-    start();
-    key($("#tab-streamer"), "End");
-    expect(hero!.story()).toBe("worship");
-    expect($("#panel-worship").hidden).toBe(false);
-    key($("#tab-worship"), "Home");
-    expect(hero!.story()).toBe("streamer");
-    expect($("#panel-streamer").hidden).toBe(false);
+    subs.forEach((fn) => fn(false));
+    pause.click();
+    allowed = true;
+    subs.forEach((fn) => fn(true));
+    vi.advanceTimersByTime(12_000);
+    expect(selected()).toBe("worship");
   });
 
-  it("story switch clears the pin and swaps the fine print", () => {
-    allowed = false;
-    start();
-    dest("streamer", "youtube").click();
-    $("#tab-worship").click();
-    expect($("[data-fine]").textContent).toMatch(/doesn't license music/);
-    expect(status().textContent).toBe(statusFor(STORIES.worship, null, true).text);
-    hero!.setStory("streamer");
-    expect(dest("streamer", "youtube").getAttribute("aria-pressed")).toBe("false");
-    expect(dest("streamer", "twitch").classList.contains("dim")).toBe(false);
+  it("stops advancing after a pointer press or a key press inside the hero", () => {
+    stop = initHero(root, gate);
+    root.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    vi.advanceTimersByTime(60_000);
+    expect(selected()).toBe("sports");
+
+    stop();
+    root = mount();
+    stop = initHero(root, gate);
+    root.querySelector<HTMLElement>("#tab-sports")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    vi.advanceTimersByTime(60_000);
+    expect(selected()).toBe("sports");
   });
 
-  it("writes status with textContent, never markup", () => {
-    start();
-    const original = STORIES.streamer.dests[1].name;
-    try {
-      STORIES.streamer.dests[1].name = "<img src=x>";
-      dest("streamer", "youtube").click();
-      const b = status().querySelector("b")!;
-      expect(b.textContent).toBe("<img src=x>");
-      expect(status().querySelector("img")).toBeNull();
-    } finally {
-      STORIES.streamer.dests[1].name = original;
+  it("dispatches case:change with the key on every change", () => {
+    const seen: string[] = [];
+    root.addEventListener("case:change", (e) => seen.push((e as CustomEvent<{ key: string }>).detail.key));
+    stop = initHero(root, gate);
+    vi.advanceTimersByTime(12_000);
+    root.querySelector<HTMLElement>("#tab-sports")!.click();
+    expect(seen.at(-2)).toBe("worship");
+    expect(seen.at(-1)).toBe("sports");
+  });
+
+  it("shows the fine print of the current case", () => {
+    stop = initHero(root, gate);
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    expect(fine()).toBe(CASES.worship.fine);
+    root.querySelector<HTMLElement>("#tab-streamer")!.click();
+    expect(fine()).toBe(CASES.streamer.fine);
+  });
+
+  it("sets the fine print as text, not markup", () => {
+    const original = CASES.worship.fine;
+    CASES.worship.fine = "<b>x</b> & <i>y</i>";
+    stop = initHero(root, gate);
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    expect(root.querySelector("[data-fine] b")).toBeNull();
+    expect(fine()).toBe("<b>x</b> & <i>y</i>");
+    CASES.worship.fine = original;
+  });
+
+  it("shows only the selected case's panel", () => {
+    stop = initHero(root, gate);
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    expect(root.querySelector<HTMLElement>("#panel-worship")!.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>("#panel-sports")!.hidden).toBe(true);
+  });
+
+  it("the disposer stops the timer and the tab controller", () => {
+    const dispose = initHero(root, gate);
+    dispose();
+    vi.advanceTimersByTime(60_000);
+    expect(selected()).toBe("sports");
+    root.querySelector<HTMLElement>("#tab-streamer")!.click();
+    expect(selected()).toBe("sports");
+  });
+});
+
+describe("heroModel", () => {
+  it("gives the sports case five tiles of six chips, two lit each", () => {
+    const m = heroModel("sports");
+    expect(m.tiles).toHaveLength(5);
+    for (const t of m.tiles) {
+      expect(t.chips).toHaveLength(6);
+      expect(t.chips.filter((c) => c.on)).toHaveLength(2);
     }
   });
-
-  it("runs the swap animation only when motion is allowed", () => {
-    vi.useFakeTimers();
-    start();
-    hero!.setStory("sports");
-    expect($("#panel-streamer").classList.contains("swap-out")).toBe(true);
-    expect($("#panel-streamer").hidden).toBe(false);
-    vi.advanceTimersByTime(150);
-    expect($("#panel-streamer").classList.contains("swap-out")).toBe(false);
-    expect($("#panel-streamer").hidden).toBe(true);
+  it("keeps chips in track order and lights the destination's own tracks", () => {
+    const t = heroModel("sports").tiles[1];
+    expect(t.chips.map((c) => c.label)).toEqual(CASES.sports.tracks.map((x: { label: string }) => x.label));
+    expect(t.chips.filter((c) => c.on).map((c) => c.label)).toEqual(["Español", "Crowd"]);
+    expect(t.mix).toBe("video + ESPAÑOL + CROWD");
+    expect(t.city).toBe("Bogotá");
   });
+  it("counts destinations and distinct audio mixes for the header", () => {
+    for (const k of CASE_ORDER) expect(heroModel(k).header).toEqual({ destinations: 5, mixes: 5 });
+  });
+});
 
-  it("skips the swap animation when motion is not allowed", () => {
+describe("hero motion", () => {
+  const meters = () => [...root.querySelectorAll<HTMLElement>("[data-meter]")].map((m) => m.style.transform);
+  const clock = () => root.querySelector("[data-clock]")!.textContent;
+
+  it("does nothing while the gate disallows motion", () => {
     allowed = false;
-    start();
-    const add = vi.spyOn(DOMTokenList.prototype, "add");
-    hero!.setStory("sports");
-    expect(add.mock.calls.some((c) => c.includes("swap-out"))).toBe(false);
-    expect($("#panel-streamer").hidden).toBe(true);
-    expect($("#panel-sports").hidden).toBe(false);
-    add.mockRestore();
+    stop = initHero(root, gate);
+    const m0 = meters();
+    const c0 = clock();
+    vi.advanceTimersByTime(30_000);
+    expect(meters()).toEqual(m0);
+    expect(clock()).toBe(c0);
   });
 
-  it("finishes a pending swap when the visitor switches again", () => {
-    vi.useFakeTimers();
-    start();
-    hero!.setStory("sports");
-    hero!.setStory("worship");
-    vi.advanceTimersByTime(150);
-    expect($("#panel-worship").hidden).toBe(false);
-    expect($("#panel-sports").hidden).toBe(true);
-    expect($("#panel-streamer").hidden).toBe(true);
+  it("moves the meters, differently per destination, and ticks the clock once a second", () => {
+    stop = initHero(root, gate);
+    const panel = root.querySelector("#panel-sports")!;
+    const m0 = meters();
+    vi.advanceTimersByTime(1000);
+    expect(clock()).toBe("ON AIR 00:14:36");
+    vi.advanceTimersByTime(4000);
+    expect(clock()).toBe("ON AIR 00:14:40");
+    const m1 = meters();
+    expect(m1).not.toEqual(m0);
+    const first = [...panel.querySelectorAll<HTMLElement>("[data-meter]")].map((m) => m.style.transform);
+    expect(new Set(first).size).toBeGreaterThan(1);
   });
 
-  it("does not bind pause itself (boot owns it)", () => {
-    start();
-    $("[data-pause]").click();
-    expect(userPaused).toBe(false);
+  it("stops when the gate turns motion off", () => {
+    stop = initHero(root, gate);
+    vi.advanceTimersByTime(2000);
+    allowed = false;
+    subs.forEach((fn) => fn(false));
+    const m = meters();
+    const c = clock();
+    vi.advanceTimersByTime(30_000);
+    expect(meters()).toEqual(m);
+    expect(clock()).toBe(c);
+  });
+
+  it("the disposer stops the meters and the clock", () => {
+    const dispose = initHero(root, gate);
+    vi.advanceTimersByTime(2000);
+    dispose();
+    const m = meters();
+    const c = clock();
+    vi.advanceTimersByTime(30_000);
+    expect(meters()).toEqual(m);
+    expect(clock()).toBe(c);
+  });
+
+  it("keeps moving after the visitor takes over the tabs", () => {
+    stop = initHero(root, gate);
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    const c = clock();
+    vi.advanceTimersByTime(3000);
+    expect(clock()).not.toBe(c);
+  });
+});
+
+describe("hero globe", () => {
+  const settle = () => vi.advanceTimersByTimeAsync(0);
+
+  it("mounts the globe once when its box is near, with the gate and the current case", async () => {
+    stop = initHero(root, gate);
+    await settle();
+    expect(mountGlobe).toHaveBeenCalledTimes(1);
+    const [el, g, c] = vi.mocked(mountGlobe).mock.calls[0];
+    expect(el).toBe(root.querySelector("[data-globe]"));
+    expect(g).toBe(gate);
+    expect(c).toBe(CASES.sports);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(mountGlobe).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not mount the globe until its box is near", async () => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    stop = initHero(root, gate);
+    await settle();
+    expect(mountGlobe).not.toHaveBeenCalled();
+  });
+
+  it("tells the globe about every case change", async () => {
+    stop = initHero(root, gate);
+    await settle();
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    expect(globe.setCase).toHaveBeenLastCalledWith(CASES.worship);
+    root.querySelector<HTMLElement>("#tab-streamer")!.click();
+    expect(globe.setCase).toHaveBeenLastCalledWith(CASES.streamer);
+  });
+
+  it("gives the globe the case chosen while it was still loading", async () => {
+    let resolve!: (g: typeof globe) => void;
+    vi.mocked(mountGlobe).mockReturnValue(new Promise((r) => (resolve = r)));
+    stop = initHero(root, gate);
+    await settle();
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    resolve(globe);
+    await settle();
+    expect(globe.setCase).toHaveBeenCalledWith(CASES.worship);
+  });
+
+  it("the disposer destroys the globe and stops forwarding case changes", async () => {
+    const dispose = initHero(root, gate);
+    await settle();
+    dispose();
+    expect(globe.destroy).toHaveBeenCalledTimes(1);
+    root.querySelector<HTMLElement>("#tab-worship")!.click();
+    expect(globe.setCase).not.toHaveBeenCalled();
+  });
+
+  it("destroys a globe that finishes loading after the disposer ran", async () => {
+    let resolve!: (g: typeof globe) => void;
+    vi.mocked(mountGlobe).mockReturnValue(new Promise((r) => (resolve = r)));
+    const dispose = initHero(root, gate);
+    await settle();
+    dispose();
+    resolve(globe);
+    await settle();
+    expect(globe.destroy).toHaveBeenCalledTimes(1);
   });
 });

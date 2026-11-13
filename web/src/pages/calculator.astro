@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import { HEADROOM_PCT, OVERHEAD_PCT } from "../lib/calc";
 
 /* A BANDWIDTH CALCULATOR THAT MODELS THIS PRODUCT, NOT MULTISTREAMING IN GENERAL.
  *
@@ -61,7 +62,6 @@ const CHECKED = "2026-08-06";
 ---
 
 <Base
-  grid
   title="Bandwidth calculator for multistreaming — polyemesis"
   description="Work out the upstream and server bandwidth a multistream actually needs, and the data it moves per day, week and month. Models stream-copied video, so the numbers match what a self-hosted restreamer really sends."
   path="/calculator"
@@ -255,7 +255,7 @@ const CHECKED = "2026-08-06";
                 min="0"
                 max="30"
                 step="1"
-                value="5"
+                value={OVERHEAD_PCT}
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
               <span class="text-[11px] text-muted">
@@ -270,7 +270,7 @@ const CHECKED = "2026-08-06";
                 min="0"
                 max="100"
                 step="5"
-                value="20"
+                value={HEADROOM_PCT}
                 class="rounded-md border border-line bg-transparent px-2 py-1.5 text-sm text-fg"
               />
               <span class="text-[11px] text-muted">
@@ -366,6 +366,18 @@ const CHECKED = "2026-08-06";
 </Base>
 
 <script>
+  import {
+    HEADROOM_PCT,
+    OVERHEAD_PCT,
+    egressKbps,
+    fmtData,
+    fmtRate,
+    gbFor,
+    ingestKbps,
+    perMonth,
+    withMargins,
+  } from "../lib/calc";
+
   /* Plain DOM, matching MixMatrix: a framework for one form would outweigh the
      page it sits on. */
 
@@ -403,13 +415,8 @@ const CHECKED = "2026-08-06";
     return out.concat(custom);
   }
 
-  const mbps = (kbps: number) => kbps / 1000;
-  const fmtRate = (k: number) => `${mbps(k).toFixed(1)} Mbps`;
-  /* Decimal GB -- the unit hosts bill in. 1 Mbps for 1 hour is 450 MB:
-     1e6 bits/s x 3600 s / 8 = 450e6 bytes. */
-  const gbFor = (k: number, hours: number) => (mbps(k) * 450 * hours) / 1000;
-  const fmtData = (gb: number) =>
-    gb >= 1000 ? `${(gb / 1000).toFixed(2)} TB` : `${gb.toFixed(1)} GB`;
+  /* The formulas and number formats live in src/lib/calc.ts, shared with the
+     homepage calculator. */
 
   function warn(kind: "hard" | "soft", text: string) {
     const box = $("warnings");
@@ -532,8 +539,8 @@ const CHECKED = "2026-08-06";
     const sharedVideo = num("video-kbps", 6000);
     const sharedAudio = num("audio-kbps", 160);
     const tracks = Math.max(1, num("tracks", 1));
-    const overhead = 1 + num("overhead", 5) / 100;
-    const headroom = 1 + num("headroom", 20) / 100;
+    const overheadPct = num("overhead", OVERHEAD_PCT);
+    const headroomPct = num("headroom", HEADROOM_PCT);
     const hours = Math.max(0, num("hours", 4));
     const perWeek = Math.max(0, num("per-week", 4));
 
@@ -547,7 +554,7 @@ const CHECKED = "2026-08-06";
     const copied: Dest[] = [];
     for (const d of dests) {
       const r = ratesFor(d, sharedVideo, sharedAudio);
-      egressRaw += r.video + r.audio;
+      egressRaw += egressKbps({ video: r.video, audio: r.audio, dests: 1 });
       if (r.copied) copied.push(d);
       else renditionRates.add(r.video);
       if (!r.copied && r.video > d.max) {
@@ -560,9 +567,9 @@ const CHECKED = "2026-08-06";
       }
     }
 
-    const ingestRaw = sharedVideo + sharedAudio * tracks;
-    $("r-ingest")!.textContent = fmtRate(ingestRaw * overhead * headroom);
-    $("r-egress")!.textContent = fmtRate(egressRaw * overhead * headroom);
+    const ingestRaw = ingestKbps({ video: sharedVideo, audio: sharedAudio, tracks });
+    $("r-ingest")!.textContent = fmtRate(withMargins(ingestRaw, overheadPct, headroomPct));
+    $("r-egress")!.textContent = fmtRate(withMargins(egressRaw, overheadPct, headroomPct));
     $("r-ingest-note")!.textContent =
       `${fmtRate(ingestRaw)} of media${tracks > 1 ? ` across ${tracks} tracks` : ""}, ` +
       `plus overhead and headroom.`;
@@ -573,10 +580,10 @@ const CHECKED = "2026-08-06";
 
     // Data uses overhead but not headroom: headroom is capacity you provision,
     // not bytes you send, and billing one as the other overstates the invoice.
-    const perStream = gbFor(egressRaw * overhead, hours);
+    const perStream = gbFor(egressRaw, hours, overheadPct);
     $("r-per")!.textContent = fmtData(perStream);
     $("r-week")!.textContent = fmtData(perStream * perWeek);
-    $("r-month")!.textContent = fmtData(perStream * perWeek * 4.35);
+    $("r-month")!.textContent = fmtData(perMonth(perStream, perWeek));
 
     // The copied bitstream is ONE stream, so the binding recommendation is the
     // strictest of the destinations still taking it. Destinations on a

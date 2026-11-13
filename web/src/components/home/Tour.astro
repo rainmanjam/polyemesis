@@ -1,0 +1,157 @@
+---
+/* The video tour, under "How it works" (rendered by HowItWorks.astro).
+ *
+ * A silent, captioned 1080p recording of the console, in a .frame. The poster
+ * and the file are served from /media/ on the site itself, which the CSP's
+ * default-src 'self' allows. width and height reserve the box so nothing
+ * shifts when the poster arrives; preload="none" keeps the 7 MB file off the
+ * wire until somebody plays it or scrolls it half into view.
+ *
+ * The chapters are real buttons: tour.ts seeks and plays when one is pressed.
+ * Without JS the video still has its controls and the chapters stay readable
+ * as a list, but they are drawn as plain text, not as something to press, until
+ * tour.ts marks the block .is-live and enables the buttons: without it they are
+ * rendered disabled, so nothing looks or tabs like a control that does nothing. */
+import { TOUR, clock, isoDuration } from "../../data/tour.mjs";
+---
+
+<div class="wrap tour" data-tour>
+  <div class="tour-grid">
+    <div>
+      <div class="frame">
+        <div class="frame-bar">
+          <span>polyemesis console</span>
+          <span>Video tour · {clock(TOUR.duration)}</span>
+        </div>
+        <video
+          class="tour-video"
+          muted
+          playsinline
+          preload="none"
+          controls
+          poster={TOUR.poster}
+          width={TOUR.width}
+          height={TOUR.height}
+          aria-label="Video tour of the polyemesis console"
+        >
+          <source src={TOUR.src} type="video/mp4" />
+          Your browser cannot play this video. The <a href="/docs/quickstart">quickstart</a> walks through the same ground in writing.
+        </video>
+      </div>
+      <p class="tour-cap"><b>Video tour</b> · silent, with captions</p>
+    </div>
+    <div class="tour-side">
+      <h3>See it on a real console.</h3>
+      <ol class="chapters">
+        {
+          TOUR.chapters.map((c) => (
+            <li>
+              <button type="button" data-seek={c.start} disabled>
+                <time datetime={isoDuration(c.start)}>{clock(c.start)}</time>
+                <span>{c.title}</span>
+              </button>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </div>
+  <div class="tour-links">
+    <a class="more" href="/docs/quickstart">Read the quickstart</a>
+    <a class="more" href="/features">See every feature</a>
+  </div>
+</div>
+
+<style>
+  .tour {
+    margin-top: clamp(3rem, 7vw, 4.5rem);
+  }
+  .tour-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  .tour-video {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    background: var(--color-ink);
+  }
+  .frame-bar {
+    justify-content: space-between;
+  }
+  .tour-cap {
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-muted);
+  }
+  .tour-cap b {
+    color: var(--color-fg);
+    font-weight: 500;
+  }
+  .tour-side h3 {
+    margin: 6px 0 18px;
+    font-size: 1.375rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .chapters {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+  }
+  .chapters li {
+    border-bottom: 1px solid var(--color-line);
+  }
+  .chapters button {
+    display: flex;
+    gap: 18px;
+    align-items: baseline;
+    width: 100%;
+    min-height: 44px;
+    padding: 14px 0;
+    background: none;
+    border: 0;
+    color: var(--color-fg);
+    font: inherit;
+    text-align: left;
+    cursor: default;
+    pointer-events: none;
+  }
+  .is-live .chapters button {
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .is-live .chapters button:hover,
+  .is-live .chapters button:focus-visible {
+    color: var(--color-accent);
+  }
+  .chapters time {
+    min-width: 3.2em;
+    color: var(--color-muted);
+  }
+  .tour-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 32px;
+    margin-top: 36px;
+  }
+  @media (min-width: 1024px) {
+    .tour-grid {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+      gap: 40px;
+      align-items: start;
+    }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .tour { margin-top: 2rem; }
+    .tour-links { margin-top: 20px; }
+  }
+</style>

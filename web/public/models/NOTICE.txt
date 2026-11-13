@@ -1,0 +1,7 @@
+stream-deck-plus.glb
+
+This 3D model of a Stream Deck + is derived from Elgato's "Stream Deck + STP"
+file, from the Elgato Marketplace. It is not covered by this repository's MIT
+licence, and the original STP file is not included. Stream Deck + model: Elgato.
+
+polyemesis is not affiliated with or endorsed by Elgato.

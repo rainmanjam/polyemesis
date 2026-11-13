@@ -1,0 +1,378 @@
+---
+/* "Pick how you run it": three install methods as tabs, one terminal block
+ * each. Every command comes from data/install.mjs (the same strings the
+ * download page and the install-commands test read); nothing is typed here.
+ *
+ * All three panels are server-rendered. Without script the tablist is hidden
+ * and each panel carries its own heading, so every method is readable;
+ * scripts/home/install.ts marks the section ready and shows one panel at a
+ * time. The steps under each command are the ones docs/QUICKSTART.md (steps 1
+ * to 6) and docs/INSTALL.md describe for that method: the setup code is read
+ * from `docker logs` for docker run, `docker compose logs` for Compose and the
+ * installer's closing summary for the script (INSTALL.md, "The first-run setup
+ * code"). Version floors come from data/facts.mjs; Docker Engine 20.10+ is
+ * INSTALL.md's own prerequisite line.
+ * The Docker tab is noted "for a first try", the wording of QUICKSTART.md "Run it". */
+import CodeBlock from "../CodeBlock.astro";
+import { CLONE, COMPOSE_UP, DOCKER_RUN, INSTALL_SCRIPT } from "../../data/install.mjs";
+import { FFMPEG_FLOOR } from "../../data/facts.mjs";
+
+const DOCKER_ENGINE = "Docker Engine 20.10+";
+
+const ADD = [
+  "Add a source",
+  "On Sources, add one, pick SRT or RTMP on its card and press Apply. SRT carries every audio track.",
+] as const;
+const DEST = [
+  "Add a destination",
+  "On Destinations, press Add, choose the platform, and tick the tracks it should carry. Enable it.",
+] as const;
+
+const METHODS = [
+  {
+    key: "docker",
+    tab: "Docker",
+    note: "for a first try",
+    label: "docker run",
+    code: DOCKER_RUN,
+    needs: `${DOCKER_ENGINE} or Docker Desktop. Nothing else on the host: the image bundles FFmpeg.`,
+    steps: [
+      ["Open the console", "Go to http://localhost:8080."],
+      ["Create your admin", "Use the setup code printed by docker logs polyemesis. It works once."],
+      ADD,
+      DEST,
+    ],
+  },
+  {
+    key: "compose",
+    tab: "Docker Compose",
+    note: "",
+    label: "docker compose, from a clone",
+    code: `${CLONE}\n${COMPOSE_UP}`,
+    needs: `${DOCKER_ENGINE} or Docker Desktop, and git. The clone supplies the compose file; the image bundles FFmpeg.`,
+    steps: [
+      ["Open the console", "Go to http://localhost:8080."],
+      ["Create your admin", "Use the setup code printed by docker compose logs polyemesis. It works once."],
+      ADD,
+      DEST,
+    ],
+  },
+  {
+    key: "script",
+    tab: "Install script",
+    note: "Linux server",
+    label: "install.sh, read it first",
+    code: INSTALL_SCRIPT,
+    needs: `A Linux server with systemd, run as root. Docker mode bundles FFmpeg; binary mode needs FFmpeg ${FFMPEG_FLOOR} or later with SRT, and offers to install one.`,
+    steps: [
+      ["Answer its questions", "Docker or binary, ports and TLS. Nothing is written until you have seen the plan and confirmed it."],
+      ["Open the console", "The closing summary gives the address to open (localhost, unless you named a domain) and the one-time setup code."],
+      ADD,
+      DEST,
+    ],
+  },
+] as const;
+---
+
+<section id="install" class="inst-sec" data-install data-journey-stage="install" aria-labelledby="h-install">
+  <div class="wrap">
+    <p class="eyebrow"><b>04</b> Install</p>
+    <h2 id="h-install">Pick how you <em class="it it-hot">run</em> it.</h2>
+    <p class="sec-lede">
+      Docker is the shortest path and bundles a known-good FFmpeg. The install script sets up a Linux server for you.
+    </p>
+
+    <div class="inst-grid">
+      <div class="inst-main">
+        <div class="inst-tabs" role="tablist" aria-label="Install method" data-install-tabs>
+          {
+            METHODS.map((m, i) => (
+              <button
+                type="button"
+                role="tab"
+                class="inst-tab"
+                id={`install-tab-${m.key}`}
+                data-key={m.key}
+                aria-controls={`install-panel-${m.key}`}
+                aria-selected={i === 0 ? "true" : "false"}
+                tabindex={i === 0 ? 0 : -1}
+              >
+                {m.tab}
+                {m.note && <> <i>{m.note}</i></>}
+              </button>
+            ))
+          }
+        </div>
+
+        {
+          METHODS.map((m) => (
+            <div role="tabpanel" class="inst-panel" id={`install-panel-${m.key}`} aria-labelledby={`install-tab-${m.key}`}>
+              <h3 class="inst-panel-h">{m.tab}</h3>
+              <CodeBlock label={m.label} code={m.code} />
+              <p class="inst-need">
+                <span>Needs</span>
+                <span>{m.needs}</span>
+              </p>
+              <ol class="inst-steps">
+                {m.steps.map(([head, text]) => (
+                  <li>
+                    <b>{head}</b>
+                    <span>{text}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))
+        }
+
+        <p class="inst-alt">
+          Prefer a single binary? Static builds are on{" "}
+          <a href="https://github.com/rainmanjam/polyemesis/releases/latest" rel="noopener">GitHub Releases</a>; you
+          supply FFmpeg {FFMPEG_FLOOR} or later.
+        </p>
+      </div>
+
+      <aside class="inst-aside" aria-label="What you need and where to go next">
+        <div>
+          <h3>What you need</h3>
+          <ul class="inst-check">
+            <li>With Docker: {DOCKER_ENGINE} or Docker Desktop. FFmpeg is bundled.</li>
+            <li>Without Docker: FFmpeg {FFMPEG_FLOOR} or later with SRT on the host.</li>
+            <li>Port 8080 (TCP) for the console, 6000 (UDP) for SRT in, 1935 (TCP) for RTMP in</li>
+            <li>Ports 80 and 443 only when polyemesis serves HTTPS itself</li>
+            <li>Linux and Docker are the primary platforms</li>
+          </ul>
+        </div>
+        <div>
+          <h3>After you install</h3>
+          <div class="inst-after">
+            <a href="/docs/quickstart">Quickstart <span>first stream out</span></a>
+            <a href="/docs/connecting-platforms">Connecting platforms <span>sign-in and keys</span></a>
+            <a href="/docs/obs">Sending from OBS <span>multitrack SRT</span></a>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <p class="inst-foot"><a class="more" href="/download">All downloads and versions</a></p>
+  </div>
+</section>
+
+<style>
+  .inst-sec {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+  }
+  .inst-sec h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .inst-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+    margin-top: 2.5rem;
+  }
+  @media (min-width: 1100px) {
+    .inst-grid {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+      gap: 64px;
+      align-items: start;
+    }
+  }
+  .inst-main {
+    min-width: 0;
+  }
+
+  /* No script: no tablist, every panel under its own heading. */
+  .inst-tabs {
+    display: none;
+  }
+  .inst-panel + .inst-panel {
+    margin-top: 40px;
+  }
+  .inst-panel-h {
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  /* Script ran: one panel at a time under the tabs. */
+  [data-install][data-ready] .inst-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  [data-install][data-ready] .inst-panel-h {
+    display: none;
+  }
+  [data-install][data-ready] .inst-panel + .inst-panel {
+    margin-top: 0;
+  }
+  .inst-tab {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 12px 18px;
+    margin-bottom: -1px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    font: inherit;
+    font-weight: 500;
+    color: var(--color-muted);
+    cursor: pointer;
+  }
+  .inst-tab i {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-style: normal;
+    color: var(--color-muted);
+  }
+  .inst-tab:hover {
+    color: var(--color-fg);
+  }
+  .inst-tab[aria-selected="true"] {
+    color: var(--color-fg);
+    border-bottom-color: var(--color-accent);
+  }
+  .inst-tab:focus-visible {
+    outline: 2px solid var(--color-fg);
+    outline-offset: -2px;
+  }
+
+  .inst-need {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .inst-need span:first-child {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding-top: 3px;
+  }
+  .inst-steps {
+    list-style: none;
+    margin: 20px 0 0;
+    padding: 0;
+    border-top: 1px solid var(--color-line);
+    counter-reset: inst;
+  }
+  .inst-steps li {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-line);
+    counter-increment: inst;
+  }
+  .inst-steps li::before {
+    content: counter(inst);
+    grid-row: 1 / span 2;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-accent);
+    padding-top: 1px;
+  }
+  .inst-steps b {
+    grid-column: 2;
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  .inst-steps span {
+    grid-column: 2;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+  .inst-alt {
+    margin-top: 24px;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .inst-alt a {
+    color: var(--color-fg);
+    text-decoration: underline;
+    text-decoration-color: var(--color-line-strong);
+    text-underline-offset: 3px;
+  }
+
+  .inst-aside {
+    display: grid;
+    gap: 36px;
+    min-width: 0;
+  }
+  .inst-aside h3 {
+    margin-bottom: 14px;
+    font-size: 1.375rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .inst-check {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .inst-check li {
+    padding: 11px 0;
+    border-bottom: 1px solid var(--color-line);
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+  .inst-after {
+    display: grid;
+    border-top: 1px solid var(--color-line);
+  }
+  .inst-after a {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 16px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--color-line);
+    font-weight: 500;
+    color: var(--color-fg);
+  }
+  .inst-after a:hover {
+    color: var(--color-accent);
+  }
+  .inst-after span {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .inst-foot {
+    margin-top: 32px;
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .inst-grid { margin-top: 1.5rem; gap: 28px; }
+    .inst-aside { gap: 24px; }
+    .inst-tab { padding-block: 9px; }
+    .inst-steps { margin-top: 14px; }
+    .inst-steps li { padding-block: 9px; }
+    .inst-check li { padding-block: 8px; }
+    .inst-after a { padding-block: 10px; }
+    .inst-alt { margin-top: 16px; }
+    .inst-foot { margin-top: 20px; }
+  }
+</style>

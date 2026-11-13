@@ -26,12 +26,18 @@ describe("progressOf", () => {
 });
 
 describe("stepFor", () => {
-  it("maps fifths", () => {
-    expect(stepFor(0)).toBe(1);
-    expect(stepFor(0.2)).toBe(2);
-    expect(stepFor(0.4)).toBe(3);
-    expect(stepFor(0.99)).toBe(5);
-    expect(stepFor(1)).toBe(5);
+  it("maps thirds", () => {
+    expect(stepFor(0, 3)).toBe(1);
+    expect(stepFor(0.32, 3)).toBe(1);
+    expect(stepFor(1 / 3, 3)).toBe(2);
+    expect(stepFor(0.5, 3)).toBe(2);
+    expect(stepFor(2 / 3, 3)).toBe(3);
+    expect(stepFor(0.99, 3)).toBe(3);
+    expect(stepFor(1, 3)).toBe(3);
+  });
+  it("defaults to the three steps", () => {
+    expect(stepFor(0.5)).toBe(2);
+    expect(stepFor(1)).toBe(3);
   });
 });
 
@@ -39,37 +45,34 @@ let allowed: boolean;
 let gateSubs: Array<(a: boolean) => void>;
 let gate: MotionGate;
 let trackTop: number;
-let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null;
+let ioCallback: ((entries: Array<{ isIntersecting: boolean; intersectionRatio: number }>) => void) | null;
 let wide: boolean;
 let mqListeners: Array<() => void>;
 let navHeight: number;
+let journeyHeight: number | null; // null: no journey bar on the page
 let scrollTo: ReturnType<typeof vi.fn>;
 let teardown: (() => void) | null;
 
-const STEPS = [1, 2, 3, 4, 5];
+const STEPS = [1, 2, 3];
 
 function build(): HTMLElement {
   document.body.innerHTML = `
     <header><nav></nav></header>
+    ${journeyHeight === null ? "" : '<nav data-journey></nav>'}
     <section id="how">
       <div class="how-track">
         <div class="how-stage">
-          <ol class="steps">${STEPS.map((n) => `<li class="step" data-step="${n}"><h3>${n}</h3></li>`).join("")}</ol>
+          <ol class="steps">${STEPS.map((n) => `<li class="step" data-step="${n}"><h3>${n}</h3><a class="step-link" href="#s${n}">link ${n}</a></li>`).join("")}</ol>
           <div class="prog" role="group" aria-label="Jump to step">
             ${STEPS.map((n) => `<button type="button" data-goto="${n}" aria-label="Step ${n}"></button>`).join("")}
-          </div>
-          <div class="dg" data-dg>
-            <ul class="src">
-              <li class="si" data-src="0" data-on="1 2 5"></li>
-              <li class="si" data-src="1" data-on="1 3 4 5"></li>
-            </ul>
-            <div class="hub" data-on="2 3 4 5"></div>
           </div>
         </div>
       </div>
     </section>`;
   const root = document.getElementById("how")!;
   document.querySelector("header nav")!.getBoundingClientRect = () => ({ height: navHeight }) as DOMRect;
+  const journey = document.querySelector("[data-journey]");
+  if (journey) journey.getBoundingClientRect = () => ({ height: journeyHeight }) as DOMRect;
   root.querySelector<HTMLElement>(".how-track")!.getBoundingClientRect = () =>
     ({ top: trackTop, height: TRACK_H, bottom: trackTop + TRACK_H }) as DOMRect;
   return root;
@@ -97,6 +100,7 @@ beforeEach(() => {
   wide = true;
   mqListeners = [];
   navHeight = 0;
+  journeyHeight = null;
   ioCallback = null;
   teardown = null;
   scrollTo = vi.fn();
@@ -118,7 +122,7 @@ beforeEach(() => {
     },
   })) as unknown as typeof window.matchMedia;
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-    constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+    constructor(cb: (entries: Array<{ isIntersecting: boolean; intersectionRatio: number }>) => void) {
       ioCallback = cb;
     }
     observe() {}
@@ -132,40 +136,67 @@ afterEach(() => {
 });
 
 describe("initHowSteps", () => {
-  it("marks the active step and hides parts not in it", () => {
+  it("marks the active step", () => {
     const root = build();
-    trackTop = -0.4 * RANGE;
+    trackTop = -0.8 * RANGE;
     teardown = initHowSteps(root, gate);
     scrollTick();
     expect(root.querySelector('li.step[data-step="3"]')!.classList.contains("on")).toBe(true);
     expect(root.querySelector('li.step[data-step="2"]')!.classList.contains("on")).toBe(false);
-    expect(root.querySelector(".dg")!.getAttribute("data-step")).toBe("3");
-    expect(root.querySelector('.si[data-src="0"]')!.classList.contains("off")).toBe(true);
-    expect(root.querySelector('.si[data-src="1"]')!.classList.contains("off")).toBe(false);
     expect(root.querySelector('button[data-goto="3"]')!.getAttribute("aria-current")).toBe("step");
     expect(root.querySelector('button[data-goto="2"]')!.hasAttribute("aria-current")).toBe(false);
   });
 
-  it("enhances: adds .is-enhanced and measures --nav-h from header nav", () => {
+  it("enhances: adds .is-enhanced and sets --stack-h to the nav alone when there is no journey bar", () => {
     navHeight = 62;
     const root = build();
     teardown = initHowSteps(root, gate);
     expect(root.classList.contains("is-enhanced")).toBe(true);
-    expect(root.style.getPropertyValue("--nav-h")).toBe("62px");
+    expect(root.style.getPropertyValue("--stack-h")).toBe("62px");
   });
 
-  it("re-measures the nav on resize", () => {
+  it("sets --stack-h to the nav plus the journey bar when the bar is on the page", () => {
+    navHeight = 64;
+    journeyHeight = 45;
+    const root = build();
+    teardown = initHowSteps(root, gate);
+    expect(root.style.getPropertyValue("--stack-h")).toBe("109px");
+  });
+
+  it("re-measures the stack on resize", () => {
     navHeight = 62;
+    journeyHeight = 45;
     const root = build();
     teardown = initHowSteps(root, gate);
     navHeight = 48;
+    journeyHeight = 40;
     window.dispatchEvent(new Event("resize"));
-    expect(root.style.getPropertyValue("--nav-h")).toBe("48px");
+    expect(root.style.getPropertyValue("--stack-h")).toBe("88px");
+  });
+
+  it("starts the first step under the whole stack, not the nav alone", () => {
+    navHeight = 64;
+    journeyHeight = 45;
+    const root = build();
+    // The track's top is exactly at the bottom of the nav + bar: progress 0.
+    trackTop = 109;
+    teardown = initHowSteps(root, gate);
+    scrollTick();
+    expect(root.querySelector('li.step[data-step="1"]')!.classList.contains("on")).toBe(true);
+    // Scrolled two thirds of the way through the run: step 3.
+    trackTop = 109 - (2 / 3 + 0.01) * (TRACK_H - VH + 109);
+    scrollTick();
+    expect(root.querySelector('li.step[data-step="3"]')!.classList.contains("on")).toBe(true);
+    // With the nav alone that same position would still be step 2.
+    expect(stepFor(progressOf(trackTop, TRACK_H, VH, 64), 3)).toBe(3);
+    trackTop = 109 - 0.3 * (TRACK_H - VH + 109);
+    scrollTick();
+    expect(root.querySelector('li.step[data-step="1"]')!.classList.contains("on")).toBe(true);
   });
 
   it("follows the 768px query as it changes", () => {
     const root = build();
-    trackTop = -0.5 * RANGE;
+    trackTop = -0.8 * RANGE;
     teardown = initHowSteps(root, gate);
     expect(root.classList.contains("is-enhanced")).toBe(true);
     expect(root.querySelector(".on")).not.toBeNull();
@@ -173,7 +204,6 @@ describe("initHowSteps", () => {
     for (const fn of mqListeners) fn();
     expect(root.classList.contains("is-enhanced")).toBe(false);
     expect(root.querySelector(".on")).toBeNull();
-    expect(root.querySelector(".off")).toBeNull();
     wide = true;
     for (const fn of mqListeners) fn();
     expect(root.classList.contains("is-enhanced")).toBe(true);
@@ -195,23 +225,68 @@ describe("initHowSteps", () => {
     expect(behavior).toBe("smooth");
   });
 
+  it.each(STEPS)("pip %i lands inside its band under the nav and the journey bar", (n) => {
+    navHeight = 64;
+    journeyHeight = 45;
+    const root = build();
+    trackTop = -200;
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 1000 });
+    teardown = initHowSteps(root, gate);
+    root.querySelector<HTMLButtonElement>(`button[data-goto="${n}"]`)!.click();
+    const { top } = scrollTo.mock.calls[0]![0] as { top: number };
+    const landedTop = trackTop - (top - 1000);
+    expect(stepFor(progressOf(landedTop, TRACK_H, VH, 109))).toBe(n);
+  });
+
   it("scrolls with behavior instant when the gate does not allow motion", () => {
     const root = build();
     allowed = false;
     teardown = initHowSteps(root, gate);
-    root.querySelector<HTMLButtonElement>('button[data-goto="4"]')!.click();
+    root.querySelector<HTMLButtonElement>('button[data-goto="3"]')!.click();
     expect(scrollTo.mock.calls[0]![0].behavior).toBe("instant");
   });
 
-  it("plays the steps diagram only while visible", () => {
+  it("focus on a link inside an unlit step brings that step forward", () => {
+    navHeight = 56;
+    const root = build();
+    trackTop = -200;
+    Object.defineProperty(window, "scrollY", { configurable: true, value: 1000 });
+    teardown = initHowSteps(root, gate);
+    expect(root.querySelector('li.step[data-step="1"]')!.classList.contains("on")).toBe(true);
+    root.querySelector<HTMLAnchorElement>('li.step[data-step="3"] a')!.focus();
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+    const { top, behavior } = scrollTo.mock.calls[0]![0] as { top: number; behavior: string };
+    expect(stepFor(progressOf(trackTop - (top - 1000), TRACK_H, VH, 56))).toBe(3);
+    expect(behavior).toBe("smooth");
+  });
+
+  it("focus into the step that is already lit scrolls nothing, and focus with motion off jumps", () => {
     const root = build();
     teardown = initHowSteps(root, gate);
-    const dg = root.querySelector(".dg")!;
-    expect(dg.classList.contains("is-playing")).toBe(false);
-    ioCallback!([{ isIntersecting: true }]);
-    expect(dg.classList.contains("is-playing")).toBe(true);
-    ioCallback!([{ isIntersecting: false }]);
-    expect(dg.classList.contains("is-playing")).toBe(false);
+    root.querySelector<HTMLAnchorElement>('li.step[data-step="1"] a')!.focus();
+    expect(scrollTo).not.toHaveBeenCalled();
+    allowed = false;
+    root.querySelector<HTMLAnchorElement>('li.step[data-step="2"] a')!.focus();
+    expect(scrollTo.mock.calls[0]![0].behavior).toBe("instant");
+  });
+
+  it("does not move the page on focus when the layout is not enhanced", () => {
+    wide = false;
+    const root = build();
+    teardown = initHowSteps(root, gate);
+    root.querySelector<HTMLAnchorElement>('li.step[data-step="3"] a')!.focus();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("plays the diagrams only while the stage is visible", () => {
+    const root = build();
+    teardown = initHowSteps(root, gate);
+    const stage = root.querySelector(".how-stage")!;
+    expect(stage.classList.contains("is-playing")).toBe(false);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
+    expect(stage.classList.contains("is-playing")).toBe(true);
+    ioCallback!([{ isIntersecting: false, intersectionRatio: 0 }]);
+    expect(stage.classList.contains("is-playing")).toBe(false);
   });
 
   it("does nothing below 768px", () => {
@@ -220,9 +295,7 @@ describe("initHowSteps", () => {
     teardown = initHowSteps(root, gate);
     scrollTick();
     expect(root.classList.contains("is-enhanced")).toBe(false);
-    expect(root.querySelector(".dg")!.hasAttribute("data-step")).toBe(false);
     expect(root.querySelector(".on")).toBeNull();
-    expect(root.querySelector(".off")).toBeNull();
   });
 
   it("removes its listeners and enhancement on dispose", () => {
@@ -231,7 +304,7 @@ describe("initHowSteps", () => {
     teardown();
     teardown = null;
     expect(root.classList.contains("is-enhanced")).toBe(false);
-    trackTop = -0.4 * RANGE;
+    trackTop = -0.8 * RANGE;
     scrollTick();
     expect(root.querySelector(".on")).toBeNull();
   });

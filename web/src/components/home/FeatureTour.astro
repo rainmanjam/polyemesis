@@ -1,0 +1,436 @@
+---
+/* "Everything around the stream": a bento of small live miniatures, one per
+ * feature. Every panel server-renders its resting state (name, one outcome
+ * sentence, the miniature in a believable still state, a link), so the section
+ * is complete without script. scripts/home/panels.ts adds a short loop to each
+ * behind the motion gate and puts the resting state back when it stops.
+ *
+ * The failover panel reuses scripts/home/failover.ts, so it reproduces that
+ * module's markup contract: [data-frame] (data-state = the stage id), [data-enc],
+ * three [data-dest], [data-log], and a [data-fo-controls] block (hidden until the
+ * script shows it) of button[data-stage] plus [data-play]. The panel root is
+ * [data-panel="failover"], NOT [data-failover], so only initPanels starts it
+ * while the old recovery section is still on the page. The stage buttons keep
+ * their own height reserved (.fo-head) so showing them moves nothing.
+ *
+ * The state of the failover miniature is drawn by CSS from [data-frame]'s
+ * data-state; the words that change with it are spans picked by data-s.
+ * Status colours are the console's tokens (--color-ok, --color-warn,
+ * --color-down); coral is not used here.
+ *
+ * Chat lines, caption text, file names and handles are illustrative. The data
+ * is imported from panels.ts so the rest state and the loop share one list. */
+import { Picture } from "astro:assets";
+import meters from "../../assets/shots/04-meters.png";
+import { STAGES } from "../../scripts/home/failover";
+import { miniature } from "../../scripts/home/panels";
+
+const DESTS = ["Twitch", "YouTube", "Kick"];
+const ROUTES: Array<[string, string, boolean]> = [
+  ["Twitch", "In-stream CEA-608", false],
+  ["YouTube", "Caption ingestion or CEA-608", false],
+  ["Facebook", "In-stream CEA-608, provisional", false],
+  ["Kick", "none offered", true],
+];
+import Fold from "./Fold.astro";
+---
+
+<section id="features-tour" class="ft-sec" data-panels data-journey-stage="understand" aria-labelledby="h-features-tour">
+  <div class="wrap">
+    <p class="eyebrow"><b>02</b> Understand</p>
+    <h2 id="h-features-tour">Everything <em class="it it-hot">around</em> the stream.</h2>
+    <p class="sec-lede">
+      Failover, one chat, live captions, recordings and webhooks all run from the same console. Each panel below is a small copy of the real thing; open one to read how it is set up.
+    </p>
+
+    <div class="ft-grid">
+      <article class="ft-p p-fail" data-panel="failover" aria-labelledby="features-t-fail">
+        <div class="ft-tag"><span>Failover</span><span>keeps destinations up</span></div>
+        <div class="fo-head">
+          <div class="fo-ctl" data-fo-controls hidden>
+            <ol class="fo-steps" aria-label="Failover stages">
+              {
+                STAGES.map((s, i) => (
+                  <li>
+                    <button type="button" data-stage={i} class="fo-btn">{s.label}</button>
+                  </li>
+                ))
+              }
+            </ol>
+            <button type="button" data-play class="fo-btn fo-play">Pull the cable</button>
+          </div>
+        </div>
+        <div class="ft-ui fo-frame" data-frame data-state="live">
+          <div class="fo-row enc">
+            <b>ENCODER</b>
+            <div class="fo-bar" aria-hidden="true"><i></i></div>
+            <span class="fo-st"><i class="ft-dot lamp" aria-hidden="true"></i><span data-enc>{STAGES[0].encoder}</span></span>
+          </div>
+          <div class="fo-row slate">
+            <b>SLATE</b>
+            <div class="fo-bar" aria-hidden="true"><i></i></div>
+            <span class="fo-st"
+              ><span data-s="slate">on air</span><span data-s="live drop recovered">ready</span></span
+            >
+          </div>
+          <ul class="fo-dest" aria-label="Destination status">
+            {
+              DESTS.map((d) => (
+                <li>
+                  <b>{d}</b>
+                  <span>
+                    <i class="ft-dot" aria-hidden="true" />
+                    <span data-dest>live</span>
+                  </span>
+                </li>
+              ))
+            }
+          </ul>
+          <ol class="fo-log" data-log aria-live="off" aria-label="Event log, illustrative">
+            <li>{STAGES[0].log}</li>
+          </ol>
+        </div>
+        <h3 id="features-t-fail">Failover that keeps destinations up</h3>
+        <p>
+          With failover on, if the primary ingest fails or its link degrades, a backup encoder, a playlist or the slate goes on air, and no destination restarts.
+        </p>
+        <a class="more" href="/docs/link-health">Read about failover</a>
+      </article>
+
+      <article class="ft-p p-chat" data-panel="chat" aria-labelledby="features-t-chat">
+        <div class="ft-tag"><span>Chat</span><span>one timeline</span></div>
+        <div class="ft-ui chat-ui">
+          <div class="ch-list" data-live role="img" aria-label="Chat messages from YouTube, Twitch, Kick, Facebook and Rumble in one list, illustrative" set:html={miniature("chat")}></div>
+          <div class="ch-send">send to <em>YouTube</em> <em>Twitch</em> <em>Kick</em></div>
+        </div>
+        <h3 id="features-t-chat">Combined chat</h3>
+        <p>YouTube, Twitch, Kick, Facebook and Rumble in one feed, each message tagged with its platform. Send and moderate from the same place wherever the platform allows it.</p>
+        <a class="more" href="/features#chat">See combined chat</a>
+      </article>
+
+      <article class="ft-p p-cap" data-panel="captions" aria-labelledby="features-t-cap">
+        <div class="ft-tag"><span>Live captions</span><span>per destination</span></div>
+        <Fold class="ft-fold" summary="Live captions · preview">
+          <div class="ft-ui">
+            <div class="cp-line" data-live set:html={miniature("captions")}></div>
+            <ul class="cp-rt" aria-label="Caption route per destination">
+              {
+                ROUTES.map(([name, route, none]) => (
+                  <li class:list={["cp-r", { none }]}>
+                    <b>{name}</b>
+                    <span>{route}</span>
+                  </li>
+                ))
+              }
+            </ul>
+            <p class="cp-note">Per programme: pick the caption track, then spell or mask words your way.</p>
+          </div>
+        </Fold>
+        <h3 id="features-t-cap">Live captions</h3>
+        <p>Transcribed on your own machine from the audio track you pick. Where a platform accepts captions, its destination gets the route it accepts, and every destination starts with captions off.</p>
+        <a class="more" href="/docs/captions">Read about captions</a>
+      </article>
+
+      <article class="ft-p p-meter" aria-labelledby="features-t-meter">
+        <div class="ft-tag"><span>Audio meters</span><span>console screenshot</span></div>
+        <Fold class="ft-fold" summary="Audio meters · screenshot">
+          <div class="frame">
+            <div class="frame-bar"><span>Audio meters</span></div>
+            <div class="mt-crop">
+              <Picture
+                src={meters}
+                formats={["avif", "webp"]}
+                widths={[820, 1230, 1640]}
+                sizes="(min-width: 1100px) 760px, calc(100vw - 4rem)"
+                loading="lazy"
+                decoding="async"
+                alt="The console's Audio meters page: Track 1 and Track 2 stereo meters with levels in dBFS, Tracks 3 and 4 showing no signal"
+                pictureAttributes={{ class: "block" }}
+              />
+            </div>
+          </div>
+        </Fold>
+        <h3 id="features-t-meter">Meters on every track</h3>
+        <p>Confirm each track carries what you think it does, and see the loudness each destination receives, measured after routing, before you go live.</p>
+        <a class="more" href="/features">See the meters</a>
+      </article>
+
+      <article class="ft-p p-rec" data-panel="recordings" aria-labelledby="features-t-rec">
+        <div class="ft-tag"><span>Recordings</span><span>segmented</span></div>
+        <Fold class="ft-fold" summary="Recordings · preview">
+          <div class="ft-ui">
+            <div class="rc-live" data-live set:html={miniature("recordings")}></div>
+          </div>
+        </Fold>
+        <h3 id="features-t-rec">Recordings</h3>
+        <p>Segmented multitrack recordings with the chat saved beside each file, and optional offload to S3-compatible storage.</p>
+        <a class="more" href="/docs/storage">Where files go</a>
+      </article>
+
+      <article class="ft-p p-link" data-panel="link" aria-labelledby="features-t-link">
+        <div class="ft-tag"><span>IRL over SRTLA</span><span>live link stats</span></div>
+        <Fold class="ft-fold" summary="Link stats · preview">
+          <div class="ft-ui">
+            <div class="lk-live" data-live set:html={miniature("link")}></div>
+          </div>
+        </Fold>
+        <h3 id="features-t-link">Bonded IRL backpacks</h3>
+        <p>Receive a bonded cellular stream and watch its bitrate, round trip and loss, with a row for each link and failover thresholds you set.</p>
+        <a class="more" href="/docs/srtla">Read about SRTLA</a>
+      </article>
+
+      <article class="ft-p p-hook" data-panel="hooks" aria-labelledby="features-t-hook">
+        <div class="ft-tag"><span>Hooks and alerts</span><span>events</span></div>
+        <Fold class="ft-fold" summary="Event feed · preview">
+          <div class="ft-ui">
+            <div class="hk-list" data-live set:html={miniature("hooks")}></div>
+          </div>
+        </Fold>
+        <h3 id="features-t-hook">Hooks and alerts</h3>
+        <p>Webhooks fire on ingest, destination and failover events, so your own scripts can react.</p>
+        <a class="more" href="/docs/hooks">See the events</a>
+      </article>
+    </div>
+
+    <div class="ft-foot">
+      <a class="more" href="/features">See every feature</a>
+      <span>Chat moderation, clips, scheduled broadcasts, overlays and more.</span>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  #features-tour {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+  }
+  #features-tour h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  #features-tour .ft-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 44px;
+  }
+  #features-tour .ft-p {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding: 18px 18px 16px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+  }
+  #features-tour .ft-tag {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  #features-tour .ft-p h3 {
+    margin: 14px 0 6px;
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+  }
+  #features-tour .ft-p p {
+    max-width: 34em;
+    font-size: 1rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+  #features-tour .ft-p .more {
+    align-self: flex-start;
+    margin-top: 14px;
+  }
+  #features-tour .ft-ui {
+    flex: 1;
+    min-height: 0;
+    padding: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.4;
+    background: var(--color-ink);
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+  }
+  #features-tour .ft-dot {
+    display: inline-block;
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-right: 7px;
+    border-radius: 50%;
+    background: var(--color-ok);
+  }
+  /* grid placement */
+  #features-tour .p-fail { grid-column: span 7; grid-row: span 2; }
+  #features-tour .p-chat { grid-column: span 5; grid-row: span 2; }
+  #features-tour .p-cap { grid-column: span 5; }
+  #features-tour .p-meter { grid-column: span 7; }
+  #features-tour .p-rec,
+  #features-tour .p-link,
+  #features-tour .p-hook { grid-column: span 4; }
+
+  /* failover. Drawn from [data-frame]'s data-state, set by failover.ts. */
+  #features-tour .fo-head { min-height: 86px; margin-bottom: 8px; }
+  #features-tour .fo-ctl { display: grid; gap: 6px; }
+  #features-tour .fo-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  #features-tour .fo-btn {
+    width: 100%;
+    min-height: 40px;
+    padding: 0 8px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    white-space: nowrap;
+    color: var(--color-muted);
+    background: transparent;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  #features-tour .fo-btn[aria-current="step"] { color: var(--color-fg); border-color: var(--color-fg); }
+  #features-tour .fo-btn:hover { color: var(--color-fg); }
+  #features-tour .fo-btn:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+  #features-tour .fo-frame { display: flex; flex-direction: column; gap: 6px; }
+  #features-tour .fo-row {
+    display: grid;
+    grid-template-columns: 84px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    border: 1px solid var(--color-line);
+  }
+  #features-tour .fo-row b { font-weight: 500; color: var(--color-fg); letter-spacing: 0.06em; }
+  #features-tour .fo-bar { position: relative; height: 4px; overflow: hidden; background: var(--color-line); }
+  #features-tour .fo-bar i { position: absolute; inset: 0; background: var(--color-fg); transform-origin: left; }
+  #features-tour .fo-st { display: inline-flex; align-items: center; justify-content: flex-end; min-width: 150px; text-align: right; color: var(--color-muted); }
+  #features-tour .fo-st [data-s] { display: none; }
+  #features-tour .fo-row.enc { border-color: var(--color-fg); }
+  #features-tour .fo-row.enc .fo-st { color: var(--color-fg); }
+  #features-tour .fo-row.slate .fo-bar i { opacity: 0.25; }
+  #features-tour .fo-frame[data-state="live"] [data-s~="live"],
+  #features-tour .fo-frame[data-state="drop"] [data-s~="drop"],
+  #features-tour .fo-frame[data-state="slate"] [data-s~="slate"],
+  #features-tour .fo-frame[data-state="recovered"] [data-s~="recovered"] { display: inline; }
+  #features-tour .fo-frame[data-state="drop"] .enc .fo-bar i { transform: scaleX(0.22); opacity: 0.5; }
+  #features-tour .fo-frame[data-state="slate"] .enc .fo-bar i { transform: scaleX(0); }
+  #features-tour .fo-frame[data-state="drop"] .enc .lamp,
+  #features-tour .fo-frame[data-state="slate"] .enc .lamp { background: var(--color-down); }
+  #features-tour .fo-frame[data-state="slate"] .enc { border-color: var(--color-line); }
+  #features-tour .fo-frame[data-state="slate"] .enc .fo-st { color: var(--color-muted); }
+  #features-tour .fo-frame[data-state="slate"] .slate { border-color: var(--color-fg); }
+  #features-tour .fo-frame[data-state="slate"] .slate .fo-st { color: var(--color-fg); }
+  #features-tour .fo-frame[data-state="slate"] .slate .fo-bar i { opacity: 1; }
+  #features-tour .fo-frame[data-state="slate"] .fo-dest .ft-dot { background: var(--color-warn); }
+  #features-tour .fo-dest { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+  #features-tour .fo-dest li { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--color-line); }
+  #features-tour .fo-dest b { font-weight: 500; color: var(--color-fg); }
+  #features-tour .fo-dest li > span { color: var(--color-muted); }
+  #features-tour .fo-log { display: flex; flex-direction: column; gap: 4px; min-height: 5.6em; margin-top: 6px; color: var(--color-muted); }
+
+  /* chat */
+  #features-tour .chat-ui { display: flex; flex-direction: column; }
+  #features-tour .ch-list { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; flex: 1; min-height: 250px; overflow: hidden; }
+  #features-tour .ch-m { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding-bottom: 8px; border-bottom: 1px solid var(--color-line); }
+  #features-tour .ch-m em { align-self: start; padding: 0 6px; font-style: normal; white-space: nowrap; color: var(--color-muted); border: 1px solid var(--color-line-strong); border-radius: 2px; }
+  #features-tour .ch-m b { font-weight: 500; color: var(--color-fg); }
+  #features-tour .ch-m span { grid-column: 2; font-size: 0.8125rem; line-height: 1.35; color: var(--color-muted); }
+  #features-tour .ch-send { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; color: var(--color-muted); }
+  #features-tour .ch-send em { padding: 0 7px; font-style: normal; color: var(--color-fg); border: 1px solid var(--color-line-strong); border-radius: 2px; }
+
+  /* captions */
+  #features-tour .cp-line { min-height: 3.2em; padding: 10px 12px; font-size: 0.875rem; line-height: 1.6; color: var(--color-fg); background: var(--color-ink); border: 1px solid var(--color-line); }
+  #features-tour .cp-line i { font-style: normal; color: var(--color-muted); }
+  #features-tour .cp-rt { display: grid; gap: 6px; margin-top: 10px; }
+  #features-tour .cp-r { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 8px 10px; color: var(--color-muted); border: 1px solid var(--color-line); }
+  #features-tour .cp-r b { font-weight: 500; color: var(--color-fg); }
+  #features-tour .cp-r.none { color: var(--color-muted); }
+  #features-tour .cp-r.none b { color: var(--color-muted); }
+  #features-tour .ft-p .cp-note { margin: 12px 0 0; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.5; color: var(--color-muted); }
+
+  /* meters screenshot: a crop of the real page */
+  #features-tour .p-meter .frame { display: flex; flex: 1; flex-direction: column; margin: 0; }
+  #features-tour .mt-crop { position: relative; flex: none; overflow: hidden; aspect-ratio: 1708 / 910; }
+  #features-tour .mt-crop img { width: 117.1%; max-width: none; height: auto; margin: -12.6% 0 0 -15.3%; }
+
+  /* recordings */
+  #features-tour .rc-list { display: grid; align-content: start; min-height: 176px; }
+  #features-tour .rc-r { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; overflow: hidden; color: var(--color-fg); border-bottom: 1px solid var(--color-line); }
+  #features-tour .rc-r span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #features-tour .rc-r span:last-child { white-space: nowrap; color: var(--color-muted); }
+  #features-tour .rc-sum { margin-top: 8px; color: var(--color-muted); }
+
+  /* link stats */
+  #features-tour .lk-top { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  #features-tour .lk-top div { display: grid; gap: 2px; }
+  #features-tour .lk-top span { color: var(--color-muted); }
+  #features-tour .lk-top b { font-family: var(--font-display); font-size: 1.125rem; font-weight: 500; letter-spacing: -0.02em; color: var(--color-fg); }
+  #features-tour .lk-links { display: grid; gap: 7px; margin-top: 12px; }
+  #features-tour .lk-l { display: grid; grid-template-columns: 56px 1fr 78px; align-items: center; gap: 10px; color: var(--color-muted); }
+  #features-tour .lk-l i { position: relative; display: block; height: 6px; background: var(--color-line); }
+  #features-tour .lk-l u { position: absolute; inset: 0 auto 0 0; background: var(--color-fg); }
+  #features-tour .lk-l span:last-child { text-align: right; white-space: nowrap; color: var(--color-fg); }
+
+  /* hooks */
+  #features-tour .hk-list { display: grid; align-content: start; min-height: 196px; }
+  #features-tour .hk-r { display: flex; gap: 10px; padding: 7px 0; overflow: hidden; border-bottom: 1px solid var(--color-line); }
+  #features-tour .hk-r time { flex: none; color: var(--color-muted); }
+  #features-tour .hk-r span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-fg); }
+
+  #features-tour .ft-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 28px; margin-top: 36px; }
+  #features-tour .ft-foot span { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-muted); }
+
+  .motion-on #features-tour .fo-bar i { transition: transform 0.8s ease, opacity 0.4s; }
+
+  @media (max-width: 1099px) {
+    #features-tour .p-fail,
+    #features-tour .p-chat,
+    #features-tour .p-cap,
+    #features-tour .p-meter,
+    #features-tour .p-hook { grid-column: span 12; grid-row: auto; }
+    #features-tour .p-rec,
+    #features-tour .p-link { grid-column: span 6; }
+    #features-tour .ch-list { min-height: 230px; }
+  }
+  @media (max-width: 700px) {
+    #features-tour .ft-grid { gap: 12px; }
+    #features-tour .p-rec,
+    #features-tour .p-link { grid-column: span 12; }
+    #features-tour .fo-row { grid-template-columns: 70px 1fr auto; gap: 8px; }
+    #features-tour .fo-st { min-width: 0; }
+    #features-tour .fo-dest { grid-template-columns: 1fr; }
+    #features-tour .fo-dest li { grid-template-columns: 1fr auto; align-items: center; }
+  }
+  @media (max-width: 559px) {
+    #features-tour .fo-head { min-height: 132px; }
+    #features-tour .fo-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    #features-tour .ft-grid { margin-top: 24px; gap: 12px; }
+    #features-tour .ft-p { padding: 14px 14px 12px; }
+    #features-tour .ft-tag { margin-bottom: 8px; }
+    #features-tour .ft-p h3 { margin: 10px 0 4px; }
+    #features-tour .ft-p .more { margin-top: 10px; }
+  }
+
+  /* The three cards of the last row sit side by side and every card's bottom is pinned, so a shorter paragraph
+     (Hooks: two lines, the others three) gave its miniature the spare height and its heading sat ~22px lower.
+     Equal paragraph height, equal miniatures, headings on one line. */
+  @media (min-width: 1100px) {
+    #features-tour :is(.p-rec, .p-link, .p-hook) p { min-height: calc(3 * 1.45em); }
+  }
+</style>

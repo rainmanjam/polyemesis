@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { COMPETITORS } from "./competitors";
 import { MUSIC_TRACK, TRACK_LAYOUT } from "../data/tracks.mjs";
 
 /* Source-level guards for copy decisions that a rendered page cannot be
@@ -12,6 +13,17 @@ import { MUSIC_TRACK, TRACK_LAYOUT } from "../data/tracks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pages = (name: string) => readFileSync(join(here, "..", "pages", name), "utf8");
+
+/* index.astro holds no copy any more: the homepage is the files under
+ * components/home/ (plus index.astro, which assembles them). */
+const homeDir = join(here, "..", "components", "home");
+const homeFile = (name: string) => readFileSync(join(homeDir, name), "utf8");
+const homeFiles = (): [name: string, src: string][] => [
+  ["index.astro", pages("index.astro")],
+  ...readdirSync(homeDir)
+    .filter((f) => statSync(join(homeDir, f)).isFile())
+    .map((f): [string, string] => [`components/home/${f}`, homeFile(f)]),
+];
 
 describe("the features page's track layout (S7)", () => {
   const features = pages("features.astro");
@@ -70,101 +82,26 @@ describe("time-to-first-stream copy (S2)", () => {
   /* One claim cannot be used everywhere while its number is unmeasured. The
    * fix drops the number and states the three real steps. comparison.astro
    * is excluded on purpose: it describes rival tools, not polyemesis. */
-  const own = ["index.astro", "download.astro", "features.astro"];
+  const own = (): [name: string, src: string][] => [
+    ...homeFiles(),
+    ["download.astro", pages("download.astro")],
+    ["features.astro", pages("features.astro")],
+  ];
 
   /* A step count is also a claim. docs/QUICKSTART.md has eight numbered steps,
    * so "three steps" was false the moment it was written. Say what happens,
    * not how many steps it takes. */
   it("states no step count for the quickstart", () => {
-    for (const name of own) {
-      expect(pages(name), name).not.toMatch(/three steps/i);
+    for (const [name, src] of own()) {
+      expect(src, name).not.toMatch(/three steps/i);
     }
   });
 
   it("states no minute figure for polyemesis's own first stream", () => {
-    for (const name of own) {
-      const src = pages(name);
+    for (const [name, src] of own()) {
       expect(src, name).not.toMatch(/(first stream|See it running)[^.<]*(five|two) minutes/i);
       expect(src, name).not.toMatch(/about (five|two) minutes/i);
     }
-  });
-});
-
-/* THE HERO (2026-11 redesign). One headline with one italic word, a lede,
- * Install as the on-air primary, and the split diagram with its story tabs. */
-describe("the home hero (2026-11 redesign)", () => {
-  const hero = readFileSync(join(here, "..", "components", "home", "Hero.astro"), "utf8");
-  const markup = hero.slice(0, hero.indexOf("<style>"));
-  it("states the decided headline with one italic word", () =>
-    expect(hero).toMatch(/<h1[^>]*>\s*One video\. A <em class="it">different<\/em> sound for every audience\.\s*<\/h1>/));
-  it("states the decided lede", () => {
-    expect(hero).toContain("Upload once from OBS, an IRL backpack or any SRT encoder.");
-    expect(hero).toContain("with the music on Twitch and off YouTube. Free, and it runs on your own server.");
-    expect(markup).not.toMatch(/vMix/);
-  });
-  it("keeps a space between the lede's two sentences (Astro drops a span's leading whitespace)", () =>
-    expect(markup).toContain('any SRT encoder.{" "}<span class="lede-more">polyemesis sends'));
-  it("makes Install the on-air primary and How it works the ghost", () => {
-    expect(hero).toMatch(/<a[^>]*class="btn btn-onair[^"]*"[^>]*href="#run"[^>]*>\s*Install polyemesis/);
-    expect(hero).toMatch(/<a[^>]*class="btn btn-ghost[^"]*"[^>]*href="#how"[^>]*>\s*See how it works/);
-  });
-  it("renders a diagram panel per story, only Streamer visible", () => {
-    expect(hero.match(/<SplitDiagram\b/g)).toHaveLength(1); // inside STORY_ORDER.map
-    expect(hero).toMatch(/STORY_ORDER\.map/);
-    expect(hero).toMatch(/role="tabpanel"[^>]*hidden=\{k !== "streamer"\}/);
-    expect(hero).toMatch(/aria-labelledby=\{`tab-\$\{k\}`\}/);
-  });
-  it("hides the controls that need JS until JS un-hides them", () => {
-    expect(hero).toMatch(/role="tablist"[^>]*hidden/);
-    expect(hero).toMatch(/data-pause[^>]*hidden|hidden[^>]*data-pause/);
-  });
-  it("has a polite live status line and a fine print line rendered from the stories", () => {
-    expect(hero).toMatch(/data-status[^>]*aria-live="polite"/);
-    expect(hero).toMatch(/data-fine>\{STORIES\[first\]\.fine\}/);
-    expect(hero).toMatch(/statusFor\(STORIES\[first\], null, false\)/);
-  });
-  it("reserves the layout so nothing shifts when script runs (F9)", () => {
-    expect(hero).toMatch(/\.tabrow \{ min-height: 44px/);
-    expect(hero).toMatch(/\.pause \{ position: absolute/);
-    expect(hero).toMatch(/\.status \{[^}]*min-height: 3lh/);
-  });
-  it("fades the outgoing panel only while motion is on", () => {
-    expect(hero).toMatch(/prefers-reduced-motion: no-preference\) \{[^@]*:global\(\.motion-on\) \.panel\.swap-out \{ opacity: 0/);
-    expect(hero).not.toMatch(/prefers-reduced-motion: reduce/);
-  });
-  it("puts no pill above the headline and no interaction colour in it", () => {
-    expect(hero.slice(0, hero.indexOf("<h1"))).not.toMatch(/class="chip/);
-    expect(hero.slice(hero.indexOf("<h1"), hero.indexOf("</h1>"))).not.toMatch(/\bprimary\b|<span\b/);
-  });
-  it("loads the behaviour lazily from the page", () => {
-    expect(pages("index.astro")).toMatch(/requestIdleCallback\(go/);
-    expect(pages("index.astro")).toMatch(/import\("\.\.\/scripts\/home\/boot"\)/);
-  });
-  it("keeps the italic serif off the preload list and swaps it", () => {
-    const base = readFileSync(join(here, "..", "layouts", "Base.astro"), "utf8");
-    expect(base).not.toMatch(/rel="preload"[^>]*ibm-plex-serif-italic/);
-    expect(base).toMatch(/font-family: "IBM Plex Serif";[^}]*font-style: italic;[^}]*ibm-plex-serif-italic\.woff2|font-family: "IBM Plex Serif";[^}]*ibm-plex-serif-italic\.woff2[^}]*font-style: italic;[^}]*font-display: swap/);
-  });
-  it("declares the bone ink on the .home wrapper only and the accent font without system serifs", () => {
-    const css = readFileSync(join(here, "..", "styles", "global.css"), "utf8");
-    expect(css).toMatch(/\.home \{\s*--home-bone: oklch\(93% 0\.014 85\);\s*color: var\(--home-bone\);/);
-    expect(css).not.toMatch(/\.home h1|\.home p/);
-    expect(css).toContain('--font-accent: "IBM Plex Serif", serif;');
-    expect(pages("index.astro")).toMatch(/<div class="home">/);
-  });
-  it("refreshes the description and keeps the title", () => {
-    expect(pages("index.astro")).toContain('title="Multistream, a different mix per platform — polyemesis"');
-    expect(pages("index.astro")).toContain(
-      'description="Multistream to Twitch, YouTube and Kick from one upload, with a different audio mix per platform and the video untouched. Free, on your own server."',
-    );
-  });
-  it("ships the italic serif under 45 KB with its licence recorded at the top", () => {
-    const font = join(here, "..", "..", "public", "fonts", "ibm-plex-serif-italic.woff2");
-    expect(statSync(font).size).toBeLessThanOrEqual(45_000);
-    const lic = readFileSync(join(here, "..", "..", "public", "third-party-licenses.txt"), "utf8");
-    expect(lic).toContain("IBM Plex Serif");
-    expect(lic).toContain("SIL OPEN FONT LICENSE Version 1.1");
-    expect(lic.indexOf("IBM Plex Serif")).toBeLessThan(lic.indexOf("Data shipped inside the polyemesis server binary"));
   });
 });
 
@@ -211,27 +148,6 @@ describe("the features plan strip (S3)", () => {
   });
 });
 
-/* THE BUILD-TIME TRUST SIGNALS (S4). The star count and release come from
- * GitHub at build time and are printed only when that read succeeded. A
- * literal count in the source would be a fabricated figure that goes stale. */
-describe("the home trust line (S4)", () => {
-  const source = pages("index.astro");
-
-  it("reads the repository figures at build time through the helper", () => {
-    expect(source).toMatch(/import \{ fetchRepoStats \} from "\.\.\/lib\/github-stats"/);
-    expect(source).toMatch(/await fetchRepoStats\(\)/);
-  });
-
-  it("prints a star count only from the fetched value, never a typed number", () => {
-    expect(source).not.toMatch(/\b\d+\s+stars?\b/);
-    expect(source).toMatch(/\{repo\s*&&\s*\(?[\s\S]*?repo\.stars/);
-  });
-
-  it("keeps a plain source link when the fetch fails", () => {
-    expect(source).toMatch(/>Read the source<\/a/);
-  });
-});
-
 /* THE USE-CASE ROOMS (S6). Each room names the tracks and where each one goes,
  * as a small diagram rather than prose alone. Sports and esports are added
  * because they are real routing cases the product already supports. No
@@ -251,18 +167,6 @@ describe("the features page rooms (S6)", () => {
     expect(features).toMatch(/Home and away/);
     expect(features).toMatch(/Esports|esports/);
   });
-});
-
-describe("the who-it-is-for link sentences keep their spaces", () => {
-  const home = pages("index.astro");
-  it.each(["Hosted services are good at that.", "(experimental; Twitch requires a GPU):"])(
-    "%s is followed by a space",
-    (lead) => {
-      const at = home.indexOf(lead);
-      expect(at, lead).toBeGreaterThan(-1);
-      expect(home.slice(at + lead.length, at + lead.length + 5)).toBe('{" "}');
-    },
-  );
 });
 
 /* THE DASHBOARD'S INGEST UPTIME. #924 took "uptime" out of the features copy
@@ -316,31 +220,6 @@ describe("the features page order", () => {
   });
 });
 
-describe("the home page order (2026-11 redesign)", () => {
-  const home = pages("index.astro");
-
-  it("runs the five beats, then who it is for, then explore", () => {
-    const order = ["<Hero", "<Problem", "<HowItWorks", "<Recovery", "<Run", "Is this for you?", 'aria-label="Explore"'].map((n) => home.indexOf(n));
-    expect(order.every((i) => i > -1)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-  });
-
-  it("phrases who-it-is-for as a choice, in sentence case", () => {
-    expect(home).toMatch(/<h3[^>]*>Choose polyemesis if<\/h3>/);
-    expect(home).toMatch(/<h3[^>]*>Choose a hosted service if<\/h3>/);
-    expect(home).not.toMatch(/>\s*Not built for\s*</);
-  });
-
-  it("links the Twitch VOD track page and the trade-offs page", () => {
-    expect(home).toMatch(/href="\/twitch-vod-track"/);
-    expect(home).toMatch(/href="\/free-restream-service"/);
-  });
-
-  it("counts the documents rather than typing a number", () => {
-    expect(home).toMatch(/All \{PUBLISHED\.length\} documents/);
-  });
-});
-
 describe("nothing that left the home page left the site", () => {
   const features = pages("features.astro");
   it.each([
@@ -364,42 +243,6 @@ describe("nothing that left the home page left the site", () => {
   });
 });
 
-/* THE ANNOUNCEMENT BAR IS HOME-ONLY (2026-11 design review). Base renders it
- * only for a page that passes `announce`; on docs and task pages it stood
- * between the reader and the task. */
-describe("the announcement bar", () => {
-  const src = join(here, "..");
-  const astroFiles = (dir: string): string[] =>
-    readdirSync(join(src, dir), { withFileTypes: true }).flatMap((e) =>
-      e.isDirectory() ? astroFiles(join(dir, e.name)) : e.name.endsWith(".astro") ? [join(dir, e.name)] : [],
-    );
-
-  // Pages, layouts AND components: a layout such as DocPage passing
-  // `announce` to Base would put the bar on every document.
-  const everyAstro = () => ["pages", "layouts", "components"].flatMap((d) => astroFiles(d));
-
-  it("is requested by the home page and by nothing else", () => {
-    const requesting = everyAstro().filter((f) => /\bannounce=\{/.test(readFileSync(join(src, f), "utf8")));
-    expect(requesting).toEqual([join("pages", "index.astro")]);
-  });
-
-  it("is rendered only through Base", () => {
-    const rendering = everyAstro().filter((f) => /<Announce\b/.test(readFileSync(join(src, f), "utf8")));
-    expect(rendering).toEqual([join("layouts", "Base.astro")]);
-  });
-
-  it("is rendered by Base only when a page asks for it", () => {
-    const base = readFileSync(join(src, "layouts", "Base.astro"), "utf8");
-    expect(base).toMatch(/\{announce && <Announce release=\{announce\.release\} \/>\}/);
-  });
-
-  it("prints a release only from the build-time read, with an install link otherwise", () => {
-    const bar = readFileSync(join(src, "components", "Announce.astro"), "utf8");
-    expect(bar).not.toMatch(/\bv\d+\.\d+/);
-    expect(bar).toMatch(/href="\/download"/);
-  });
-});
-
 /* THE FEATURES PAGE'S SCREENSHOTS AND SECTION HEADS (2026-11 design review). */
 describe("the features page sections", () => {
   const features = pages("features.astro");
@@ -415,105 +258,135 @@ describe("the features page sections", () => {
   });
 });
 
-/* THE SPLIT DIAGRAM (homepage redesign, Task 3). It renders four times on the
- * home page (three hero panels and how-it-works), so any id would repeat, and
- * its destination cards stay generic divs until the hero script upgrades them
- * to buttons: a label on a div is announced inconsistently, so the name lives
- * in data-label until then. */
-describe("the split diagram", () => {
-  const diagram = () => readFileSync(join(here, "..", "components", "home", "SplitDiagram.astro"), "utf8");
+/* THE HOMEPAGE (2026-11 redesign). index.astro only assembles the sections;
+ * the copy lives in components/home/. */
+describe("the home page (2026-11 redesign)", () => {
+  const index = pages("index.astro");
 
-  it("SplitDiagram emits no ids and no aria-label on generic divs", () => {
-    const src = diagram();
-    expect(src).not.toMatch(/\sid=/);
-    expect(src).not.toMatch(/<div[^>]*aria-label/);
+  const TAGS = [
+    "Hero",
+    "JourneyBar",
+    "HowItWorks",
+    "MixMatrixPlay",
+    "Audiences",
+    "FeatureTour",
+    "StreamDeck",
+    "CalcMini",
+    "Why",
+    "Install",
+    "Use",
+  ];
+  // The markup between <Base ...> and </Base>, with comments and the script dropped.
+  const body = () => {
+    const open = index.indexOf("<Base");
+    const start = index.indexOf(">", index.indexOf('path="/"', open)) + 1;
+    return index
+      .slice(start, index.indexOf("</Base>"))
+      .replace(/<script>[\s\S]*?<\/script>/, "")
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  };
+
+  it("renders each section exactly once, in order", () => {
+    const tags = [...body().matchAll(/<([A-Z][A-Za-z]*) \/>/g)].map((m) => m[1]);
+    expect(tags).toEqual(TAGS);
   });
 
-  /* geometry.ts's anchors are these tracks' centres: h columns 9/50/91%, v rows
-   * .10/.40 and the destination band .56-1. Change one, change the other. */
-  it("keeps the grid tracks geometry.ts's anchors are computed from", () => {
-    const css = diagram().replace(/\s+/g, " ");
-    // v (default): one column, row bands 20/12/16/8/44.
-    expect(css).toContain(
-      "grid-template-rows: minmax(0, 20fr) minmax(0, 12fr) minmax(0, 16fr) minmax(0, 8fr) minmax(0, 44fr);",
+  /* position: sticky holds only while its parent is on screen, so the bar must be
+   * a direct child of <main> (Base.astro's slot): nothing wraps it here. */
+  it("puts the journey bar directly in <main>, right after the hero, wrapped in nothing", () => {
+    const markup = body().trim();
+    expect(markup.startsWith("<Hero />\n  <JourneyBar />")).toBe(true);
+    // Everything between <Base> and its end is a self-closing component tag: no element wraps any of them.
+    expect(markup.replace(/<[A-Z][A-Za-z]*\s*\/>/g, "").trim()).toBe("");
+  });
+
+  it("renders nothing else: no old section is left", () => {
+    expect(index.match(/<[A-Z][A-Za-z]*[ />]/g)?.filter((t) => !/^<(Base|Hero|JourneyBar|HowItWorks|MixMatrixPlay|Audiences|FeatureTour|StreamDeck|CalcMini|Why|Install|Use)\b/.test(t))).toEqual([]);
+    expect(index).not.toMatch(/<section/);
+  });
+
+  it("carries the page description verbatim", () => {
+    expect(index).toContain(
+      'description="Multistream to Twitch, YouTube, Kick, Facebook and X from one upload, with a different audio mix per destination and the video untouched. Free, open source, on your own server."',
     );
-    expect(css).toContain("grid-template-columns: repeat(5, minmax(0, 1fr));"); // sources across
-    expect(css).toContain(
-      "grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr));",
-    ); // destinations 2 x 2
-    // h (>= 768px): columns 18/22/20/22/18, five source rows, four destination rows.
-    expect(css).toContain(
-      "grid-template-columns: minmax(0, 18fr) minmax(0, 22fr) minmax(0, 20fr) minmax(0, 22fr) minmax(0, 18fr);",
-    );
-    expect(css).toContain("grid-template-rows: repeat(5, minmax(0, 1fr));");
-    expect(css).toContain("grid-template-rows: repeat(4, minmax(0, 1fr));");
+  });
+
+  it("starts the sections' scripts on an idle callback", () => {
+    expect(index).toContain("requestIdleCallback(go");
+    expect(index).toContain('import("../scripts/home/boot")');
+  });
+
+  it("makes the hero's promise and gives it one primary action", () => {
+    const hero = homeFile("Hero.astro");
+    // A <br /> between the sentences keeps the accent word on its own line.
+    expect(hero).toMatch(/One stream in\.\s*(<br\s*\/?>\s*)?<em class="it it-hot">Different<\/em> audio out\./);
+    expect(hero).toMatch(/<a class="btn btn-primary" href="\/download">Install polyemesis<\/a>/);
+    expect(hero).toMatch(/<a class="btn btn-ghost" href="#how">/);
+  });
+
+  it("uses none of the banned phrases and names no other product", () => {
+    // "Stream Deck" then a non-breaking space then "+" is the correct form: only the
+    // name written with no space before the plus is banned.
+    const banned = /bypass|dodge|DMCA|one maintainer|pre-release|Stream Deck\+|\b\d+\s+stars?\b|music on Twitch and off YouTube/i;
+    for (const [name, src] of homeFiles()) {
+      expect(src, name).not.toMatch(banned);
+      expect(src, name).not.toMatch(COMPETITORS);
+    }
+  });
+
+  it("has no entrance animation hooks", () => {
+    for (const [name, src] of homeFiles()) {
+      expect(src, name).not.toContain('class="reveal"');
+      expect(src, name).not.toContain("data-reveal");
+    }
   });
 });
 
-describe("the run beat", () => {
-  const run = readFileSync(join(here, "..", "components", "home", "Run.astro"), "utf8");
-  it("uses the real install commands", () => {
-    expect(run).toContain("rainmanjam/polyemesis:latest");
-    expect(run).toContain("-p 8080:8080 -p 6000:6000/udp -p 1935:1935");
-    const install = readFileSync(join(here, "..", "..", "..", "docs", "INSTALL.md"), "utf8");
-    const script = install.slice(install.indexOf("curl --proto"), install.indexOf("sudo bash install.sh") + "sudo bash install.sh".length);
-    // Every line of the script block, not just its URL: Run.astro's template
-    // literal escapes the line-continuation backslash, so unescape it first.
-    const shipped = run.match(/const script = `([\s\S]*?)`;/)?.[1].replace(/\\\\/g, "\\");
-    expect(shipped).toBe(script);
-  });
-  it("names no placeholder install", () => expect(run).not.toMatch(/polyemesis\.com\/install|polyemesis\/polyemesis\b|href="#"/));
-  it("does not claim the console address is printed", () => expect(run).not.toMatch(/prints the address/));
-});
-
-/* Task 12: homepage claims checked against the code and docs. Each guard keeps
- * a claim that the docs do not support from coming back. */
+/* Homepage claims checked against the code and docs (T12). Each guard keeps a
+ * claim that the docs do not support from coming back, on any homepage file. */
 describe("homepage claims match the code (T12)", () => {
-  const home = (name: string) => readFileSync(join(here, "..", "components", "home", name), "utf8");
-  const how = home("HowItWorks.astro");
-  const recovery = home("Recovery.astro");
-  const run = home("Run.astro");
+  const how = homeFile("HowItWorks.astro");
+  const everyFile = () => homeFiles();
 
   // docs/OBS.md:130-132: classic RTMP carries one audio track. Only SRT/SRTLA carry every track.
   it("does not promise every track over RTMP", () => expect(how).not.toMatch(/RTMP, SRT or SRTLA/));
   // README.md:104 and docs/API.md:893 name vMix only for stop-on-ingest-loss; no multitrack doc.
   it("names no vMix multitrack path in the steps", () => expect(how).not.toMatch(/vMix/));
-  // docs/ARCHITECTURE.md:234-236: the outage before the slate stays a timestamp gap.
-  it("does not promise a gapless failover", () => expect(recovery).not.toMatch(/never see a gap/));
-  // docs/CONNECTING-PLATFORMS.md:294: reply-to-a-message is unknown on Twitch and YouTube.
-  it("does not claim chat replies", () => expect(recovery).not.toMatch(/\breply\b/i));
-  // docs/PLATFORMS.md:42-48: chat on several platforms is unverified.
-  it("does not claim chat for every platform", () => expect(recovery).not.toMatch(/chat (for|from) every platform/i));
-  // docs/QUICKSTART.md:1-7 is "the impatient path" from installing; it covers no VPS renting
-  // and sends readers to INSTALL.md for "the careful version".
-  it("does not claim the quickstart covers renting a VPS", () => expect(run).not.toMatch(/renting/));
-  it("sends server newcomers to the install guide", () => expect(run).toMatch(/Never run a server before\?[^<]*<a href="\/docs\/install">/));
-  // docs/INSTALL.md:327: script installs find the setup code in the closing summary.
-  it("points script users at the setup code", () => expect(run).toMatch(/closing summary/));
-  // docs/FAQ.md:103-104: failover is off by default, so the heading must be conditional.
-  it("makes the recovery heading conditional on failover", () =>
-    expect(recovery).toMatch(/With failover on, your stream stays up when your encoder drops\./));
-  // docs/STORAGE.md:3-10, docs/MQTT.md, docs/HOOKS.md send data out when configured.
-  it("does not claim all data stays on the server", () => expect(run).not.toMatch(/keys and data stay/));
   // docs/PLATFORMS.md:42-50: many platforms are unverified.
   it("does not promise every platform in How it works", () => expect(how).not.toMatch(/to every platform/));
-  // Problem: competitor claims scoped to what docs/COMPARISON.md and the facts file show.
-  const problem = home("Problem.astro");
-  it("makes no universal competitor claims", () => {
-    expect(problem).not.toMatch(/Every way to multistream/);
-    expect(problem).not.toMatch(/usually means a paid plan/);
-    expect(problem).not.toMatch(/any mix you can script/);
+  it.each([
+    // docs/ARCHITECTURE.md:234-236: the outage before the slate stays a timestamp gap.
+    ["a gapless failover", /never see a gap/],
+    // docs/CONNECTING-PLATFORMS.md:294: reply-to-a-message is unknown on Twitch and YouTube
+    // (the send box posts to YouTube, Twitch and Kick).
+    ["chat replies", /\breply\b/i],
+    // docs/PLATFORMS.md:42-48: chat on several platforms is unverified.
+    ["chat for every platform", /chat (for|from) every platform/i],
+    // docs/QUICKSTART.md:1-7 is "the impatient path" from installing; it covers no VPS renting.
+    ["that the quickstart covers renting a VPS", /renting/],
+    // docs/STORAGE.md:3-10, docs/MQTT.md, docs/HOOKS.md send data out when configured.
+    ["that all data stays on the server", /keys and data stay/],
+  ])("claims no %s", (_what, re) => {
+    for (const [name, src] of everyFile()) expect(src, name).not.toMatch(re);
   });
-  // Spec "Decided": competitors stay generic (not named). Sources live in the PR claims table.
-  it("names no competitor in the problem cards", () =>
-    expect(problem).not.toMatch(/Restream|Streamlabs|StreamElements|Castr|Aitum|obs-multi-rtmp|MistServer/i));
-  // upload-meter.test.ts builds its fixture by hand; these pin the hooks it
-  // relies on to the markup that ships.
-  it("renders the meter hooks upload-meter.ts reads", () => {
-    expect(problem).toMatch(/<span data-pcount>/);
-    expect(problem.match(/<i data-kind=\{/g)).toHaveLength(2); // the cards' map and the strip
-    expect(problem.match(/<span class="val" data-val=\{/g)).toHaveLength(2);
+  // docs/FAQ.md:103-104: failover is off by default, so every failover promise is conditional.
+  it("makes the failover promise conditional on failover being on", () =>
+    expect(homeFile("Why.astro")).toMatch(/With failover on,/));
+  // docs/INSTALL.md:327: script installs find the setup code in the closing summary.
+  it("points script users at the setup code", () => expect(homeFile("Install.astro")).toMatch(/closing summary/));
+  // scripts/install.sh print_summary prints "Open <scheme>://<domain or localhost>:<port>" and the setup code
+  // after the script only; `docker run` and Compose print no address (the console is at localhost:8080, docs/QUICKSTART.md),
+  // only the setup code in the log. The old guard ("prints the address") kept that claim off the docker steps; this keeps
+  // it true everywhere: no tab may say an address is printed, and the script's summary must say what it really gives.
+  it("claims no printed console address, and says what the installer's summary gives", () => {
+    const install = homeFile("Install.astro");
+    expect(install).not.toMatch(/prints the address|address it prints/i);
+    expect(install).toMatch(/closing summary gives the address to open \(localhost, unless you named a domain\) and the one-time setup code/);
   });
-  it("lets screen readers read the platform count the meters count against", () =>
-    expect(problem).toMatch(/<p class="pc">Platforms you stream to:/));
+  // docs/CAPTIONS.md:20 "Every destination starts with captions off"; :14-18 Kick has no caption route.
+  it("does not promise every platform a caption route", () =>
+    expect(homeFile("FeatureTour.astro")).not.toMatch(/Each destination gets the caption route/));
+  // docs/CONNECTING-PLATFORMS.md:290-306: Rumble is read-only and Facebook send is unknown, so send and moderate are conditional.
+  it("makes sending and moderating in the chat conditional on the platform", () =>
+    expect(homeFile("FeatureTour.astro")).toMatch(/Send and moderate from the same place wherever the platform allows it/));
 });

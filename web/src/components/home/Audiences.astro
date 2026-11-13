@@ -1,0 +1,470 @@
+---
+/* "Built for more than one audience": a sports club, a church or event and a
+ * streamer, each with its routing drawn and a short setup recipe.
+ *
+ * Every name in a drawing or a list (the source, the tracks, the
+ * destinations, what each one hears) comes from cases.mjs, the same data the
+ * hero and the mix matrix read. The recipe copy below talks about the setup in
+ * general terms and holds no destination or track name, so a rename in the
+ * data cannot leave this section behind.
+ *
+ * ONE DRAWING FUNCTION, fed by the case object and nothing else: source on the
+ * left, tracks in the middle, destinations on the right. Off-white is video
+ * (one copy to every destination), coral is an audio lane a destination
+ * carries. The tracks, cities and mixes are illustrative; the routing model
+ * (per-destination track picks, video copied) is docs/AUDIO-ROUTING.md and
+ * docs/QUICKSTART.md.
+ *
+ * Text never scales below 12px: the viewBox is 600 wide and the diagram only
+ * shows where its figure is at least 640px wide (a container query), so the
+ * on-screen scale is above 1 and 13px text stays above 12px. Below that the
+ * same routing is a plain list. No script; nothing moves. */
+import { CASES, CASE_ORDER, mixLabel } from "../../data/cases.mjs";
+
+type Track = { id: string; label: string };
+type Dest = { name: string; tracks: string[] };
+type Case = { source: { label: string; city: string; spec: string }; tracks: Track[]; dests: Dest[]; fine: string };
+
+const VIEW_W = 600;
+const TOP = 40; /* room for the video bus above the rows */
+const PITCH = 36;
+const BOX_H = 28;
+const SRC = { x: 0, w: 124 };
+const TRK = { x: 184, w: 116 };
+const BUS_X = 366;
+const DST = { x: 388, w: VIEW_W - 388 };
+
+/* The routing drawing: geometry only, from one case. */
+function routing(c: Case) {
+  const rows = Math.max(c.tracks.length, c.dests.length);
+  const rowY = (i: number, count: number) => TOP + ((rows - count) / 2 + i) * PITCH;
+  const height = TOP + rows * PITCH + 4;
+  const mid = TOP + (rows * PITCH - (PITCH - BOX_H)) / 2;
+
+  const tracks = c.tracks.map((t, i) => ({ ...t, y: rowY(i, c.tracks.length) }));
+  const dests = c.dests.map((d, i) => {
+    const y = rowY(i, c.dests.length);
+    return {
+      name: d.name,
+      y,
+      lanes: d.tracks.flatMap((id) => {
+        const t = tracks.find((tr) => tr.id === id);
+        if (!t) return [];
+        const x1 = TRK.x + TRK.w;
+        const ya = t.y + BOX_H / 2;
+        const yb = y + BOX_H / 2;
+        const bend = (DST.x - x1) * 0.55;
+        return [`M${x1},${ya} C${x1 + bend},${ya} ${DST.x - bend},${yb} ${DST.x},${yb}`];
+      }),
+    };
+  });
+  const lastMid = dests[dests.length - 1].y + BOX_H / 2;
+  const label = `${c.source.label}: ${c.dests.map((d) => `${d.name} gets ${mixLabel(c, d)}`).join("; ")}`;
+  return { height, mid, tracks, dests, lastMid, label };
+}
+
+/* Setup recipe copy. The facts are in docs/QUICKSTART.md (steps 4 to 7),
+ * docs/OBS.md (multitrack over SRT) and docs/AUDIO-ROUTING.md. */
+const COPY = {
+  sports: {
+    tag: "Sports clubs",
+    title: "One match feed, a commentary language for each audience",
+    out: "The picture goes out once, and each channel carries its own commentary language over the same sound from the ground.",
+    steps: [
+      ["OBS", "In Advanced Audio Properties, put each commentary language and the ground sound on its own track. OBS sends up to six."],
+      ["Send", "Output Mode Advanced, Recording tab, Custom Output (FFmpeg), Output to URL, container mpegts. Paste the SRT URL from Sources."],
+      ["Sources", "Under Sources, annotations, label the incoming tracks so every destination sees the same names."],
+      ["Destinations", "Add one destination per channel and, under Tracks, tick its language and the ground sound. Video is copied, not re-encoded."],
+    ],
+    more: { href: "/docs/audio-routing", text: "How audio routing works" },
+  },
+  worship: {
+    tag: "Churches and events",
+    title: "One service, a mix for every room",
+    out: "The room, the online audience and each language get the mix made for them, from one feed.",
+    steps: [
+      ["Encoder", "Anything that pushes MPEG-TS over SRT works. Put each mix and each interpreter on its own audio track."],
+      ["Sources", "Add a source, copy its SRT publish URL into the encoder, and label each incoming track once."],
+      ["Destinations", "Add a destination per audience and, under Tracks, tick the mix that audience should hear."],
+      ["Meters", "Open Meters: loudness is measured after routing, so you see what each destination receives."],
+    ],
+    more: { href: "/docs/obs", text: "Sending multitrack from OBS" },
+  },
+  streamer: {
+    tag: "Streamers",
+    title: "One upload, the right mix for each platform",
+    out: "Your stream goes out as it is, and each platform carries the tracks its audience wants.",
+    steps: [
+      ["OBS", "Put voice, game, music and alerts on separate tracks and push multitrack over SRT. A destination gets that video as sent unless it points at a rendition."],
+      ["Sources", "Label the incoming tracks once; the labels belong to the feed."],
+      ["Renditions", "For a vertical feed, add a rendition with a portrait width and height and blurred fill. It is encoded once and shared by every destination that selects it; audio tracks pass through untouched."],
+      ["Destinations", "Add a destination per platform, point the vertical one at the rendition and, under Tracks, tick what each should carry."],
+    ],
+    more: { href: "/docs/quickstart", text: "The quickstart, start to finish" },
+  },
+} as const;
+import Fold from "./Fold.astro";
+---
+
+<section id="audiences" class="aud-sec" data-journey-stage="understand" aria-labelledby="h-audiences">
+  <div class="wrap">
+    <p class="eyebrow"><b>02</b> Understand</p>
+    <h2 id="h-audiences">Built for more than <em class="it it-hot">one</em> audience.</h2>
+    <p class="sec-lede">
+      Find your setup, see where each audio track goes, and follow the steps to build it. Each example is one
+      broadcast with a mix per audience.
+    </p>
+
+    <div class="aud-list">
+      {
+        CASE_ORDER.map((key, i) => {
+          const c: Case = CASES[key];
+          const copy = COPY[key];
+          const g = routing(c);
+          return (
+            <article class={`aud${i % 2 ? " flip" : ""}`} data-case={key} aria-labelledby={`h-aud-${key}`}>
+              <figure class="aud-fig">
+                <div class="frame aud-frame">
+                  <div class="frame-bar aud-bar">
+                    <span>
+                      <b>{c.source.label}</b> · {c.source.city}
+                    </span>
+                    <span>{c.source.spec}</span>
+                  </div>
+
+                  <svg
+                    class="aud-svg"
+                    viewBox={`0 0 ${VIEW_W} ${g.height}`}
+                    role="img"
+                    aria-label={g.label}
+                    focusable="false"
+                  >
+                    <path class="l-vid" d={`M${SRC.x + SRC.w / 2},${g.mid - BOX_H} V${TOP - 14} H${BUS_X} V${g.lastMid}`} />
+                    {g.dests.map((d) => <path class="l-vid" d={`M${BUS_X},${d.y + BOX_H / 2} H${DST.x}`} />)}
+                    <text class="t-vid" x={SRC.x + SRC.w / 2 + 10} y={TOP - 20}>
+                      video
+                    </text>
+                    {g.tracks.map((t) => (
+                      <path class="l-src" d={`M${SRC.x + SRC.w},${g.mid} C${TRK.x - 30},${g.mid} ${TRK.x - 30},${t.y + BOX_H / 2} ${TRK.x},${t.y + BOX_H / 2}`} />
+                    ))}
+                    {g.dests.flatMap((d) => d.lanes.map((p) => <path class="l-aud" d={p} />))}
+
+                    <rect class="bx" x={SRC.x} y={g.mid - BOX_H} width={SRC.w} height={BOX_H * 2} />
+                    <text class="t-name" x={SRC.x + 10} y={g.mid - 2}>
+                      {c.source.label}
+                    </text>
+                    <text class="t-sub" x={SRC.x + 10} y={g.mid + 16}>
+                      {c.source.city}
+                    </text>
+                    {g.tracks.map((t) => (
+                      <>
+                        <rect class="bx bx-aud" x={TRK.x} y={t.y} width={TRK.w} height={BOX_H} />
+                        <text class="t-trk" x={TRK.x + 10} y={t.y + 19}>
+                          {t.label}
+                        </text>
+                      </>
+                    ))}
+                    {g.dests.map((d) => (
+                      <>
+                        <rect class="bx" x={DST.x} y={d.y} width={DST.w} height={BOX_H} />
+                        <text class="t-name" x={DST.x + 10} y={d.y + 19}>
+                          {d.name}
+                        </text>
+                      </>
+                    ))}
+                  </svg>
+
+                  <ul class="aud-flat" aria-label={`Routing, ${c.source.label}`}>
+                    {c.dests.map((d) => (
+                      <li>
+                        <b>{d.name}</b>
+                        <span>{mixLabel(c, d)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </figure>
+
+              <div class="aud-copy">
+                <p class="aud-tag">
+                  <i aria-hidden="true" />
+                  {copy.tag}
+                </p>
+                <h3 id={`h-aud-${key}`} class="aud-title">{copy.title}</h3>
+                <p class="aud-out">{copy.out}</p>
+                <Fold class="aud-fold" summary={`Setup steps · ${copy.steps.length}`}>
+                  <ol class="aud-rec">
+                    {copy.steps.map(([head, text]) => (
+                      <li>
+                        <div>
+                          <b>{head}</b>
+                          <span>{text}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </Fold>
+                <a class="more" href={copy.more.href}>{copy.more.text}</a>
+                <p class="aud-fine">{c.fine}</p>
+              </div>
+            </article>
+          );
+        })
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .aud-sec {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+  }
+  .aud-sec h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .aud-list {
+    margin-top: 3rem;
+    border-top: 1px solid var(--color-line);
+  }
+  .aud {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+    padding: 44px 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .aud:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+  .aud-fig {
+    margin: 0;
+    min-width: 0;
+    max-width: 760px;
+    /* The figure is the container: the diagram is drawn only where the room
+       for it is 640px or more, so its text never shrinks under 12px. */
+    container-type: inline-size;
+    container-name: aud;
+  }
+  .aud-copy {
+    min-width: 0;
+  }
+  /* Side by side only when the figure (7fr of the row, less the gap) still
+     gets 640px for its diagram; below this width the block stacks, figure
+     first, so the diagram shows on every screen from tablets up. */
+  @media (min-width: 1240px) {
+    .aud {
+      grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+      gap: 56px;
+      align-items: start;
+      padding: 52px 0;
+    }
+    .aud.flip {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    }
+    .aud.flip .aud-fig {
+      order: 2;
+    }
+    .aud-fig {
+      max-width: none;
+    }
+  }
+
+  .aud-bar {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .aud-bar b {
+    font-weight: 500;
+    color: var(--color-fg);
+  }
+
+  /* Narrow: the plain list of the same routing. */
+  .aud-svg {
+    display: none;
+  }
+  .aud-flat {
+    list-style: none;
+    margin: 0;
+    padding: 6px 14px 10px;
+  }
+  .aud-flat li {
+    display: grid;
+    gap: 2px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .aud-flat li:last-child {
+    border-bottom: 0;
+  }
+  .aud-flat b {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  .aud-flat span {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-accent);
+  }
+
+  /* Wide enough: the drawing replaces the list. */
+  @container aud (min-width: 640px) {
+    .aud-svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      padding: 8px 14px 14px;
+    }
+    .aud-flat {
+      display: none;
+    }
+  }
+  .aud-svg text {
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+  }
+  .aud-svg .t-name {
+    font-weight: 600;
+    fill: var(--color-fg);
+  }
+  .aud-svg .t-sub,
+  .aud-svg .t-vid {
+    fill: var(--color-muted);
+  }
+  .aud-svg .t-trk {
+    fill: var(--color-fg);
+  }
+  .aud-svg .bx {
+    fill: var(--color-ink);
+    stroke: var(--color-line-strong);
+  }
+  .aud-svg .bx-aud {
+    stroke: var(--color-accent);
+  }
+  .aud-svg .l-vid {
+    fill: none;
+    stroke: var(--color-fg);
+    stroke-width: 1.4;
+    opacity: 0.75;
+  }
+  .aud-svg .l-aud {
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 1.4;
+    opacity: 0.85;
+  }
+  .aud-svg .l-src {
+    fill: none;
+    stroke: var(--color-line-strong);
+    stroke-width: 1;
+  }
+
+  .aud-tag {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .aud-tag i {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-accent);
+  }
+  .aud-title {
+    max-width: 15em;
+    margin-top: 14px;
+    font-size: clamp(1.75rem, 7.2vw, 2.375rem);
+    font-weight: 600;
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .aud-out {
+    max-width: 34em;
+    margin-top: 14px;
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .aud-rec {
+    list-style: none;
+    margin: 22px 0 0;
+    padding: 0;
+    border-top: 1px solid var(--color-line);
+    counter-reset: audrec;
+  }
+  .aud-rec li {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--color-line);
+    counter-increment: audrec;
+  }
+  .aud-rec li::before {
+    content: counter(audrec);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-accent);
+    padding-top: 1px;
+  }
+  .aud-rec b {
+    display: block;
+    margin-bottom: 2px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--color-fg);
+  }
+  .aud-rec span {
+    display: block;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+  /* On a phone the steps sit behind a Fold (the summary carries the rule). */
+  :global(.aud-fold) { margin-top: 22px; }
+  @media (max-width: 767px) {
+    .aud-rec { margin-top: 0; border-top: 0; }
+  }
+  .aud-copy .more {
+    margin-top: 20px;
+  }
+  .aud-fine {
+    max-width: 36em;
+    margin-top: 16px;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .aud-list { margin-top: 1.5rem; }
+    .aud { padding: 24px 0; gap: 20px; }
+    .aud:last-child { padding-bottom: 0; }
+    .aud-title { margin-top: 8px; }
+    .aud-out { margin-top: 10px; }
+    .aud-flat li { padding-block: 7px; }
+    .aud-copy .more { margin-top: 14px; }
+    .aud-fine { margin-top: 10px; }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .aud-title { font-size: 1.5rem; }
+  }
+</style>

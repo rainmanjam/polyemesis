@@ -1,142 +1,396 @@
 ---
-/* Beat 3, "how it works". Five steps beside the split diagram.
+/* "How it works": In, Split, Out, then the video tour (<Tour />).
+ *
+ * Each step is an li.step with a heading, two sentences, one link and one
+ * diagram. The diagrams share one language: off-white is video, coral is audio,
+ * and every label is real text of at least 12px at the size it renders (the
+ * SVGs are drawn 316 units wide, and the panel scrolls sideways rather than
+ * shrink them, which only happens below about 340px of viewport; a 390px phone
+ * gives the panel 348px, so labels render at 12px or more).
  *
  * With JS at 768px and up, how-steps.ts adds .is-enhanced: the track becomes
- * four screens tall and the stage sticks beneath the nav while the steps light
- * up in turn as the track scrolls past. That is plain CSS sticky; scrolling is
- * never captured. Without JS, or on a phone, nothing pins, every step stays
- * open and (on a phone) the diagram is hidden, since the hero already showed it.
+ * three screens tall and the stage sticks beneath the nav (and the journey bar,
+ * once the page has one) while the steps light up in turn as the track scrolls
+ * past, each showing its diagram beside it. That is plain CSS sticky; scrolling
+ * is never captured. Without JS, or on a phone, nothing pins and every step
+ * stays open with its diagram under it.
  *
  * No ancestor of .how-stage may set overflow hidden/auto/clip, or sticky stops
- * working. main, .page-grid and this section set none. */
-import SplitDiagram from "./SplitDiagram.astro";
+ * working. main and this section set none.
+ *
+ * The labels come from the sports case in cases.mjs, the same example the hero
+ * shows first. Names in diagrams are illustrative. */
+import { CASES } from "../../data/cases.mjs";
+import Tour from "./Tour.astro";
+
+/* cases.mjs's typedefs do not resolve for importers, so the two shapes read
+ * here are spelled out. */
+type Track = { id: string; label: string };
+type Dest = { name: string; tracks: string[] };
+const sports = CASES.sports;
+const langs: Track[] = sports.tracks; // six tracks: five languages and the crowd
+const dests: Dest[] = sports.dests;
 
 const STEPS = [
   {
-    title: "Send one stream",
-    body: "Point OBS or an IRL backpack at polyemesis over SRT or SRTLA. The video and every audio track arrive together in one upload. Plain RTMP works too, with one stereo pair.",
+    role: "In",
+    title: "Send one stream.",
+    body: "Point OBS, or any encoder that speaks SRT, at your polyemesis server. Over SRT the video and every audio track arrive together in one upload: up to 32 tracks, six of them from OBS.",
+    href: "/docs/obs",
+    link: "Set up OBS",
   },
   {
-    title: "The video goes through untouched",
-    body: "It is copied to each destination, not re-encoded, unless you add a rendition. No quality loss, very little CPU, and your upload stays at one stream.",
+    role: "Split",
+    title: "polyemesis splits the audio.",
+    body: "The video is copied, not re-encoded, so it keeps its quality. The audio arrives as separate tracks, such as one per language and the crowd, and each one can be routed on its own.",
+    href: "/docs/audio-routing",
+    link: "How audio routing works",
   },
   {
-    title: "The audio tracks split apart",
-    body: "Mic, music, game and co-host stay separate tracks, so each one can be on, lowered or off for any destination.",
-  },
-  {
-    title: "Each destination gets its own mix",
-    body: "Twitch gets the full mix. YouTube gets the same video without the music. Kick gets the music turned down.",
-  },
-  {
-    title: "Everyone gets a normal live stream",
-    body: "Each platform receives a regular broadcast, and the archive keeps every track separate for editing later.",
+    role: "Out",
+    title: "Each destination gets its mix.",
+    body: "Every destination receives the same video with the tracks you chose for it, to Twitch, YouTube, Kick, Facebook, X or a custom RTMP or SRT address. Change one destination and only that one restarts.",
+    href: "/docs/quickstart",
+    link: "Add your first destination",
   },
 ];
+
+const LABELS = [
+  "Diagram: OBS sends one SRT stream to polyemesis, carrying the video and six audio tracks together.",
+  `Diagram: inside polyemesis the video stays whole and the audio splits into ${langs.length} separate tracks: ${langs.map((t) => t.label).join(", ")}.`,
+  `Diagram: a grid of ${dests.length} destinations against the video and ${langs.length} audio tracks. Each destination takes the video and its own language plus the crowd.`,
+];
+
+// Step 2: a trunk down the left, one lane per stream.
+const LANE_TOP = 64;
+const LANE_GAP = 36;
+const lane = (i: number) => LANE_TOP + i * LANE_GAP;
+const LANE_LAST = lane(langs.length); // video is lane 0, the tracks follow
+
+// Step 3: the routing grid. Column 0 is the video, 1..6 the tracks.
+const COL_X = (c: number) => 150 + c * 26;
+const ROW_Y = (r: number) => 52 + r * 40;
+const GRID_BOTTOM = ROW_Y(dests.length - 1) + 18;
 ---
 
-<section class="how" id="how" aria-labelledby="h-how">
+<section class="how" id="how" data-how data-journey-stage="learn" aria-labelledby="h-how">
   <div class="how-track">
     <div class="how-stage">
-      <div class="how-h">
-        <h2 id="h-how">How it works</h2>
-        <p class="sub-h">Five steps from your encoder to each destination.</p>
-      </div>
-      <div class="how-s">
-        <ol class="steps">
-          {
-            STEPS.map((s, i) => (
-              <li class="step" data-step={i + 1}>
-                <h3>
-                  <span class="n">{i + 1}</span>{" "}
-                  {s.title}
-                </h3>
-                <div class="body">
-                  <div>
-                    <p>{s.body}</p>
-                  </div>
-                </div>
-              </li>
-            ))
-          }
-        </ol>
-        <div class="prog" role="group" aria-label="Jump to step">
-          {STEPS.map((_, i) => <button type="button" data-goto={i + 1} aria-label={`Step ${i + 1}`} />)}
+      <div class="wrap">
+        <div class="how-cols">
+          <div class="how-left">
+            <div class="how-h">
+              <p class="eyebrow"><b>01</b> Learn</p>
+              <h2 id="h-how">One stream in, <em class="it it-hot">every</em> audience out.</h2>
+              <p class="sec-lede">Your video stays whole. Your audio comes apart, so each destination gets the mix its audience needs.</p>
+            </div>
+            <ol class="steps">
+              {
+                STEPS.map((s, i) => (
+                  <li class="step" data-step={i + 1}>
+                    <h3>
+                      <span class="n">{`0${i + 1}`}</span>
+                      <span class="t">{s.title}</span>
+                      <span class="role">{s.role}</span>
+                    </h3>
+                    <div class="body">
+                      <div>
+                        <p>{s.body}</p>
+                        <a class="more" href={s.href}>
+                          {s.link}
+                        </a>
+                      </div>
+                    </div>
+                    <div class="step-dg">
+                      <div class="frame dg-panel">
+                        <div class="frame-bar">
+                          <span>Signal path</span>
+                          <span class="bar-at">{`0${i + 1} ${s.role}`}</span>
+                        </div>
+                        {i === 0 && (
+                          <svg class="dg" viewBox="0 0 316 150" role="img" aria-label={LABELS[0]}>
+                            <rect class="box" x="0.5" y="30.5" width="100" height="70" />
+                            <text class="ink" x="12" y="58">{sports.source.label}</text>
+                            <text x="12" y="78">OBS</text>
+                            <text x="112" y="46">SRT</text>
+                            <path class="rail v" d="M101 55H215" />
+                            <path class="rail a" d="M101 75H215" />
+                            <path class="flow v" d="M101 55H215" />
+                            <path class="flow a" d="M101 75H215" style="animation-delay:-0.4s" />
+                            <rect class="box srv" x="215.5" y="30.5" width="100" height="70" />
+                            <text class="big" x="226" y="58">polyemesis</text>
+                            <text x="226" y="78">your server</text>
+                            <text x="0" y="132">
+                              <tspan class="ink">1 video</tspan>
+                              <tspan> + </tspan>
+                              <tspan class="acc">6 audio tracks</tspan>
+                              <tspan>, one upload</tspan>
+                            </text>
+                          </svg>
+                        )}
+                        {i === 1 && (
+                          <svg class="dg" viewBox={`0 0 316 ${LANE_LAST + 24}`} role="img" aria-label={LABELS[1]}>
+                            <rect class="box srv" x="0.5" y="0.5" width="315" height="34" />
+                            <text class="big" x="12" y="22">polyemesis</text>
+                            <text x="304" y="22" text-anchor="end">one stream in</text>
+                            <path class="rail v" d={`M10 35V${LANE_LAST}`} />
+                            <path class="flow v" d={`M10 35V${LANE_LAST}`} />
+                            <path class="rail v" d={`M10 ${lane(0)}H306`} />
+                            <path class="flow v" d={`M10 ${lane(0)}H306`} />
+                            <text class="ink" x="26" y={lane(0) - 8}>Video · copied, not re-encoded</text>
+                            <circle class="node v" cx="306" cy={lane(0)} r="3" />
+                            {langs.map((t, n) => (
+                              <>
+                                <path class="rail a" d={`M10 ${lane(n + 1)}H306`} />
+                                <path class="flow a" d={`M10 ${lane(n + 1)}H306`} style={`animation-delay:${-(n + 1) * 0.23}s`} />
+                                <text class="acc" x="26" y={lane(n + 1) - 8}>{`${n + 1} · ${t.label}`}</text>
+                                <circle class="node a" cx="306" cy={lane(n + 1)} r="3" />
+                              </>
+                            ))}
+                          </svg>
+                        )}
+                        {i === 2 && (
+                          <svg class="dg" viewBox={`0 0 316 ${GRID_BOTTOM + 36}`} role="img" aria-label={LABELS[2]}>
+                            <text class="ink" x={COL_X(0)} y="14" text-anchor="middle">V</text>
+                            {langs.map((_, n) => (
+                              <text class="acc" x={COL_X(n + 1)} y="14" text-anchor="middle">{n + 1}</text>
+                            ))}
+                            {[0, ...langs.map((_, n) => n + 1)].map((c) => (
+                              <>
+                                <path class={`rail ${c === 0 ? "v" : "a"}`} d={`M${COL_X(c)} 24V${GRID_BOTTOM}`} />
+                                <path class={`flow ${c === 0 ? "v" : "a"}`} d={`M${COL_X(c)} 24V${GRID_BOTTOM}`} style={`animation-delay:${-c * 0.23}s`} />
+                              </>
+                            ))}
+                            {dests.map((d, r) => (
+                              <>
+                                <path class="rail v" d={`M${COL_X(0) - 8} ${ROW_Y(r)}H${COL_X(langs.length) + 8}`} />
+                                <text class="ink" x="0" y={ROW_Y(r) + 4}>{d.name}</text>
+                                <rect class="tap v" x={COL_X(0) - 5} y={ROW_Y(r) - 5} width="10" height="10" />
+                                {langs.map((t, n) =>
+                                  d.tracks.includes(t.id) ? (
+                                    <rect class="tap a" x={COL_X(n + 1) - 5} y={ROW_Y(r) - 5} width="10" height="10" />
+                                  ) : (
+                                    <circle class="off" cx={COL_X(n + 1)} cy={ROW_Y(r)} r="2" />
+                                  ),
+                                )}
+                              </>
+                            ))}
+                            <text x="0" y={GRID_BOTTOM + 30}>
+                              <tspan class="ink">V video</tspan>
+                              <tspan> · </tspan>
+                              <tspan class="acc">1-6 audio tracks</tspan>
+                            </text>
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                ))
+              }
+            </ol>
+            <div class="prog" role="group" aria-label="Jump to step">
+              {STEPS.map((s, i) => <button type="button" data-goto={i + 1} aria-label={`Step ${i + 1}: ${s.role}`} />)}
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="how-dg">
-        <SplitDiagram story="streamer" mode="steps" />
       </div>
     </div>
   </div>
+  <Tour />
 </section>
 
 <style>
   .how {
-    --nav-h: 56px;
-    margin-block: clamp(2.5rem, 6vw, 5rem);
-  }
-  .how-stage {
-    display: grid;
-    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-    grid-template-areas: "h dg" "s dg";
-    align-content: center;
-    column-gap: clamp(24px, 5vw, 72px);
-    row-gap: 18px;
-    max-width: 72rem;
-    margin-inline: auto;
-    padding: 20px 1rem;
-  }
-  .how-h {
-    grid-area: h;
-    align-self: end;
-  }
-  .how-s {
-    grid-area: s;
-    align-self: start;
-  }
-  .how-dg {
-    grid-area: dg;
-    align-self: center;
-    min-width: 0;
+    margin-block: var(--sec-gap);
+    /* Overwritten on this section by how-steps.ts with the measured stack. */
+    --g: clamp(24px, 5vw, 72px);
   }
   .how-h h2 {
+    margin-top: 1rem;
     font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
   }
-  .sub-h {
-    margin-top: 10px;
-    font-size: 1.0625rem;
+  .how-h {
+    margin-bottom: 2rem;
   }
+
   .steps {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
     list-style: none;
     margin: 0;
     padding: 0;
   }
   .step {
-    border-left: 2px solid var(--color-line);
-    padding: 6px 0 6px 16px;
+    border-top: 1px solid var(--color-line);
+    padding: 22px 0 26px;
+  }
+  .step:last-child {
+    border-bottom: 1px solid var(--color-line);
   }
   .step h3 {
     display: flex;
-    gap: 12px;
     align-items: baseline;
-    font-size: 1.125rem;
-    letter-spacing: -0.015em;
-    font-weight: 500;
+    gap: 14px;
+    font-size: clamp(1.5rem, 1rem + 1.6vw, 2.125rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+  }
+  /* The step's text lines up under its title: the number's width plus the title's gap.
+     The number is 13px, so its 2.2em is not the 2.2em of the 17px paragraph. */
+  .step {
+    --step-indent: calc(2.2 * 0.8125rem + 14px);
   }
   .n {
+    min-width: 2.2em;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--color-muted);
+  }
+  .role {
+    margin-left: auto;
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    font-weight: 400;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-muted);
   }
   .step p {
-    padding: 8px 0 4px 28px;
-    max-width: 46ch;
-    font-size: 1rem;
+    max-width: 32em;
+    margin: 12px 0 0 var(--step-indent);
+    font-size: 1.0625rem;
+    line-height: 1.5;
+    color: var(--color-muted);
   }
+  .step .more {
+    margin: 16px 0 0 var(--step-indent);
+  }
+
+  /* The diagram under each step (phones, and without JS). */
+  .step-dg {
+    margin-top: 20px;
+  }
+  .dg-panel {
+    max-width: 480px;
+    overflow-x: auto;
+  }
+  .frame-bar {
+    justify-content: space-between;
+  }
+  .bar-at {
+    color: var(--color-fg);
+  }
+  .dg {
+    display: block;
+    width: 100%;
+    min-width: 316px; /* 1 unit = 1px at least, so 12px text is never smaller */
+    height: auto;
+    padding: 18px 14px 14px;
+    box-sizing: border-box;
+    overflow: visible;
+  }
+  /* Phones: no side padding, so a 360px viewport's 318px panel still fits the
+     316px minimum. Below that the panel scrolls inside itself. */
+  @media (max-width: 767.98px) {
+    .dg {
+      padding-inline: 0;
+    }
+  }
+  /* From 390px the panel's own inner padding fits: the diagram's 316px minimum (so its 12px text is never
+     scaled down) still has 320px of room at 390. Below that it keeps the whole width. */
+  @media (min-width: 390px) and (max-width: 767.98px) {
+    .dg {
+      padding-inline: 14px;
+    }
+  }
+  .dg text {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    fill: var(--color-muted);
+  }
+  .dg .ink {
+    fill: var(--color-fg);
+  }
+  .dg .acc {
+    fill: var(--color-accent);
+  }
+  .dg .big {
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    fill: var(--color-fg);
+  }
+  .dg .box {
+    fill: var(--color-ink);
+    stroke: var(--color-line-strong);
+    stroke-width: 1;
+  }
+  .dg .srv {
+    stroke: var(--color-fg);
+  }
+  /* A rail is the quiet line a signal travels on; the flow is the moving dash
+     on top of it. Off-white is video, coral is audio. */
+  .dg .rail {
+    fill: none;
+    stroke-width: 1;
+  }
+  .dg .rail.v {
+    stroke: var(--color-line-strong);
+  }
+  .dg .rail.a {
+    stroke: color-mix(in srgb, var(--color-accent) 35%, var(--color-ink));
+  }
+  .dg .flow {
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-dasharray: 2 10;
+  }
+  .dg .flow.v {
+    stroke: var(--color-fg);
+  }
+  .dg .flow.a {
+    stroke: var(--color-accent);
+  }
+  .dg .node {
+    fill: var(--color-ink);
+    stroke-width: 1;
+  }
+  .dg .node.v {
+    stroke: var(--color-fg);
+  }
+  .dg .node.a {
+    stroke: var(--color-accent);
+  }
+  .dg .tap.v {
+    fill: var(--color-fg);
+  }
+  .dg .tap.a {
+    fill: var(--color-accent);
+  }
+  .dg .off {
+    fill: var(--color-line-strong);
+  }
+
+  /* The dashes flow only while how-steps.ts says the stage is on screen and
+     the gate allows motion. Otherwise they sit still: a complete diagram. */
+  @media (prefers-reduced-motion: no-preference) {
+    :global(.motion-on) .how-stage.is-playing .dg .flow {
+      animation: how-flow 1.1s linear infinite;
+    }
+  }
+  @keyframes how-flow {
+    to {
+      stroke-dashoffset: -12;
+    }
+  }
+
   /* Without JS the pips would jump to nothing, so they only appear enhanced. */
   .prog {
     display: none;
@@ -151,7 +405,7 @@ const STEPS = [
     place-items: center;
     background: transparent;
     border: 0;
-    border-radius: 8px;
+    border-radius: 4px;
     cursor: pointer;
   }
   .prog button::before {
@@ -162,43 +416,52 @@ const STEPS = [
     background: var(--color-line-strong);
   }
   .prog button[aria-current="step"]::before {
-    background: var(--tally);
+    background: var(--color-fg);
   }
 
-  /* Phones and tablets under 768px: nothing pins, and the hero already showed
-   * the diagram. */
-  @media (max-width: 767.98px) {
-    .how-stage {
-      grid-template-columns: 1fr;
-      grid-template-areas: "h" "s";
-    }
-    .how-dg {
-      display: none;
-    }
-  }
-
-  /* Pinned layout: only when how-steps.ts has enhanced the section. */
+  /* Pinned layout: only when how-steps.ts has enhanced the section. The stage
+     sticks at --stack-h (the nav, plus the journey bar when the page has one)
+     and the diagram of the lit step fills the right column. */
   @media (min-width: 768px) {
     .how.is-enhanced .how-track {
-      height: 400vh;
+      height: 300vh;
     }
     .how.is-enhanced .how-stage {
       position: sticky;
-      top: var(--nav-h);
-      height: calc(100svh - var(--nav-h));
+      top: var(--stack-h);
+      height: calc(100svh - var(--stack-h));
       box-sizing: border-box;
-    }
-    .how.is-enhanced .prog {
       display: flex;
+      align-items: center;
+    }
+    .how.is-enhanced .wrap {
+      min-width: 0;
+    }
+    .how.is-enhanced .how-cols {
+      position: relative;
+    }
+    .how.is-enhanced .how-left {
+      width: calc((100% - var(--g)) * 5 / 12);
+    }
+    .how.is-enhanced .how-h {
+      margin-bottom: 1.25rem;
+    }
+    .how.is-enhanced .how-h .sec-lede {
+      margin-top: 0.75rem;
+      font-size: 1.0625rem;
+    }
+    .how.is-enhanced .step {
+      padding: 14px 0 16px;
     }
     .how.is-enhanced .step h3 {
       color: var(--color-subtle);
     }
-    .how.is-enhanced .step.on {
-      border-left-color: var(--tally);
-    }
     .how.is-enhanced .step.on h3 {
       color: var(--color-fg);
+    }
+    .how.is-enhanced .step.on .n,
+    .how.is-enhanced .step.on .role {
+      color: var(--color-accent);
     }
     .how.is-enhanced .body {
       display: grid;
@@ -207,26 +470,68 @@ const STEPS = [
     .how.is-enhanced .body > div {
       overflow: hidden;
     }
-    .how.is-enhanced .step.on .body {
+    /* :focus-within is the fallback for the moment between a link taking
+       keyboard focus and how-steps.ts lighting its step. */
+    .how.is-enhanced .step.on .body,
+    .how.is-enhanced .step:focus-within .body {
       grid-template-rows: 1fr;
+    }
+    .how.is-enhanced .step.on p {
+      color: var(--color-fg);
+    }
+    .how.is-enhanced .prog {
+      display: flex;
+    }
+    /* Right column: every diagram occupies it, only the lit step's shows. The
+       li is not positioned, so the absolute box is placed against .how-cols. */
+    .how.is-enhanced .step-dg {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: calc((100% - var(--g)) * 5 / 12 + var(--g));
+      right: 0;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      visibility: hidden;
+      opacity: 0;
+    }
+    .how.is-enhanced .step.on .step-dg {
+      visibility: visible;
+      opacity: 1;
+    }
+    .how.is-enhanced .dg-panel {
+      width: 100%;
+      max-width: 480px;
     }
   }
 
   /* All motion sits behind no-preference and .motion-on, which only the
-   * page's script sets, so reduced motion and the Pause control both get
-   * instant changes. */
+     page's script sets, so reduced motion and the Pause control both get
+     instant changes. */
   @media (prefers-reduced-motion: no-preference) {
-    :global(.motion-on) .how.is-enhanced .step {
-      transition: border-color 0.25s;
-    }
-    :global(.motion-on) .how.is-enhanced .step h3 {
+    :global(.motion-on) .how.is-enhanced .step h3,
+    :global(.motion-on) .how.is-enhanced .n,
+    :global(.motion-on) .how.is-enhanced .role,
+    :global(.motion-on) .how.is-enhanced .step p {
       transition: color 0.25s;
     }
     :global(.motion-on) .how.is-enhanced .body {
       transition: grid-template-rows 0.35s var(--ease-out);
     }
+    :global(.motion-on) .how.is-enhanced .step-dg {
+      transition: opacity 0.35s, visibility 0.35s;
+    }
     :global(.motion-on) .how.is-enhanced .prog button::before {
       transition: background-color 0.25s;
     }
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .how-h { margin-bottom: 1rem; }
+    .step { padding: 14px 0 16px; }
+    .step-dg { margin-top: 12px; }
+    .dg { padding-block: 10px 8px; }
   }
 </style>

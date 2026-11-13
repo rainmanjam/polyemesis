@@ -163,3 +163,10 @@
 # gets a new filename and reaches people immediately rather than after the TTL.
 /fonts/*
   Cache-Control: public, max-age=604800
+
+# The 3D model and the social cards are stable but NOT content-hashed (they are
+# served from public/, not through the build), so the same week as /fonts/*.
+/models/*
+  Cache-Control: public, max-age=604800
+/og/*
+  Cache-Control: public, max-age=604800

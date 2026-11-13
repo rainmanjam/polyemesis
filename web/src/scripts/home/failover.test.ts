@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initFailover, STAGES } from "./failover";
 import type { MotionGate } from "./motion";
 
-let ioCallback: ((entries: Array<{ isIntersecting: boolean }>) => void) | null;
+let ioCallback: ((entries: Array<{ isIntersecting: boolean; intersectionRatio: number }>) => void) | null;
 
 /** A gate whose answer can change; subscribers hear it, as with the real one. */
 function fakeGate(initial: boolean) {
@@ -52,7 +52,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   ioCallback = null;
   (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-    constructor(cb: (entries: Array<{ isIntersecting: boolean }>) => void) {
+    constructor(cb: (entries: Array<{ isIntersecting: boolean; intersectionRatio: number }>) => void) {
       ioCallback = cb;
     }
     observe() {}
@@ -93,7 +93,7 @@ describe("initFailover", () => {
   it("autoplays once when 50% visible and motion allowed", () => {
     const f = initFailover(fixture(), makeGate(true));
     expect(state()).toBe("live");
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     const seen = [state()];
     for (const s of STAGES.slice(0, -1)) {
       vi.advanceTimersByTime(s.ms + (s.id === "live" ? 700 : 0));
@@ -103,8 +103,8 @@ describe("initFailover", () => {
     vi.advanceTimersByTime(20000);
     expect(state()).toBe("recovered");
     // leaving and re-entering does not replay
-    ioCallback!([{ isIntersecting: false }]);
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: false, intersectionRatio: 0 }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(20000);
     expect(state()).toBe("recovered");
     f.destroy();
@@ -120,7 +120,7 @@ describe("initFailover", () => {
 
   it("with motion off, Pull the cable jumps straight to the slate and schedules nothing", () => {
     const f = initFailover(fixture(), makeGate(false));
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(20000);
     expect(state()).toBe("live");
     play();
@@ -169,14 +169,14 @@ describe("initFailover", () => {
 
   it("scrolling away mid-run restores live, and the visitor's run does not replay", () => {
     const f = initFailover(fixture(), makeGate(true));
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     play();
     vi.advanceTimersByTime(STAGES[1].ms);
     expect(state()).toBe("slate");
-    ioCallback!([{ isIntersecting: false }]);
+    ioCallback!([{ isIntersecting: false, intersectionRatio: 0 }]);
     expect(state()).toBe("live");
     expect(vi.getTimerCount()).toBe(0);
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(20000);
     expect(state()).toBe("live");
     f.destroy();
@@ -185,7 +185,7 @@ describe("initFailover", () => {
   it("announces visitor-started steps only, never autoplay", () => {
     const f = initFailover(fixture(), makeGate(true));
     expect(live()).toBe("off");
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(700 + STAGES[0].ms);
     expect(state()).toBe("drop");
     expect(live()).toBe("off");
@@ -216,20 +216,20 @@ describe("initFailover", () => {
   it("an interrupted autoplay resumes from the top and completes", () => {
     const f = initFailover(fixture(), makeGate(true));
     // leaves view during the lead-in: autoplay must not be lost
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(300);
-    ioCallback!([{ isIntersecting: false }]);
+    ioCallback!([{ isIntersecting: false, intersectionRatio: 0 }]);
     vi.advanceTimersByTime(20000);
     expect(state()).toBe("live");
     // leaves view mid-run: must not freeze on a failure stage
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(700 + STAGES[0].ms + STAGES[1].ms);
     expect(state()).toBe("slate");
-    ioCallback!([{ isIntersecting: false }]);
+    ioCallback!([{ isIntersecting: false, intersectionRatio: 0 }]);
     expect(state()).toBe("live");
     vi.advanceTimersByTime(20000);
     expect(state()).toBe("live");
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(700);
     expect(state()).toBe("live");
     vi.advanceTimersByTime(STAGES[0].ms + STAGES[1].ms + STAGES[2].ms);
@@ -248,7 +248,7 @@ describe("initFailover", () => {
 
   it("a manual jump stops a running autoplay", () => {
     const f = initFailover(fixture(), makeGate(true));
-    ioCallback!([{ isIntersecting: true }]);
+    ioCallback!([{ isIntersecting: true, intersectionRatio: 1 }]);
     vi.advanceTimersByTime(700 + STAGES[0].ms);
     expect(state()).toBe("drop");
     document.querySelector<HTMLButtonElement>('button[data-stage="0"]')!.click();

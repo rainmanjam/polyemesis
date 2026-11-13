@@ -1,0 +1,22 @@
+---
+/* A block that is secondary on a phone: a real <details> that starts closed
+ * below 768px and is simply shown, with no control, from 768px up. The content
+ * is in the server-rendered HTML either way, and works with no script.
+ *
+ * The wide-screen rule (global.css, `.fold`) uses ::details-content so a closed
+ * <details> can show its content with no script and no layout shift after
+ * paint. A browser without that pseudo-element keeps the disclosure control on
+ * a wide screen, closed but one click from the content.
+ *
+ * Props: `summary` says what is inside ("Setup steps · 4"). */
+interface Props {
+  summary: string;
+  class?: string;
+}
+const { summary, class: cls } = Astro.props;
+---
+
+<details class:list={["fold", cls]} data-collapse>
+  <summary>{summary}</summary>
+  <slot />
+</details>

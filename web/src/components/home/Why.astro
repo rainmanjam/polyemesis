@@ -1,0 +1,492 @@
+---
+/* "Yours to run. Free to use.": what it costs and needs, how self-hosting
+ * compares with a cloud relay, and the common questions. No script.
+ *
+ * Sources, so the copy can be re-checked:
+ *  - cost block: README.md (MIT, "Single static binary", about 4% of one core per
+ *    destination, platform maturity table), docs/QUICKSTART.md "Check FFmpeg first"
+ *    (FFmpeg 8.0 or later with SRT; the image bundles it), docs/INSTALL.md "Ports".
+ *    The FFmpeg floor is read from data/facts.mjs, not typed.
+ *  - the comparison table: docs/COMPARISON.md and README.md "How it compares".
+ *    The table names no product; each row is a plain difference. Its wording is
+ *    the owner's to sign off. Its first header is never "capability":
+ *    check-build.mjs treats such a table as the comparison table and requires
+ *    its rows in docs/COMPARISON.md. Each topic is a rowgroup header above its
+ *    two cells, so a phone shows both columns.
+ *  - the questions: docs/FAQ.md, each answer the FAQ's own in fewer words.
+ * The release line is read from CHANGELOG.md at build time and omitted if it
+ * cannot be. */
+import { Picture } from "astro:assets";
+import destinations from "../../assets/shots/18-destinations.png";
+import monitoring from "../../assets/shots/07-monitoring.png";
+import { FFMPEG_FLOOR } from "../../data/facts.mjs";
+import { latestRelease } from "../../lib/release";
+
+const release = latestRelease();
+
+const SPEC: Array<[string, string, string?]> = [
+  ["runs on", "Linux server or Docker", "macOS works well as a workstation rig"],
+  ["needs", `FFmpeg ${FFMPEG_FLOOR} or later, with SRT`, "The Docker image bundles it"],
+  ["ports", "8080/tcp console, 6000/udp SRT in, 1935/tcp RTMP in"],
+  ["cpu", "about 4% of one core per destination", "Video is copied, not re-encoded"],
+  ["network", "upload for every destination you send to", "Upload bandwidth is the practical limit"],
+  ["install", "one static binary, or a Docker image"],
+];
+
+/* The first rows stay in view on a phone; the rest sit behind a Fold there. */
+const SPEC_SHOWN = 2;
+
+const ROWS: Array<[string, string, string]> = [
+  ["Audio", "Each destination gets its own mix from one multitrack stream", "Typically the same audio to every destination"],
+  ["Where it runs", "A server you choose; your data lives in its data directory", "The provider's servers"],
+  ["Cost", "Your own hardware and bandwidth, with no per-destination fee", "Set by the provider's plans"],
+  ["Destinations", "No configured cap; upload bandwidth is the practical limit", "Set by the provider's plans"],
+  ["Setup", "You install and run the server; the Docker image bundles FFmpeg", "Nothing to install"],
+  ["Teams", "One admin login; a reverse proxy in front adds access control", "Depends on the provider's plan"],
+];
+
+const FAQ: Array<[string, string]> = [
+  [
+    "What is this for, exactly?",
+    "One stream in, many places out, with each destination getting its own audio mix. A second-language stream can carry mic and commentary while your main channel carries mic and music, all from one upload.",
+  ],
+  [
+    "Does it re-encode my video?",
+    "No. Destinations copy the video, so each platform receives exactly what your encoder produced. A rendition, such as a 720p alongside your 1080p, is opt-in.",
+  ],
+  [
+    "How many destinations can I run?",
+    "Upload bandwidth is the practical limit: copying video is nearly free, at about 4% of one core per destination. Ten destinations on a small VPS is unremarkable.",
+  ],
+  [
+    "Do I need SRT? Can I use RTMP?",
+    "Classic RTMP carries one stereo pair. For several audio tracks in one stream, use SRT: that is what the per-destination mixes are built from.",
+  ],
+  [
+    "What happens if my encoder drops?",
+    "With failover on, a standby slate goes out and your destinations never restart, so the platform connections survive. When the encoder returns, it takes over again. Failover is off by default; turn it on under Settings, Pipeline.",
+  ],
+  [
+    "Does it work on a Raspberry Pi or a NAS?",
+    "It should: it is one static binary and arm64 images are published. Check the FFmpeg version and SRT support; on a NAS, Docker is usually the easiest route.",
+  ],
+];
+import Fold from "./Fold.astro";
+---
+
+<section id="why" class="why-sec" data-journey-stage="why" aria-labelledby="h-why">
+  <div class="wrap">
+    <p class="eyebrow"><b>03</b> Why polyemesis</p>
+    <h2 id="h-why">Yours to run. <em class="it it-hot">Free</em> to use.</h2>
+    <p class="sec-lede">
+      Open source under the MIT license, running on a server you choose. Here is what it takes, and how it compares
+      with a cloud relay.
+    </p>
+
+    <div class="why-grid">
+      <div class="why-cost">
+        <h3>What it costs and needs</h3>
+        <p class="why-sub">No subscription and no per-destination fee. You supply a machine and the upload bandwidth.</p>
+        <p class="why-price"><b>Free</b><span>MIT license, open source</span></p>
+        <dl class="why-spec">
+          {
+            SPEC.slice(0, SPEC_SHOWN).map(([k, v, small]) => (
+              <div>
+                <dt>{k}</dt>
+                <dd>
+                  {v}
+                  {small && <small>{small}</small>}
+                </dd>
+              </div>
+            ))
+          }
+        </dl>
+        <Fold class="why-fold" summary={`Ports, CPU, bandwidth and install · ${SPEC.length - SPEC_SHOWN}`}>
+          <dl class="why-spec why-spec-more">
+            {
+              SPEC.slice(SPEC_SHOWN).map(([k, v, small]) => (
+                <div>
+                  <dt>{k}</dt>
+                  <dd>
+                    {v}
+                    {small && <small>{small}</small>}
+                  </dd>
+                </div>
+              ))
+            }
+          </dl>
+        </Fold>
+        <p class="why-links">
+          <a class="more" href="/docs/install">Read the install guide</a>
+          <a class="more" href="https://github.com/rainmanjam/polyemesis" rel="noopener">Source on GitHub</a>
+        </p>
+        {release && <p class="why-rel">Latest release v{release.version} · {release.date}</p>}
+      </div>
+
+      <div class="why-proof">
+        <h3>The real console</h3>
+        <p class="why-sub">Screenshots of the running product, cropped, not mock-ups.</p>
+        <figure>
+          <div class="frame">
+            <div class="frame-bar"><span>Destinations</span></div>
+            <div class="why-crop why-crop-dest">
+              <Picture
+                src={destinations}
+                formats={["avif", "webp"]}
+                widths={[720, 1240, 1860, 2880]}
+                sizes="(min-width: 1100px) calc(((min(100vw, 1320px) - 5rem - 528px) / 12 * 7 + 288px) * 1.764), calc((100vw - 2.5rem) * 1.764)"
+                loading="lazy"
+                decoding="async"
+                alt="The console's Destinations page: cards for YouTube and Twitch, each showing its video tier and the audio tracks it carries"
+                pictureAttributes={{ class: "block" }}
+              />
+            </div>
+          </div>
+          <figcaption>The Destinations page. Each card shows its video tier and the audio tracks it carries.</figcaption>
+        </figure>
+        <Fold class="why-fold" summary="Monitoring page · screenshot">
+          <figure>
+            <div class="frame">
+              <div class="frame-bar"><span>Monitoring</span></div>
+              <div class="why-crop why-crop-mon">
+                <Picture
+                  src={monitoring}
+                  formats={["avif", "webp"]}
+                  widths={[720, 1240, 1860, 2880]}
+                  sizes="(min-width: 1100px) calc(((min(100vw, 1320px) - 5rem - 528px) / 12 * 7 + 288px) * 2.014), calc((100vw - 2.5rem) * 2.014)"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The console's Monitoring page: a table of processes with their state, restarts and uptime"
+                  pictureAttributes={{ class: "block" }}
+                />
+              </div>
+            </div>
+            <figcaption>The Monitoring page. Each process with its state, restarts and uptime.</figcaption>
+          </figure>
+        </Fold>
+      </div>
+
+      <div class="why-cmp">
+        <h3>Self-hosted compared with a cloud relay</h3>
+        <p class="why-sub">
+          A cloud relay runs on the provider's servers, and the provider's plans set its limits. Self-hosted, the server and the limits are yours.
+        </p>
+        <div class="why-tbl">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">polyemesis, self-hosted</th>
+                <th scope="col">A cloud relay</th>
+              </tr>
+            </thead>
+            {
+              ROWS.map(([topic, ours, theirs]) => (
+                <tbody>
+                  <tr>
+                    <th scope="rowgroup" colspan="2">{topic}</th>
+                  </tr>
+                  <tr>
+                    <td>{ours}</td>
+                    <td>{theirs}</td>
+                  </tr>
+                </tbody>
+              ))
+            }
+          </table>
+        </div>
+        <p class="why-links"><a class="more" href="/comparison">See the full comparison</a></p>
+      </div>
+
+      <div class="why-faq">
+        <h3>Common questions</h3>
+        <p class="why-sub">Short answers. The FAQ has the rest.</p>
+        {
+          FAQ.map(([q, a]) => (
+            <details class="why-q">
+              <summary>{q}</summary>
+              <p>{a}</p>
+            </details>
+          ))
+        }
+        <p class="why-links"><a class="more" href="/docs/faq">Read the full FAQ</a></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .why-sec {
+    margin-block: var(--sec-gap);
+    scroll-margin-top: var(--anchor-offset);
+  }
+  .why-sec h2 {
+    margin-top: 1rem;
+    font-size: clamp(1.75rem, 1rem + 2.6vw, 2.875rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .why-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 56px;
+    margin-top: 3rem;
+  }
+  .why-grid > * {
+    min-width: 0;
+  }
+  @media (min-width: 1100px) {
+    .why-grid {
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 56px 48px;
+      align-items: start;
+    }
+    .why-cost {
+      grid-column: span 5;
+    }
+    .why-proof {
+      grid-column: span 7;
+    }
+    .why-cmp {
+      grid-column: span 7;
+    }
+    .why-faq {
+      grid-column: span 5;
+    }
+  }
+  .why-sec h3 {
+    margin-bottom: 6px;
+    font-size: 1.625rem;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+  }
+  .why-sub {
+    max-width: 34em;
+    margin-bottom: 20px;
+    font-size: 1rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+
+  .why-price {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin: 0 0 6px;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-line-strong);
+  }
+  .why-price b {
+    font-size: 3.5rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+  .why-price span {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-muted);
+  }
+  .why-spec {
+    margin: 0;
+    border-top: 1px solid var(--color-line);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  .why-spec-more { border-top: 0; }
+  :global(.why-fold > summary) { border-top: 0; }
+  .why-spec div {
+    display: grid;
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 14px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .why-spec dt {
+    color: var(--color-muted);
+  }
+  .why-spec dd {
+    margin: 0;
+    line-height: 1.5;
+    color: var(--color-fg);
+  }
+  .why-spec small {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .why-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin-top: 20px;
+  }
+  .why-rel {
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+
+  .why-proof figure {
+    margin: 0 0 20px;
+    min-width: 0;
+  }
+  .why-proof figcaption {
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+  /* A crop of a full-page capture: the image is scaled up and shifted so only
+     the part that names the screen shows. */
+  .why-crop {
+    position: relative;
+    overflow: hidden;
+  }
+  .why-crop :global(picture) {
+    display: block;
+  }
+  .why-crop :global(img) {
+    display: block;
+    max-width: none;
+    height: auto;
+  }
+  .why-crop-dest {
+    aspect-ratio: 1134 / 280;
+  }
+  .why-crop-dest :global(img) {
+    width: 176.4%;
+    margin: -28.4% 0 0 -73.7%;
+  }
+  .why-crop-mon {
+    aspect-ratio: 993 / 318;
+  }
+  .why-crop-mon :global(img) {
+    width: 201.4%;
+    margin: -10.6% 0 0 -77.2%;
+  }
+
+  .why-tbl {
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-surface);
+    border-radius: 2px;
+  }
+  .why-tbl table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.9375rem;
+    line-height: 1.4;
+  }
+  .why-tbl :is(th, td) {
+    padding: 12px 14px;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: break-word;
+  }
+  .why-tbl thead th {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-muted);
+    background: var(--color-ink);
+    border-bottom: 1px solid var(--color-line-strong);
+  }
+  .why-tbl thead th:first-child {
+    color: var(--color-fg);
+  }
+  /* The topic sits on its own full-width row above its two cells, so both
+     value columns keep half the width on a phone. */
+  .why-tbl tbody th {
+    padding-bottom: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .why-tbl tbody td {
+    padding-top: 4px;
+  }
+  .why-tbl tbody td:first-child {
+    color: var(--color-fg);
+  }
+  .why-tbl tbody td:last-child {
+    color: var(--color-muted);
+  }
+  .why-tbl tbody + tbody tr:first-child > th {
+    border-top: 1px solid var(--color-line);
+  }
+  @media (max-width: 700px) {
+    .why-tbl table {
+      font-size: 0.875rem;
+    }
+    .why-tbl :is(th, td) {
+      padding-inline: 10px;
+    }
+  }
+
+  .why-q {
+    border-top: 1px solid var(--color-line);
+  }
+  .why-q:last-of-type {
+    border-bottom: 1px solid var(--color-line);
+  }
+  .why-q summary {
+    position: relative;
+    padding: 15px 36px 15px 0;
+    font-size: 1.125rem;
+    font-weight: 500;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+    list-style: none;
+    cursor: pointer;
+  }
+  .why-q summary::-webkit-details-marker {
+    display: none;
+  }
+  .why-q summary::after {
+    content: "+";
+    position: absolute;
+    right: 2px;
+    top: 12px;
+    font-family: var(--font-mono);
+    font-size: 1.25rem;
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+  .why-q[open] summary::after {
+    content: "\2212";
+    color: var(--color-accent);
+  }
+  .why-q summary:hover {
+    color: var(--color-fg);
+  }
+  .why-q summary:focus-visible {
+    outline: 2px solid var(--color-fg);
+    outline-offset: 2px;
+  }
+  .why-q p {
+    margin: 0;
+    padding: 0 36px 18px 0;
+    font-size: 1rem;
+    line-height: 1.55;
+    color: var(--color-muted);
+  }
+
+  /* Phone only: tighter vertical rhythm (the page is long on a phone; check-home.mjs "length"). */
+  @media (max-width: 767px) {
+    .why-grid { margin-top: 1.5rem; gap: 32px; }
+    .why-sub { margin-bottom: 14px; }
+    .why-price { padding-top: 8px; }
+    .why-spec div { padding-block: 8px; }
+    .why-links { margin-top: 14px; }
+    .why-proof figure { margin-bottom: 12px; }
+    .why-tbl :is(th, td) { padding-block: 9px; }
+    .why-q summary { padding-block: 12px; }
+  }
+</style>

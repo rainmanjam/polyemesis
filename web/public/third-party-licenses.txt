@@ -1,15 +1,36 @@
 Third-party software shipped with polyemesis.com
 
-IBM Plex Serif 2.0.0 (Italic, latin split), served as
-/fonts/ibm-plex-serif-italic.woff2 for the italic word in the home page headline.
-Source: https://registry.npmjs.org/@ibm/plex-serif/-/plex-serif-2.0.0.tgz
-(fonts/split/woff2/IBMPlexSerif-Italic-Latin1.woff2, unmodified).
+Bricolage Grotesque 5.3.0 (variable, weight axis, latin subset), served as
+/fonts/bricolage-grotesque.woff2 for headings.
+Source: https://registry.npmjs.org/@fontsource-variable/bricolage-grotesque/-/bricolage-grotesque-5.3.0.tgz
+(files/bricolage-grotesque-latin-wght-normal.woff2, unmodified).
 
-Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage)
 
-This Font Software is licensed under the SIL Open Font License, Version 1.1.
+Instrument Serif 5.3.0 (Italic 400, latin subset), served as
+/fonts/instrument-serif-italic.woff2 for the italic accent word in headings.
+Source: https://registry.npmjs.org/@fontsource/instrument-serif/-/instrument-serif-5.3.0.tgz
+(files/instrument-serif-latin-400-italic.woff2, unmodified).
 
-This license is copied below, and is also available with a FAQ at: http://scripts.sil.org/OFL
+Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)
+
+IBM Plex Sans 3.201 (variable, weight axis 100 to 700, latin subset), served as
+/fonts/ibm-plex-sans.woff2 for body text.
+Source: not recorded when the file was added (commit 777ee1f3); the version and
+copyright line below are read from the file's own name table.
+
+Copyright 2019 IBM Corp. All rights reserved. (OFL notice: Reserved Font Name "Plex")
+
+JetBrains Mono 2.211 (variable, weight axis 400 to 800, latin subset), served as
+/fonts/jetbrains-mono.woff2 for labels, data and commands.
+Source: not recorded when the file was added (commit 777ee1f3); the version and
+copyright line below are read from the file's own name table.
+
+Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
+
+All four fonts are licensed under the SIL Open Font License, Version 1.1.
+
+The license is copied below, and is also available with a FAQ at: http://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------
@@ -610,3 +631,36 @@ Except as contained in this notice, the name of a copyright holder shall
 not be used in advertising or otherwise to promote the sale, use or other
 dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
+
+-----------------------------------------------------------
+
+three.js 0.187.0, bundled into the homepage globe script (a lazily loaded chunk).
+Source: https://registry.npmjs.org/three/-/three-0.187.0.tgz
+Licensed under the MIT License.
+
+Copyright © 2010-2026 three.js authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-----------------------------------------------------------
+
+Land outline for the homepage globe (src/data/land-110m.json): dot positions
+sampled from the Natural Earth 1:110m land polygons, as distributed in the
+world-atlas package (land-110m.json). Natural Earth data is in the public
+domain: https://www.naturalearthdata.com/about/terms-of-use/

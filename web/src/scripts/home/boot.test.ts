@@ -20,8 +20,11 @@ function stubMatchMedia() {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.resetModules();
   vi.doUnmock("./motion");
+  vi.doUnmock("./hero");
+  vi.doUnmock("./how-steps");
   document.body.innerHTML = "";
 });
 
@@ -75,6 +78,15 @@ describe("boot", () => {
     expect(btn.textContent).toBe("Pause motion");
   });
 
+  it("boot shows a Pause button the markup rendered hidden", async () => {
+    stubMatchMedia();
+    const { boot } = await import("./boot");
+    document.body.innerHTML = `<button type="button" data-pause hidden aria-pressed="false">Pause motion</button>`;
+    expect(document.querySelector<HTMLElement>("[data-pause]")!.hidden).toBe(true);
+    boot(document);
+    expect(document.querySelector<HTMLElement>("[data-pause]")!.hidden).toBe(false);
+  });
+
   it("with the hero present, one click is still one setUserPaused call", async () => {
     stubMatchMedia();
     const setUserPaused = vi.fn();
@@ -92,11 +104,72 @@ describe("boot", () => {
     });
     const { boot } = await import("./boot");
     document.body.innerHTML = `<section data-hero>
-      <div role="tablist" data-story-tabs hidden></div>
-      <p data-status></p><p data-fine></p>
       <button type="button" data-pause hidden aria-pressed="false">Pause motion</button></section>`;
     boot(document);
     document.querySelector<HTMLElement>("[data-pause]")!.click();
     expect(setUserPaused).toHaveBeenCalledTimes(1);
+    // Let the section's async import settle so it cannot leak into the next test.
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  it("calls the init of each present root, whatever it returns", async () => {
+    stubMatchMedia();
+    const initHero = vi.fn(() => ({ controller: true }));
+    const initHowSteps = vi.fn(() => () => {});
+    vi.doMock("./hero", () => ({ initHero }));
+    vi.doMock("./how-steps", () => ({ initHowSteps }));
+    const { boot } = await import("./boot");
+    document.body.innerHTML = `<section data-hero></section><section data-how></section>`;
+    boot(document);
+    await vi.waitFor(() => {
+      expect(initHero).toHaveBeenCalledTimes(1);
+      expect(initHowSteps).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not request a module whose root is absent", async () => {
+    stubMatchMedia();
+    const initHero = vi.fn();
+    vi.doMock("./hero", () => ({ initHero }));
+    const { boot } = await import("./boot");
+    document.body.innerHTML = `<p>nothing</p>`;
+    boot(document);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(initHero).not.toHaveBeenCalled();
+  });
+
+  it("one broken section does not stop the others or the pause button", async () => {
+    stubMatchMedia();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const initHero = vi.fn(() => {
+      throw new Error("hero broke");
+    });
+    const initHowSteps = vi.fn(() => () => {});
+    vi.doMock("./hero", () => ({ initHero }));
+    vi.doMock("./how-steps", () => ({ initHowSteps }));
+    const { boot } = await import("./boot");
+    document.body.innerHTML = `<section data-hero></section><section data-how></section>
+      <button type="button" data-pause aria-pressed="false">Pause motion</button>`;
+    const gate = boot(document)!;
+    await vi.waitFor(() => expect(initHowSteps).toHaveBeenCalledTimes(1));
+    document.querySelector<HTMLElement>("[data-pause]")!.click();
+    expect(gate.userPaused()).toBe(true);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(String(errSpy.mock.calls[0][0])).toContain("[data-hero]");
+  });
+
+  it("a module whose import rejects does not stop the others", async () => {
+    stubMatchMedia();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const initHowSteps = vi.fn(() => () => {});
+    vi.doMock("./hero", () => {
+      throw new Error("chunk failed");
+    });
+    vi.doMock("./how-steps", () => ({ initHowSteps }));
+    const { boot } = await import("./boot");
+    document.body.innerHTML = `<section data-hero></section><section data-how></section>`;
+    expect(() => boot(document)).not.toThrow();
+    await vi.waitFor(() => expect(initHowSteps).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(errSpy).toHaveBeenCalledTimes(1));
+    expect(String(errSpy.mock.calls[0][0])).toContain("[data-hero]");
   });
 });
