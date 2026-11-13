@@ -10,7 +10,7 @@
  * Run once, after `npm run build`, on the OLD pages. It is never regenerated:
  * check-build.mjs asserts every sentence in the fixture is still on the
  * rebuilt page. The sentences that carried the retired phrase are removed
- * below on purpose, so that check never asks for them.
+ * below on purpose, so that check never asks for them (each cut leaves a " | " seam).
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -80,7 +80,10 @@ function freeze(route) {
   if (!h1) throw new Error(`${route}: no <h1>`);
   const h2 = (body.match(/<h2[\s\S]*?<\/h2>/g) || []).map(plain);
   let text = norm(body);
-  for (const sentence of LEGACY_REMOVALS) text = text.split(sentence).join(" ");
+  /* A removed sentence leaves a " | " seam, not a bare space: text on either
+   * side of the cut was never one sentence, and the check that reads the
+   * fixture splits on the seam. */
+  for (const sentence of LEGACY_REMOVALS) text = text.split(sentence).join(" | ");
   text = text.replace(/\s+/g, " ").trim();
   if (/one[- ]maintainer/i.test(text)) throw new Error(`${route}: still mentions "one maintainer"`);
   return { h1: plain(h1), h2, text };
