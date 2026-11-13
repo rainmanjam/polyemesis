@@ -107,7 +107,7 @@
     },
     {
       "file": "08-mix-matrix.png",
-      "scene": "full",
+      "scene": "sports",
       "test": "routing mix matrix — channel-level control",
       "screen": "/routing",
       "site": false,
@@ -168,7 +168,10 @@
       "site": false,
       "usedBy": [],
       "exception": null,
-      "allowFailedWords": []
+      "allowFailedWords": [
+        "failed"
+      ],
+      "caption": "\"Failed\" is the label of the Delivery card's counter, which reads 0; it is the column name, not a state."
     },
     {
       "file": "14-clips.png",

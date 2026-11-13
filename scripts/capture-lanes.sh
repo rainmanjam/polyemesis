@@ -55,6 +55,10 @@ cleanup() {
     docker rm -f "$n" >/dev/null 2>&1 || true
   done
   docker network rm "$NET" >/dev/null 2>&1 || true
+  # The work directory holds secrets.tsv (the publish tokens), so it goes on
+  # EVERY exit path -- success, a failed step and a signal -- not only when the
+  # script reaches its last line.
+  command rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
 
@@ -217,6 +221,30 @@ sleep 15
 shoot 3 "dashboard-3-programmes.png"
 
 rm -rf "$OUT/.playwright-lanes"
+
+# THE SAME COMPRESSION scripts/demo-seed.sh applies to its own shots (a
+# 256-colour palette, resolution unchanged): the three PNGs came out of the
+# capture at 750 KB each.
+echo "==> compressing"
+if python3 -c "import PIL" 2>/dev/null; then
+  python3 - "$OUT" <<'PY'
+import os, sys
+from PIL import Image
+before = after = 0
+for name in ("dashboard-1-programme.png", "dashboard-2-programmes.png", "dashboard-3-programmes.png"):
+    path = os.path.join(sys.argv[1], name)
+    was = os.path.getsize(path)
+    im = Image.open(path).convert("RGB")
+    im.quantize(colors=256, method=Image.MEDIANCUT,
+                dither=Image.FLOYDSTEINBERG).save(path, optimize=True)
+    before, after = before + was, after + os.path.getsize(path)
+print(f"    {before // 1024}K -> {after // 1024}K "
+      f"({100 - 100 * after / before:.0f}% smaller, resolution unchanged)")
+PY
+else
+  echo "    skipped: python3 with Pillow not found, shots left unquantised" >&2
+fi
+
 echo
 echo "wrote:"
 for f in dashboard-1-programme.png dashboard-2-programmes.png dashboard-3-programmes.png; do
