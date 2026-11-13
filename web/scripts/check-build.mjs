@@ -1380,6 +1380,11 @@ const DROPPED = {
       why: "The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action.",
     },
   ],
+  "/docs": [
+    { contains: "documentation the docs live with the code", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page now has a breadcrumb instead, and the h1 itself is kept." },
+    { contains: "getting it running the routing operating it automating it understanding it", why: "The old sidebar list ran straight into the first section's blurb; the list is now the in-page index and every blurb is kept beside its own heading." },
+    { contains: "the docs are in the same repository as the code, under docs/", why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the link moved to a 'Browse docs/ on GitHub' line after the last group and the sentence is otherwise kept." },
+  ],
 };
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");

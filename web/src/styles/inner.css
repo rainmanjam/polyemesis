@@ -581,6 +581,98 @@
 
   /* ===== docs-index ===== */
 
+  .docs-start { padding-bottom: 36px; }
+  .docs-more { border-top: 1px solid var(--color-line); padding-top: 22px; }
+  .docs-start > h2 {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: 14px;
+  }
+  .grp {
+    border-top: 1px solid var(--color-line);
+    padding-bottom: 30px;
+  }
+  /* Below 1024px the index is a sticky strip under the nav: land the group
+     below both. From 1024px only the nav sticks and the global anchor offset
+     (on [id]) is enough. */
+  @media (max-width: 1023px) {
+    .grp { scroll-margin-top: calc(var(--anchor-offset) + 3rem); }
+  }
+  .grp > summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 16px;
+    align-items: baseline;
+    padding: 22px 0 16px;
+  }
+  .grp > summary::-webkit-details-marker { display: none; }
+  .grp > summary:focus-visible { outline-offset: -2px; }
+  .grp h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.625rem, 5.5vw, 2.125rem);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+  }
+  .grp .cnt {
+    grid-column: 2;
+    grid-row: 1;
+    font: 0.75rem var(--font-mono);
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .grp .cnt::after { content: " +"; color: var(--color-fg); }
+  .grp[open] .cnt::after { content: " \2212"; }
+  .grp .blurb {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    font-family: var(--font-sans);
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+    max-width: 62ch;
+  }
+  .dl {
+    list-style: none;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 44px;
+  }
+  @media (min-width: 760px) {
+    .grp .dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  /* Rows own the hairline above each entry; the list's own bottom rule would
+     double up under the last pair of a two-column grid. */
+  .dl.rows { border-bottom: 0; }
+  .dl.rows > * { padding-block: 0; }
+  .dl a {
+    display: block;
+    height: 100%;
+    padding: 12px 0 13px;
+    text-decoration: none;
+  }
+  .dl-t { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+  .dl-t b { font-weight: 500; font-size: 1rem; line-height: 1.3; }
+  .dl-t i { font: normal 0.75rem var(--font-mono); color: var(--color-muted); }
+  .dl-d {
+    display: block;
+    margin-top: 4px;
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--color-muted);
+  }
+  .dl a:hover .dl-t b,
+  .dl a:focus-visible .dl-t b {
+    text-decoration: underline;
+    text-decoration-color: var(--color-accent);
+    text-underline-offset: 4px;
+  }
+
 
 
 

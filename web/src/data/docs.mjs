@@ -279,6 +279,11 @@ const DOCS_BY_SECTION = {
  * @type {{ id: string, title: string, blurb: string }[]} */
 export const SECTIONS = SECTION_ROWS.map(([id, title, blurb]) => ({ id, title, blurb }));
 
+/** The four documents the index page puts first, in reading order. Each is
+ *  also listed in its own section, so no section loses an entry.
+ *  @type {string[]} */
+export const START_HERE = ["QUICKSTART.md", "INSTALL.md", "AUDIO-ROUTING.md", "CONNECTING-PLATFORMS.md"];
+
 /** Every published document, flattened in sidebar order.
  *
  * Driven by SECTION_ROWS rather than by `Object.keys(DOCS_BY_SECTION)`, so the
