@@ -250,3 +250,37 @@ func TestDemoDriverRoutesByRole(t *testing.T) {
 		t.Error(`routeAll must choose tracks by the "commentary" role`)
 	}
 }
+
+// The shell side of the same rule as TestDemoDriverNeverPrintsASecret: the demo
+// password goes to $WORK/admin.pw and is read back from there, so no line that
+// echoes or printf-s may expand it unless the line is the one that writes that
+// file. An xtrace would print every expansion, so the scripts may not turn it on.
+func TestDemoSeedNeverPrintsThePassword(t *testing.T) {
+	root := repoRootFromTest(t)
+	printer := regexp.MustCompile(`\b(echo|printf)\b`)
+	expands := regexp.MustCompile(`\$\{?E2E_PASSWORD`)
+	xtrace := regexp.MustCompile(`(^|[;&\s])set\s+-[a-zA-Z]*x|xtrace`)
+	checked := 0
+	for _, name := range []string{"demo-seed.sh", "lib-demo-sports.sh"} {
+		raw, err := os.ReadFile(filepath.Join(root, "scripts", name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			code := strings.TrimSpace(line)
+			if strings.HasPrefix(code, "#") {
+				continue
+			}
+			checked++
+			if xtrace.MatchString(code) {
+				t.Errorf("%s:%d turns on xtrace, which prints every expansion: %s", name, i+1, code)
+			}
+			if printer.MatchString(code) && expands.MatchString(code) && !strings.Contains(code, "admin.pw") {
+				t.Errorf("%s:%d prints the password: %s", name, i+1, code)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no script lines checked")
+	}
+}

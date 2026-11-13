@@ -7,6 +7,19 @@
 #   ./scripts/demo-seed.sh --out DIR       write the screenshots somewhere else
 #   ./scripts/demo-seed.sh --down          remove everything this created
 #
+#   --scene full|sports   which installation (default full). The sports scene is
+#                         one match feed with six audio tracks going to five
+#                         destinations labelled YouTube that publish only to a
+#                         receiver container on an internal Docker network; see
+#                         scripts/lib-demo-sports.sh.
+#   --state NAME          sports only, acts on the running rig and exits:
+#                         routing-initial | routing-final | start | stop |
+#                         status | guard | waitlive
+#   --proof               sports only: read each destination's path back from
+#                         the receiver and check it carries its own language
+#   DEMO_PORT (8098 full, 8097 sports)   DEMO_WORK   DEMO_FPS (60)
+#   DEMO_FIXTURE   DEMO_REUSE_IMAGE=1 (skip the image rebuild; never set here)
+#
 # WHY THIS EXISTS. capture.spec.ts drives a real browser against a real server
 # and waits for real state before every shot, which is the right design and is
 # worth nothing pointed at an empty install. Every install available to point it
@@ -40,7 +53,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FIXTURE="$ROOT/scripts/demo-seed.fixture.json"
+FIXTURE="${DEMO_FIXTURE:-$ROOT/scripts/demo-seed.fixture.json}"
 DRIVER="$ROOT/scripts/demo_seed_driver.go"
 
 PORT="${DEMO_PORT:-8098}"
@@ -74,6 +87,15 @@ CAPTURE=yes
 RESET=no
 DOWN=no
 BASE=""
+SCENE=full
+STATE_NAME=""
+PROOF=no
+FPS="${DEMO_FPS:-60}"
+# Set by sports_configure; empty for the full scene, so teardown has nothing
+# extra to remove there.
+RECV=""
+PROXY=""
+NET_FLAGS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -82,10 +104,30 @@ while [ $# -gt 0 ]; do
     --reset) RESET=yes; shift ;;
     --down) DOWN=yes; shift ;;
     --base) BASE="$2"; shift 2 ;;
-    -h|--help) sed -n '2,40p' "$0"; exit 0 ;;
+    --scene) SCENE="${2:-}"; shift 2 ;;
+    --state) STATE_NAME="${2:-}"; shift 2 ;;
+    --proof) PROOF=yes; shift ;;
+    -h|--help) sed -n '2,/^$/p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+case "$SCENE" in
+  full) ;;
+  sports)
+    . "$ROOT/scripts/lib-demo-sports.sh"
+    sports_configure
+    ;;
+  *) echo "unknown scene: $SCENE (full or sports)" >&2; exit 2 ;;
+esac
+if [ -n "$STATE_NAME" ] || [ "$PROOF" = yes ]; then
+  [ "$SCENE" = sports ] || { echo "--state and --proof act on the sports rig: add --scene sports" >&2; exit 2; }
+fi
+case "$STATE_NAME" in
+  ""|routing-initial|routing-final|start|stop|status|guard|waitlive) ;;
+  *) echo "unknown state: $STATE_NAME" >&2; exit 2 ;;
+esac
+BASE_URL="http://127.0.0.1:$PORT"
 
 # Everything this script starts is a container or a directory it made, so
 # teardown is exactly those two things. No pkill: there are no host processes to
@@ -99,6 +141,11 @@ teardown() {
   while read -r name; do
     [ -n "$name" ] && docker rm -f "$name" >/dev/null 2>&1
   done < <(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E "^${PUB_PREFIX}-|^${SRV}\$" || true)
+  # The sports rig's receiver and relay, by name: they are not publishers, and a
+  # listing that came back empty must not leave them behind.
+  for name in "$SRV" "$RECV" "$PROXY"; do
+    [ -n "$name" ] && docker rm -f "$name" >/dev/null 2>&1
+  done
   docker network rm "$NET" >/dev/null 2>&1 || true
 }
 
@@ -110,9 +157,24 @@ if [ "$DOWN" = yes ]; then
   exit 0
 fi
 
+command -v go >/dev/null || { echo "go is required (it runs the seeder)" >&2; exit 1; }
+if [ -n "$STATE_NAME" ]; then
+  sports_state "$STATE_NAME"
+  exit 0
+fi
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
 docker info >/dev/null 2>&1 || { echo "docker is not running" >&2; exit 1; }
-command -v go >/dev/null || { echo "go is required (it runs the seeder)" >&2; exit 1; }
+if [ "$PROOF" = yes ]; then
+  sports_proof
+  exit 0
+fi
+
+# THE HEADER READS "dev" WHEN THERE IS NO RELEASE TAG (a shallow clone), and the
+# screenshots exist to look like the product people install. Refuse to take them.
+if [ "$CAPTURE" = yes ] && [ "$DEMO_VERSION" = dev ]; then
+  echo "no release tag found (shallow clone?): the header would read \"dev\". git fetch --tags, or set DEMO_VERSION." >&2
+  exit 1
+fi
 
 # THE FIXTURE IS SCANNED BEFORE IT IS USED, not after it is committed.
 #
@@ -134,6 +196,15 @@ else
   echo "==> gitleaks not installed; fixture not scanned locally (CI still will)"
 fi
 
+# THE FIRST SAFETY LAYER (sports): before any container or network exists, every
+# destination URL in the fixture must be on the receiver's host. A fixture that
+# names a real platform stops the script here.
+if [ "$SCENE" = sports ]; then
+  go run "$DRIVER" - guardfixture "$FIXTURE" "$RECV" >&2 \
+    || { echo "REFUSING: the sports fixture has a destination that is not the local receiver ($RECV); nothing was started." >&2; exit 1; }
+  echo "==> every fixture destination is the local receiver"
+fi
+
 # One password for the seeder and for Playwright's auth setup, generated per
 # run. They each used to carry their own literal, and when the two disagreed the
 # seeder created the account and the browser then failed on a missing <nav> --
@@ -150,7 +221,14 @@ export E2E_PASSWORD
 
 # First-run setup needs the server's one-time setup code; preset it so the
 # server started below and the seeder share it. See lib-preflight.sh.
-export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+if [ -z "${POLYEMESIS_SETUP_CODE:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate a setup code; export POLYEMESIS_SETUP_CODE yourself" >&2
+    exit 1
+  }
+  POLYEMESIS_SETUP_CODE="demo-$(openssl rand -hex 8)"
+fi
+export POLYEMESIS_SETUP_CODE
 
 if [ -n "$BASE" ]; then
   # Seeding somebody else's server. The data-directory guarantee above does not
@@ -190,6 +268,11 @@ echo "==> fresh data directory: $DATA"
 teardown
 command rm -rf "$WORK"
 mkdir -p "$DATA/recordings" "$STAGE" "$OUT"
+# THE CREDENTIALS ARE FILES, mode 600, and nothing prints them: --state and
+# --proof read them back, and a password in an argument shows in `ps`.
+( umask 077
+  printf '%s' "$E2E_PASSWORD" > "$WORK/admin.pw"
+  printf '%s' "$POLYEMESIS_SETUP_CODE" > "$WORK/setup.code" )
 
 if lsof -nP -iTCP:"$PORT" 2>/dev/null | grep -q LISTEN; then
   echo "port $PORT is already in use:" >&2
@@ -198,10 +281,14 @@ if lsof -nP -iTCP:"$PORT" 2>/dev/null | grep -q LISTEN; then
   exit 1
 fi
 
-# BUILT EVERY RUN, never reused if present. capture-media.sh learned this the
+# BUILT EVERY RUN, never reused if present (DEMO_REUSE_IMAGE=1, which the script
+# never sets, is for iterating on this script and for its offline tests). capture-media.sh learned this the
 # expensive way: the image on the machine was a week old, so every screenshot
 # committed from it photographed week-old code. A tool that advertises the
 # product must photograph the product as it is now.
+if [ "${DEMO_REUSE_IMAGE:-}" = 1 ] && docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "==> reusing the image $IMAGE (DEMO_REUSE_IMAGE=1)"
+else
 echo "==> building the UI and the demo image"
 ( cd "$ROOT" && make build >/dev/null ) || { echo "make build failed" >&2; exit 1; }
 GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
@@ -214,10 +301,11 @@ GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
 # became the floor, and the container exits before /health ever answers.
 docker build -q -t "$IMAGE" -f - "$STAGE" >/dev/null <<'DOCKERFILE' || { echo "docker build failed" >&2; exit 1; }
 FROM alpine:3.24
-RUN apk add --no-cache ffmpeg ca-certificates
+RUN apk add --no-cache ffmpeg ca-certificates font-dejavu socat
 COPY polyemesis-linux /usr/local/bin/polyemesis
 ENTRYPOINT ["/usr/local/bin/polyemesis"]
 DOCKERFILE
+fi
 
 # Server AND publishers in containers on one network, dialing each other by
 # name. The host-to-container route does not work here and the reason is
@@ -225,13 +313,21 @@ DOCKERFILE
 # while the gosrt listener was bound IPv6-only, and nothing logged a refusal
 # because nothing arrived.
 echo "==> starting polyemesis on :$PORT"
-docker network create "$NET" >/dev/null 2>&1 || true
+# Sports: the network is --internal and the server is never published with -p;
+# the relay started after it is the only thing that binds 127.0.0.1:$PORT.
+PUBLISH=()
+if [ "$SCENE" = sports ]; then
+  sports_network_and_receiver
+else
+  docker network create "$NET" >/dev/null 2>&1 || true
+  PUBLISH=(-p "127.0.0.1:$PORT:$PORT")
+fi
 docker run -d --rm --name "$SRV" -e POLYEMESIS_SETUP_CODE --network "$NET" \
-  -p "127.0.0.1:$PORT:$PORT" \
+  ${PUBLISH[@]+"${PUBLISH[@]}"} \
   -v "$DATA:/data" \
-  "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null
-
-BASE_URL="http://127.0.0.1:$PORT"
+  "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null \
+  || { echo "the polyemesis server failed to start" >&2; exit 1; }
+[ "$SCENE" = sports ] && sports_start_relay
 
 # ---------------------------------------------------------------- recordings
 #
@@ -244,6 +340,7 @@ BASE_URL="http://127.0.0.1:$PORT"
 # One short clip is encoded, then concatenated with -c copy to each target
 # length. Encoding forty minutes of video would cost minutes of CPU to produce
 # exactly the same numbers on the page.
+if [ "$SCENE" = full ]; then
 echo "==> rendering the recording library"
 docker run --rm -v "$DATA:/data" --entrypoint ffmpeg "$IMAGE" \
   -hide_banner -loglevel error -y \
@@ -274,6 +371,7 @@ while IFS=$'\t' read -r NAME SECONDS_LONG; do
     -map 0 -c copy -t "$SECONDS_LONG" "/data/recordings/$NAME"
   printf '    %s  %d:%02d\n' "$NAME" $((SECONDS_LONG / 60)) $((SECONDS_LONG % 60))
 done < <(go run "$DRIVER" "$BASE_URL" recordings "$FIXTURE")
+fi
 
 # ------------------------------------------------------------------- seeding
 
@@ -292,6 +390,9 @@ go run "$DRIVER" "$BASE_URL" setup "$FIXTURE" > "$PLAN"
 # editor says "no signal". The routing is right either way; only one of them
 # photographs as a working product.
 echo "==> publishing into each programme"
+if [ "$SCENE" = sports ]; then
+  sports_publish "$PLAN"
+else
 N=0
 while IFS=$'\t' read -r SID TOKEN VLAVFI VKBPS ALAVFI; do
   [ -n "$SID" ] || continue
@@ -313,6 +414,7 @@ while IFS=$'\t' read -r SID TOKEN VLAVFI VKBPS ALAVFI; do
     "srt://$SRV:$SRT_PORT?streamid=$TOKEN&mode=caller&transtype=live&latency=200000" >/dev/null
   echo "    programme $SID publishing (${#TRACKS[@]} audio tracks)"
 done < "$PLAN"
+fi
 
 echo "==> waiting for every programme to go live and probe"
 go run "$DRIVER" "$BASE_URL" wait "$FIXTURE"
@@ -320,11 +422,31 @@ go run "$DRIVER" "$BASE_URL" wait "$FIXTURE"
 echo "==> creating the rendition ladder and the destinations"
 go run "$DRIVER" "$BASE_URL" finish "$FIXTURE"
 
+# THE SECOND SAFETY LAYER (sports): the same allow-list, against what the server
+# stored. The driver's start re-checks before every start.
+if [ "$SCENE" = sports ]; then
+  echo "==> checking the stored destinations"
+  go run "$DRIVER" "$BASE_URL" guard "$FIXTURE" "$RECV"
+  go run "$DRIVER" "$BASE_URL" routing "$FIXTURE" initial
+fi
+# What the capture must refuse to photograph: the fixture's tokens and stream
+# keys, then the admin password and the setup code (read from their files, never
+# echoed). Both scenes; the file is mode 600.
+( umask 077
+  go run "$DRIVER" "$BASE_URL" secrets "$FIXTURE" > "$WORK/secrets.list"
+  printf 'password\t%s\n' "$(cat "$WORK/admin.pw")" >> "$WORK/secrets.list"
+  printf 'setupCode\t%s\n' "$(cat "$WORK/setup.code")" >> "$WORK/secrets.list" )
+
+if [ "$SCENE" = sports ]; then
+  echo "==> checking that the publisher holds ${FPS} fps"
+  sports_check_publisher
+else
 # The ladder has to actually start before it is worth photographing: an encoder
 # that has not opened yet reports no consumers and no bitrate, and the ladder
 # view is the one page where those two numbers are the whole point.
 echo "==> letting the encoders and file destinations settle"
 sleep 25
+fi
 
 # REFUSE TO PHOTOGRAPH AN UNDER-SEEDED INSTALL.
 #
@@ -349,14 +471,30 @@ fi
 if [ "$CAPTURE" = no ]; then
   echo
   echo "==> seeded, streaming, and left running at $BASE_URL"
-  echo "    sign in as admin / \$E2E_PASSWORD ($E2E_PASSWORD)"
+  echo "    sign in as admin; credential: $WORK/admin.pw"
   echo "    ./scripts/demo-seed.sh --down  removes all of it"
   exit 0
 fi
 
+if [ "$SCENE" = sports ]; then
+  echo "==> routing, starting and waiting for the five destinations"
+  sports_prepare_capture
+fi
+
 echo "==> capturing into $OUT"
-( cd "$ROOT/ui" && BASE_URL="$BASE_URL" SHOT_DIR="$OUT" \
+# Only PNGs newer than this marker are this run's: the check, the compression and
+# the site refresh below leave every other file in $OUT alone.
+touch "$WORK/.started"
+( cd "$ROOT/ui" && BASE_URL="$BASE_URL" SHOT_DIR="$OUT" SHOT_SCENE="$SCENE" \
+    SHOT_SECRETS_FILE="$WORK/secrets.list" \
     npx --no-install playwright test --config=e2e/capture.config.ts )
+
+[ -f "$ROOT/scripts/check-shots.mjs" ] || {
+  echo "scripts/check-shots.mjs is missing, so the shots cannot be checked; refusing to go on." >&2
+  exit 1
+}
+node "$ROOT/scripts/check-shots.mjs" "$SCENE" "$WORK/.started" \
+  || { echo "the shots failed their check; nothing was compressed or copied." >&2; exit 1; }
 
 # THE SAME COMPRESSION capture-media.sh has always applied, which this script
 # never did -- so its shots came out at 300-450 KB against 90-200 KB for the
@@ -365,11 +503,14 @@ echo "==> capturing into $OUT"
 # site still serves avif/webp variants built from these by Astro's <Picture>.
 echo "==> compressing"
 if python3 -c "import PIL" 2>/dev/null; then
-  python3 - "$OUT" <<'PY'
+  python3 - "$OUT" "$WORK/.started" <<'PY'
 import glob, os, sys
 from PIL import Image
 before = after = 0
+started = os.path.getmtime(sys.argv[2])
 for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.png"))):
+    if os.path.getmtime(path) <= started:
+        continue
     was = os.path.getsize(path)
     im = Image.open(path).convert("RGB")
     im.quantize(colors=256, method=Image.MEDIANCUT,
@@ -397,7 +538,7 @@ if [ "$OUT" = "$ROOT/docs/media" ] && [ -d "$SITE_SHOTS" ]; then
   for dst in "$SITE_SHOTS"/*.png; do
     [ -e "$dst" ] || continue
     src="$OUT/$(basename "$dst")"
-    if [ -f "$src" ] && ! cmp -s "$src" "$dst"; then
+    if [ -f "$src" ] && [ "$src" -nt "$WORK/.started" ] && ! cmp -s "$src" "$dst"; then
       cp -f "$src" "$dst"
       echo "    $(basename "$dst")"
       copied=$((copied + 1))
@@ -410,5 +551,5 @@ echo
 echo "==> done"
 ls -la "$OUT"/*.png
 echo
-echo "the install is still up at $BASE_URL (admin / $E2E_PASSWORD)"
+echo "the install is still up at $BASE_URL (admin; credential: $WORK/admin.pw)"
 echo "./scripts/demo-seed.sh --down  removes the containers and $WORK"

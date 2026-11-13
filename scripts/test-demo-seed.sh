@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+#
+# Offline tests of scripts/demo-seed.sh --scene sports: its refusals, and the
+# things it must not do before it has refused.
+#
+# A stub `docker` goes first on PATH. It answers `docker info` per
+# STUB_DOCKER_UP, prints nothing for `docker ps`, records every call in
+# $STUB_LOG and refuses to start the sports server. So the script can be driven
+# to the point where it would create something, and each case can assert that it
+# stopped before (no `network create` in the log) rather than only that the
+# exit code was non-zero. No Docker, no network and no UI build are needed;
+# `go run` of the seed driver is the only heavy step (its modules are already in
+# the build cache for the Go tests).
+#
+# Prints `ok <n> <name>` per case and exits 1 on the first failure.
+
+# shellcheck disable=SC1090 # the library is sourced by a variable path
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT="$ROOT/scripts/demo-seed.sh"
+LIB="$ROOT/scripts/lib-demo-sports.sh"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/demo-seed-test.XXXXXX")"
+LISTENER_PID=""
+
+cleanup() {
+  [ -n "$LISTENER_PID" ] && kill "$LISTENER_PID" 2>/dev/null
+  command rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/docker" <<'STUB'
+#!/bin/sh
+echo "$*" >> "$STUB_LOG"
+case "$1" in
+  info) [ "${STUB_DOCKER_UP:-1}" = 1 ]; exit $? ;;
+  ps) exit 0 ;;
+  network) [ "$2" = inspect ] && echo true; exit 0 ;;
+esac
+case "$*" in
+  *run*polyemesis-demo-sports-server*) exit 1 ;;
+esac
+exit 0
+STUB
+chmod +x "$TMP/bin/docker"
+cat > "$TMP/bin/git" <<'STUB'
+#!/bin/sh
+exit 1
+STUB
+chmod +x "$TMP/bin/git"
+
+N=0
+fail() {
+  echo "FAIL $N $NAME: $*" >&2
+  exit 1
+}
+pass() { echo "ok $N $NAME"; }
+begin() {
+  N=$((N + 1)); NAME="$1"
+  export DEMO_WORK="$TMP/work$N" STUB_LOG="$TMP/log$N" STUB_DOCKER_UP=1
+  export DEMO_PORT; DEMO_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])')"
+  OUT="$TMP/out$N"; ERR="$TMP/err$N"
+  : > "$STUB_LOG"
+}
+# run_script <args...>: stub docker first on PATH, a version set so the capture
+# guard is quiet, the image build skipped. Sets RC.
+run_script() {
+  PATH="$TMP/bin:$PATH" DEMO_VERSION="${DEMO_VERSION-v0.0.0-test}" DEMO_REUSE_IMAGE=1 \
+    bash "$SCRIPT" "$@" > "$OUT" 2> "$ERR" < /dev/null
+  RC=$?
+}
+expect_rc() { [ "$RC" = "$1" ] || fail "exit $RC, want $1 (stderr: $(tail -n 3 "$ERR" | tr '\n' ' '))"; }
+expect_err() { grep -q -- "$1" "$ERR" || fail "stderr lacks \"$1\" (stderr: $(tail -n 3 "$ERR" | tr '\n' ' '))"; }
+expect_no_call() { ! grep -q -- "$1" "$STUB_LOG" || fail "the stub log has \"$1\": $(grep -- "$1" "$STUB_LOG" | head -n 1)"; }
+
+# 1
+begin docker-not-running
+export STUB_DOCKER_UP=0
+run_script --scene sports --no-capture
+expect_rc 1
+expect_err "docker is not running"
+bad="$(grep -v '^info' "$STUB_LOG" || true)"
+[ -z "$bad" ] || fail "docker was called beyond the probe: $bad"
+pass
+
+# 2
+begin port-busy
+python3 -m http.server "$DEMO_PORT" --bind 127.0.0.1 > /dev/null 2>&1 &
+LISTENER_PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  lsof -nP -iTCP:"$DEMO_PORT" 2> /dev/null | grep -q LISTEN && break
+  sleep 0.5
+done
+run_script --scene sports --no-capture
+kill "$LISTENER_PID" 2> /dev/null; LISTENER_PID=""
+expect_rc 1
+expect_err "port $DEMO_PORT is already in use"
+expect_no_call "network create"
+pass
+
+# 3
+begin leftover-data-refused
+mkdir -p "$DEMO_WORK/data"
+run_script --scene sports --no-capture
+expect_rc 1
+expect_err -- "--down"
+expect_err -- "--reset"
+expect_no_call "network create"
+pass
+
+# 4
+begin rerun-cleans-first
+mkdir -p "$DEMO_WORK/data"
+run_script --scene sports --no-capture --reset
+net_line="$(grep -n 'network create --internal' "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+[ -n "$net_line" ] || fail "no 'network create --internal' in the log"
+for suffix in server recv proxy; do
+  rm_line="$(grep -n "rm -f polyemesis-demo.*-$suffix\$" "$STUB_LOG" | head -n 1 | cut -d: -f1)"
+  [ -n "$rm_line" ] || fail "no 'rm -f' of the -$suffix container before the network was created"
+  [ "$rm_line" -lt "$net_line" ] || fail "-$suffix was removed after the network was created"
+done
+pass
+
+# 5
+begin slow-publisher-refused
+progress() { # <file> <speed> <drops>
+  : > "$1"
+  for _ in 1 2 3; do
+    printf 'frame=100\nfps=60.00\nspeed=%sx\ndrop_frames=%s\nprogress=continue\n' "$2" "$3" >> "$1"
+  done
+}
+progress "$TMP/p-slow" 0.80 0
+progress "$TMP/p-good" 1.00 0
+progress "$TMP/p-drop" 1.00 3
+( . "$LIB"; DEMO_FPS=60 publisher_speed_ok "$TMP/p-slow" ) > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 1
+expect_err "DEMO_FPS=30"
+( . "$LIB"; publisher_speed_ok "$TMP/p-good" ) > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 0
+( . "$LIB"; publisher_speed_ok "$TMP/p-drop" ) > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 1
+expect_err "dropped 3"
+pass
+
+# 6
+begin real-host-refused-before-docker
+python3 - "$ROOT/scripts/demo-seed.sports.fixture.json" "$TMP/real-host.json" <<'PY'
+import json, sys
+fx = json.load(open(sys.argv[1]))
+fx["sources"][0]["destinations"][0]["url"] = "rtmp://a.rtmp.youtube.com/live2"
+json.dump(fx, open(sys.argv[2], "w"))
+PY
+DEMO_FIXTURE="$TMP/real-host.json" run_script --scene sports --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "network create"
+expect_no_call "run"
+pass
+
+# 7
+begin no-release-tag-refused
+env -u DEMO_VERSION PATH="$TMP/bin:$PATH" DEMO_REUSE_IMAGE=1 \
+  bash "$SCRIPT" --scene sports > "$OUT" 2> "$ERR" < /dev/null
+RC=$?
+expect_rc 1
+expect_err "no release tag"
+expect_no_call "network create"
+pass
+
+# 8
+begin password-not-printed
+SENTINEL="sentinel-pass-123"
+E2E_PASSWORD="$SENTINEL" run_script --scene sports --no-capture
+[ -f "$DEMO_WORK/admin.pw" ] || fail "the run never reached the credential file"
+for f in admin.pw setup.code; do
+  mode="$(stat -f %Lp "$DEMO_WORK/$f" 2> /dev/null || stat -c %a "$DEMO_WORK/$f")"
+  [ "$mode" = 600 ] || fail "$f has mode $mode, want 600"
+done
+grep -q "$SENTINEL" "$DEMO_WORK/admin.pw" || fail "admin.pw does not hold the password"
+leak="$(grep -rl "$SENTINEL" "$OUT" "$ERR" "$STUB_LOG" "$DEMO_WORK" 2> /dev/null | grep -v '/admin\.pw$' || true)"
+[ -z "$leak" ] || fail "the password reached: $leak"
+pass
+
+# 9
+begin filters-match-generator
+python3 "$ROOT/scripts/demo-sports/gen-filter.py" --check > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 0
+command cp -R "$ROOT/scripts/demo-sports" "$TMP/demo-sports-copy"
+printf 'x' >> "$TMP/demo-sports-copy/match.filter"
+python3 "$TMP/demo-sports-copy/gen-filter.py" --check > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 1
+pass
+
+# 10
+begin options-refused
+run_script --scene bogus
+expect_rc 2
+run_script --state status
+expect_rc 2
+run_script --scene sports --state bogus
+expect_rc 2
+expect_no_call "network create"
+pass
+
+# 11
+begin plan-line-keeps-empty-fields
+printf 'abc\tsecret-token-xyz\t\t9000\t\n' > "$TMP/plan.tsv"
+got="$( . "$LIB"; sports_plan_token "$TMP/plan.tsv" )"
+[ "$got" = secret-token-xyz ] || fail "the token read from a line with empty fields was \"$got\""
+pass

@@ -649,6 +649,14 @@ jobs:
         run: ./scripts/test-obs-stop.sh
         timeout-minutes: 6
 
+      # The demo rig's refusals (docker down, port busy, leftovers, a fixture
+      # that names a real platform, no release tag, a slow publisher), driven
+      # against a stub `docker` that records what the script tried to create.
+      # The rig itself is never run in CI; its safety checks are, here.
+      - if: needs.changes.outputs.code == 'true'
+        run: ./scripts/test-demo-seed.sh
+        timeout-minutes: 5
+
       # Outbound webhooks over a real socket. IN THIS JOB RATHER THAN THE
       # acceptance MATRIX, because it needs neither FFmpeg nor `make build` --
       # the far end is an http.Server the driver starts on a loopback port, so
