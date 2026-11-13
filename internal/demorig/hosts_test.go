@@ -35,16 +35,16 @@ func TestCheckHostsRefusesRealPlatformHosts(t *testing.T) {
 		{"rtmp://127.0.0.1:1935/live", "127.0.0.1"},
 		{"rtmp://polyemesis-demo-recv.evil.com/live", "polyemesis-demo-recv.evil.com"},
 		{"rtmp://polyemesis-demo-recv./live", "polyemesis-demo-recv."},
-		{"rtmp://polyemesis-demo-recv@evil.com/live", "evil.com"},
+		{"rtmp://polyemesis-demo-recv@evil.com/live", ""},
 		{"rtmp://evil.com/polyemesis-demo-recv", "evil.com"},
 		{"rtmp://evil.com/live?h=polyemesis-demo-recv", "evil.com"},
 		{"rtmp://[::1]:1935/live", "::1"},
-		{"rtmp://polyemesis-demo-recv:1935@evil.com:1935/live", "evil.com"},
+		{"rtmp://polyemesis-demo-recv:1935@evil.com:1935/live", ""},
 		{"rtmp://polyemesis-demo-recv%40evil.com/x", ""},
 	}
-	// Userinfo naming another host does not change the hostname: this is the receiver.
-	if err := CheckHosts(row("X", "rtmp://evil.com:1935@polyemesis-demo-recv/live"), recv); err != nil {
-		t.Errorf("hostname is the receiver, userinfo is not a host: %v", err)
+	// Userinfo is refused outright: parsers disagree about which @ ends it.
+	if err := CheckHosts(row("X", "rtmp://evil.com:1935@polyemesis-demo-recv/live"), recv); err == nil {
+		t.Error("userinfo accepted")
 	}
 	for _, c := range cases {
 		err := CheckHosts(row("Spanish", c.url), recv)
@@ -179,7 +179,7 @@ func TestCheckHostsRefusesAnythingButAPlainURLToTheReceiver(t *testing.T) {
 		{"rtmp query", "rtmp://" + r + "/live?x=1", "query", ""},
 		{"empty query", "rtmp://" + r + "/live?", "query", ""},
 		{"fragment", "rtmp://" + r + "/live#frag", "query", "frag-x"},
-		{"fragment hiding a host", "rtmp://" + r + "#@evil/x", "query", "evil"},
+		{"fragment hiding a host", "rtmp://" + r + "#@evil/x", "userinfo", "evil"},
 		{"port zero", "rtmp://" + r + ":0/x", "port", ""},
 		{"port too big", "rtmp://" + r + ":65536/x", "port", ""},
 		{"empty port", "rtmp://" + r + ":/x", "port", ""},
@@ -209,5 +209,98 @@ func TestCheckHostsRefusesAnythingButAPlainURLToTheReceiver(t *testing.T) {
 	// The same shape rules apply to the backup URL.
 	if err := CheckHosts([]DestRow{{Name: "L", URL: "rtmp://" + r + "/x", BackupURL: "http://" + r + "/y"}}, []string{r}); err == nil {
 		t.Error("backup with a bad scheme accepted")
+	}
+}
+
+func TestCheckHostsRefusesUserinfoNonASCIIAndHugeURLs(t *testing.T) {
+	r := "polyemesis-demo-recv"
+	cases := []struct{ name, url, kind, mustNotLeak string }{
+		{"double at", "rtmp://" + r + "@evil.com@" + r + "/x", "userinfo", "evil"},
+		{"user and password", "rtmp://u:p@" + r + "/x", "userinfo", "u:p"},
+		{"zero-width space in path", "rtmp://" + r + "/li\u200bve", "characters", ""},
+		{"non-ASCII letter in host", "rtmp://polyemesis-demo-r\u00e9cv/x", "characters", "cv"},
+		{"del", "rtmp://" + r + "/x\x7f", "characters", ""},
+		{"huge path", "rtmp://" + r + "/" + strings.Repeat("a", 100000), "too long", "aaaa"},
+		{"one byte over", "rtmp://" + r + "/" + strings.Repeat("a", 2049-len("rtmp://"+r+"/")), "too long", "aaaa"},
+	}
+	for _, c := range cases {
+		err := CheckHosts(row("Greek", c.url), []string{r})
+		if err == nil {
+			t.Errorf("%s accepted", c.name)
+			continue
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "Greek") || !strings.Contains(msg, c.kind) {
+			t.Errorf("%s: error should name the destination and %q: %v", c.name, c.kind, err)
+		}
+		if c.mustNotLeak != "" && strings.Contains(msg, c.mustNotLeak) {
+			t.Errorf("%s: error leaked the URL: %v", c.name, err)
+		}
+		if len(msg) > 300 {
+			t.Errorf("%s: error is %d bytes long", c.name, len(msg))
+		}
+	}
+	exact := "rtmp://" + r + "/" + strings.Repeat("a", 2048-len("rtmp://"+r+"/"))
+	if err := CheckHosts(row("Greek", exact), []string{r}); err != nil {
+		t.Errorf("a 2048-byte URL is the limit and should pass: %v", err)
+	}
+}
+
+func TestCheckStoredRefusesWhatReachesAPlatformWithoutTheURL(t *testing.T) {
+	r := "polyemesis-demo-recv"
+	ok := DestRow{Name: "English", URL: "rtmp://" + r + "/x"}
+	zero := int64(0)
+	seven := int64(7)
+	cases := []struct {
+		name  string
+		mod   func(d *DestRow)
+		field string
+	}{
+		{"extra output args", func(d *DestRow) { d.ExtraOutputArgs = "-f flv rtmp://a.rtmp.youtube.com/k" }, "extraOutputArgs"},
+		{"extra output args, redacted mask", func(d *DestRow) { d.ExtraOutputArgs = "[redacted]" }, "extraOutputArgs"},
+		{"extra input args", func(d *DestRow) { d.ExtraInputArgs = "-re" }, "extraInputArgs"},
+		{"extra input args, redacted mask", func(d *DestRow) { d.ExtraInputArgs = "***" }, "extraInputArgs"},
+		{"account", func(d *DestRow) { d.AccountID = &seven }, "accountId"},
+		{"account id zero", func(d *DestRow) { d.AccountID = &zero }, "accountId"},
+		{"multitrack", func(d *DestRow) { d.Multitrack = true }, "multitrack"},
+	}
+	if err := CheckStored([]DestRow{ok}, []string{r}); err != nil {
+		t.Fatalf("a plain row was refused: %v", err)
+	}
+	for _, c := range cases {
+		d := ok
+		c.mod(&d)
+		err := CheckStored([]DestRow{d}, []string{r})
+		if err == nil {
+			t.Errorf("%s accepted", c.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "English") || !strings.Contains(err.Error(), c.field) {
+			t.Errorf("%s: error should name the destination and %s: %v", c.name, c.field, err)
+		}
+		for _, leak := range []string{"youtube", "redacted", "***", "-re"} {
+			if strings.Contains(err.Error(), leak) {
+				t.Errorf("%s: error leaked field content %q: %v", c.name, leak, err)
+			}
+		}
+	}
+	// Host problems are still found, and every offender and field is reported.
+	bad := DestRow{Name: "A", URL: "rtmp://evil.com/x"}
+	both := DestRow{Name: "B", URL: "rtmp://" + r + "/x", Multitrack: true, AccountID: &seven}
+	if err := CheckStored([]DestRow{bad, ok}, []string{r}); err == nil || !strings.Contains(err.Error(), "evil.com") {
+		t.Errorf("host problem lost: %v", err)
+	}
+	err := CheckStored([]DestRow{both, {Name: "C", URL: ok.URL, ExtraInputArgs: "x"}}, []string{r})
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, w := range []string{"B", "multitrack", "accountId", "C", "extraInputArgs"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("error lacks %q: %v", w, err)
+		}
+	}
+	// An empty allow-list is still refused through this entry point.
+	if err := CheckStored([]DestRow{ok}, nil); err == nil {
+		t.Error("empty allow-list accepted")
 	}
 }

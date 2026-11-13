@@ -1,6 +1,7 @@
 package testenv
 
 import (
+	"bytes"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -41,6 +42,7 @@ type sportsProfile struct {
 
 type sportsFixture struct {
 	Scene      string            `json:"scene"`
+	Settings   json.RawMessage   `json:"settings"`
 	Recordings []json.RawMessage `json:"recordings"`
 	Sources    []struct {
 		Name         string                     `json:"name"`
@@ -48,15 +50,20 @@ type sportsFixture struct {
 		Audio        []sportsTrack              `json:"audio"`
 		Renditions   []json.RawMessage          `json:"renditions"`
 		Destinations []struct {
-			Name         string        `json:"name"`
-			Kind         string        `json:"kind"`
-			Platform     string        `json:"platform"`
-			URL          string        `json:"url"`
-			BackupURL    string        `json:"backupUrl"`
-			StreamKey    string        `json:"streamKey"`
-			Enabled      bool          `json:"enabled"`
-			AudioBitrate int           `json:"audioBitrate"`
-			Profile      sportsProfile `json:"profile"`
+			Name         string `json:"name"`
+			Kind         string `json:"kind"`
+			Platform     string `json:"platform"`
+			URL          string `json:"url"`
+			BackupURL    string `json:"backupUrl"`
+			StreamKey    string `json:"streamKey"`
+			Enabled      bool   `json:"enabled"`
+			AudioBitrate int    `json:"audioBitrate"`
+			// Present so the strict decode accepts them; the test asserts they are unset.
+			ExtraInputArgs  string        `json:"extraInputArgs"`
+			ExtraOutputArgs string        `json:"extraOutputArgs"`
+			AccountID       *int64        `json:"accountId"`
+			Multitrack      bool          `json:"multitrack"`
+			Profile         sportsProfile `json:"profile"`
 		} `json:"destinations"`
 	} `json:"sources"`
 }
@@ -70,8 +77,12 @@ func loadSportsFixture(t *testing.T) (sportsFixture, string) {
 	if err != nil {
 		t.Fatalf("read sports fixture: %v", err)
 	}
+	// Strict: a field this test does not know about fails here, so a new field
+	// cannot pass unseen.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
 	var fx sportsFixture
-	if err := json.Unmarshal(raw, &fx); err != nil {
+	if err := dec.Decode(&fx); err != nil {
 		t.Fatalf("parse sports fixture: %v", err)
 	}
 	return fx, root
@@ -147,9 +158,13 @@ func TestSportsFixtureIsOneProgrammeFiveLocalDestinations(t *testing.T) {
 				t.Errorf("%s: profile track %d = %+v, want enabled at gain 1", d.Name, j, tr)
 			}
 		}
-		rows = append(rows, demorig.DestRow{Name: d.Name, URL: d.URL, BackupURL: d.BackupURL})
+		if d.ExtraInputArgs != "" || d.ExtraOutputArgs != "" || d.AccountID != nil || d.Multitrack {
+			t.Errorf("%s carries extra args, an account or multitrack", d.Name)
+		}
+		rows = append(rows, demorig.DestRow{Name: d.Name, URL: d.URL, BackupURL: d.BackupURL,
+			ExtraInputArgs: d.ExtraInputArgs, ExtraOutputArgs: d.ExtraOutputArgs, AccountID: d.AccountID, Multitrack: d.Multitrack})
 	}
-	if err := demorig.CheckHosts(rows, []string{sportsReceiverHost}); err != nil {
+	if err := demorig.CheckStored(rows, []string{sportsReceiverHost}); err != nil {
 		t.Errorf("fixture destinations are not all local: %v", err)
 	}
 }
@@ -379,11 +394,17 @@ func TestDemoDriverNeverEchoesAResponseBody(t *testing.T) {
 	}
 }
 
-func TestDemoDriverGuardsPlatformAccountsAndArgs(t *testing.T) {
+// The refusal of platform accounts, multitrack and extra arguments is decided
+// in internal/demorig (where it is unit-tested); the driver only fetches and
+// calls. guardLive must therefore hold no decision of its own about those fields.
+func TestDemoDriverDelegatesTheStoredRowCheck(t *testing.T) {
 	gl := loadDriver(t).funcText(t, "guardLive")
-	for _, f := range []string{"extraOutputArgs", "extraInputArgs", "accountId", "multitrack"} {
-		if !strings.Contains(gl, f) {
-			t.Errorf("guardLive does not refuse a stored destination with %s", f)
+	if !strings.Contains(gl, "demorig.CheckStored(") {
+		t.Error("guardLive must call demorig.CheckStored")
+	}
+	for _, f := range []string{"ExtraOutputArgs", "ExtraInputArgs", "AccountID", "Multitrack", "switch"} {
+		if strings.Contains(gl, f) {
+			t.Errorf("guardLive mentions %s: that decision belongs in demorig.CheckStored", f)
 		}
 	}
 }

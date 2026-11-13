@@ -8,11 +8,61 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
-// DestRow is one destination as the fixture or the server holds it.
-type DestRow struct{ Name, URL, BackupURL string }
+// DestRow is one destination as the fixture or the server holds it. The JSON
+// names are the server's, so the driver decodes stored rows straight into it.
+//
+// The last four fields are not about the URL: each makes a destination talk to
+// a real platform (or run arbitrary FFmpeg output) without the URL saying so.
+// A platform account's API is called at go-live, Enhanced Broadcasting
+// negotiates with the platform, and extra arguments can name any output.
+type DestRow struct {
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	BackupURL       string `json:"backupUrl"`
+	ExtraInputArgs  string `json:"extraInputArgs"`
+	ExtraOutputArgs string `json:"extraOutputArgs"`
+	AccountID       *int64 `json:"accountId"`
+	Multitrack      bool   `json:"multitrack"`
+}
+
+// maxURLBytes bounds the raw string: the rig's URLs are about 40 bytes.
+const maxURLBytes = 2048
+
+// CheckStored is the one question the driver asks of a stored row before it
+// starts anything: is it safe? It is CheckHosts plus the four fields above,
+// refused when set at all (a redacted mask is still "set"; an account id of 0
+// is still an account). The error names each offending destination and field,
+// never a value.
+func CheckStored(rows []DestRow, allowed []string) error {
+	if err := CheckHosts(rows, allowed); err != nil {
+		return err
+	}
+	var bad []string
+	for _, r := range rows {
+		var fields []string
+		if r.ExtraInputArgs != "" {
+			fields = append(fields, "extraInputArgs")
+		}
+		if r.ExtraOutputArgs != "" {
+			fields = append(fields, "extraOutputArgs")
+		}
+		if r.AccountID != nil {
+			fields = append(fields, "accountId")
+		}
+		if r.Multitrack {
+			fields = append(fields, "multitrack")
+		}
+		if len(fields) > 0 {
+			bad = append(bad, fmt.Sprintf("%s: %s set", r.Name, strings.Join(fields, ", ")))
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	return fmt.Errorf("demo rig: destinations that could reach a real platform without their URL: %s", strings.Join(bad, "; "))
+}
 
 // CheckHosts returns nil only if every row's URL, and BackupURL when set, parses
 // and has a hostname equal to one of allowed (case-folded). The error names every
@@ -59,10 +109,20 @@ func hostProblem(raw string, allow []string) string {
 	if raw == "" {
 		return "empty URL"
 	}
-	for _, c := range raw {
-		if unicode.IsSpace(c) || unicode.IsControl(c) || strings.ContainsRune(`|,\`, c) {
+	if len(raw) > maxURLBytes {
+		return "URL is too long"
+	}
+	// Printable ASCII only (0x21 to 0x7E): whitespace, controls and look-alike or
+	// zero-width characters all fall outside it.
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; c < 0x21 || c > 0x7e || c == '|' || c == ',' || c == '\\' {
 			return "URL has forbidden characters"
 		}
+	}
+	// No userinfo, by refusing any @: Go splits at the last one and other
+	// clients at the first, so "a@evil@recv" has two different hosts.
+	if strings.Contains(raw, "@") {
+		return "URL has userinfo"
 	}
 	u, err := url.Parse(raw)
 	if err != nil {

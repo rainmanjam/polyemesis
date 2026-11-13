@@ -618,31 +618,32 @@ func guardFixture(fx *fixture, host string) {
 	var rows []demorig.DestRow
 	for _, s := range fx.Sources {
 		for _, d := range s.Destinations {
-			url, _ := d.Rest["url"].(string)
-			backup, _ := d.Rest["backupUrl"].(string)
-			rows = append(rows, demorig.DestRow{Name: d.Name, URL: url, BackupURL: backup})
+			row := demorig.DestRow{Name: d.Name}
+			row.URL, _ = d.Rest["url"].(string)
+			row.BackupURL, _ = d.Rest["backupUrl"].(string)
+			row.ExtraInputArgs, _ = d.Rest["extraInputArgs"].(string)
+			row.ExtraOutputArgs, _ = d.Rest["extraOutputArgs"].(string)
+			if _, set := d.Rest["accountId"]; set {
+				row.AccountID = new(int64)
+			}
+			row.Multitrack, _ = d.Rest["multitrack"].(bool)
+			rows = append(rows, row)
 		}
 	}
 	if len(rows) == 0 {
 		die("the fixture has no destinations to check")
 	}
-	if err := demorig.CheckHosts(rows, []string{host}); err != nil {
+	if err := demorig.CheckStored(rows, []string{host}); err != nil {
 		die("%v", err)
 	}
 	fmt.Fprintf(os.Stderr, "  fixture guard ok: %d destinations, every host is %s\n", len(rows), host)
 }
 
 // storedDest is one destination as the server holds it (the "destination" half
-// of a list or get response).
+// of a list or get response): the id, plus the fields demorig decides on.
 type storedDest struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	URL             string `json:"url"`
-	BackupURL       string `json:"backupUrl"`
-	ExtraInputArgs  string `json:"extraInputArgs"`
-	ExtraOutputArgs string `json:"extraOutputArgs"`
-	AccountID       *int64 `json:"accountId"`
-	Multitrack      bool   `json:"multitrack"`
+	ID int64 `json:"id"`
+	demorig.DestRow
 }
 
 // listStored reads GET /destinations, whose rows wrap each destination in
@@ -664,10 +665,9 @@ func listStored() []storedDest {
 // reused data directory). It reads the list ONCE and returns exactly the rows
 // it checked, so a caller that starts them starts only what was guarded.
 //
-// Beyond the host it refuses what could reach a real platform without the URL:
-// a platform account (its API is called at go-live), Enhanced Broadcasting
-// negotiation, and raw FFmpeg arguments (which can name any output). The
-// fixture sets none of them.
+// It decides nothing itself: demorig.CheckStored refuses a host outside the
+// allow-list and any platform account, Enhanced Broadcasting flag or raw FFmpeg
+// argument, and is unit-tested.
 func guardLive(host string) []storedDest {
 	stored := listStored()
 	if len(stored) == 0 {
@@ -675,22 +675,10 @@ func guardLive(host string) []storedDest {
 	}
 	rows := make([]demorig.DestRow, 0, len(stored))
 	for _, d := range stored {
-		rows = append(rows, demorig.DestRow{Name: d.Name, URL: d.URL, BackupURL: d.BackupURL})
+		rows = append(rows, d.DestRow)
 	}
-	if err := demorig.CheckHosts(rows, []string{host}); err != nil {
+	if err := demorig.CheckStored(rows, []string{host}); err != nil {
 		die("%v", err)
-	}
-	for _, d := range stored {
-		switch {
-		case d.ExtraOutputArgs != "":
-			die("destination %q has extraOutputArgs set; the rig refuses raw FFmpeg arguments", d.Name)
-		case d.ExtraInputArgs != "":
-			die("destination %q has extraInputArgs set; the rig refuses raw FFmpeg arguments", d.Name)
-		case d.AccountID != nil:
-			die("destination %q has accountId set; a platform account would be called at go-live", d.Name)
-		case d.Multitrack:
-			die("destination %q has multitrack on; Enhanced Broadcasting negotiates with a real platform", d.Name)
-		}
 	}
 	fmt.Fprintf(os.Stderr, "  guard ok: %d stored destinations, every host is %s\n", len(rows), host)
 	return stored
