@@ -189,6 +189,11 @@ func TestDemoDriverGuardsBeforeEveryStart(t *testing.T) {
 	if guard < 0 || start < 0 || guard > start {
 		t.Errorf("startAll must call guardLive( before it builds a /start path (guardLive at %d, /start at %d)", guard, start)
 	}
+	// One read, guarded and then used: a second listStored( inside startAll would
+	// start rows that were added or edited after the guard looked.
+	if strings.Contains(body, "listStored(") {
+		t.Error("startAll must not read the destination list itself; start only the rows guardLive returned")
+	}
 	// No other function may start a destination, and the bulk route would skip
 	// the per-row guard above.
 	if n := strings.Count(d.text, `/start"`); n != 1 {
@@ -233,8 +238,9 @@ func TestDemoDriverNeverPrintsASecret(t *testing.T) {
 	if checked < 10 {
 		t.Errorf("only %d print calls found; this guard has stopped matching", checked)
 	}
-	if !strings.Contains(d.funcText(t, "printSecrets"), "ModeCharDevice") {
-		t.Error("printSecrets must refuse a terminal (os.ModeCharDevice)")
+	ps := d.funcText(t, "printSecrets")
+	if !strings.Contains(ps, "ModeCharDevice") || !strings.Contains(ps, "IsRegular()") {
+		t.Error("printSecrets must refuse a terminal and a pipe: stdout has to be a regular file")
 	}
 }
 
@@ -248,5 +254,66 @@ func TestDemoDriverRoutesByRole(t *testing.T) {
 	// The behavioural check is the rig's receiver proof (plan 3, Task 13).
 	if !strings.Contains(loadDriver(t).funcText(t, "routeAll"), `"commentary"`) {
 		t.Error(`routeAll must choose tracks by the "commentary" role`)
+	}
+}
+
+// A response body can carry a stream key (GET /destinations begins with id,
+// name, kind, platform, url, streamKey), so no failure path may print one: only
+// method, path, status and length.
+func TestDemoDriverNeverEchoesAResponseBody(t *testing.T) {
+	d := loadDriver(t)
+	bodyNames := map[string]bool{"body": true, "out": true, "raw": true, "b": true, "resp": true, "data": true, "text": true}
+	printers := map[string]bool{"Printf": true, "Fprintf": true, "Println": true, "Fprintln": true, "Print": true, "Fprint": true, "die": true}
+	checked := 0
+	var walk func(n ast.Node, printer string)
+	walk = func(n ast.Node, printer string) {
+		ast.Inspect(n, func(m ast.Node) bool {
+			switch x := m.(type) {
+			case *ast.CallExpr:
+				if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "len" {
+					return false // a length is not the content
+				}
+			case *ast.Ident:
+				if bodyNames[x.Name] {
+					t.Errorf("%s: %s( is given %s, which holds a response body or a secret-bearing buffer", d.fset.Position(x.Pos()), printer, x.Name)
+				}
+			}
+			return true
+		})
+	}
+	ast.Inspect(d.file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		var name string
+		switch f := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			name = f.Sel.Name
+		case *ast.Ident:
+			name = f.Name
+		}
+		if printers[name] {
+			checked++
+			for _, a := range call.Args {
+				walk(a, name)
+			}
+		}
+		return true
+	})
+	if checked < 10 {
+		t.Errorf("only %d print calls found; this guard has stopped matching", checked)
+	}
+	if strings.Contains(d.text, "func truncate(") {
+		t.Error("truncate echoes part of a body; delete it")
+	}
+}
+
+func TestDemoDriverGuardsPlatformAccountsAndArgs(t *testing.T) {
+	gl := loadDriver(t).funcText(t, "guardLive")
+	for _, f := range []string{"extraOutputArgs", "extraInputArgs", "accountId", "multitrack"} {
+		if !strings.Contains(gl, f) {
+			t.Errorf("guardLive does not refuse a stored destination with %s", f)
+		}
 	}
 }

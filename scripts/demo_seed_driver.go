@@ -342,13 +342,13 @@ func createSource(s fixSource) int64 {
 		"name": s.Name, "enabled": true, "ingest": ingest,
 	})
 	if code >= 300 {
-		die("create source %q: %d %s", s.Name, code, body)
+		die("create source %q: HTTP %d (%d-byte body not shown)", s.Name, code, len(body))
 	}
 	var row struct {
 		ID int64 `json:"id"`
 	}
 	if err := json.Unmarshal(body, &row); err != nil || row.ID == 0 {
-		die("create source %q returned no id: %s", s.Name, body)
+		die("create source %q returned no id (%d-byte body not shown)", s.Name, len(body))
 	}
 	return row.ID
 }
@@ -490,16 +490,16 @@ func finish(fx *fixture) {
 			body["sourceId"] = sid
 			code, out := send("POST", "/renditions", body)
 			if code >= 300 {
-				die("create rendition %q: %d %s", name, code, out)
+				die("create rendition %q: HTTP %d (%d-byte body not shown)", name, code, len(out))
 			}
-			var resp struct {
+			var made struct {
 				Rendition struct {
 					ID int64 `json:"id"`
 				} `json:"rendition"`
 			}
-			decode(out, &resp)
-			rends[name] = resp.Rendition.ID
-			fmt.Fprintf(os.Stderr, "  rendition %q (id %d)\n", name, resp.Rendition.ID)
+			decode(out, &made)
+			rends[name] = made.Rendition.ID
+			fmt.Fprintf(os.Stderr, "  rendition %q (id %d)\n", name, made.Rendition.ID)
 		}
 
 		for _, d := range s.Destinations {
@@ -517,7 +517,7 @@ func finish(fx *fixture) {
 			}
 			code, out := send("POST", "/destinations", body)
 			if code >= 300 {
-				die("create destination %q: %d %s", d.Name, code, out)
+				die("create destination %q: HTTP %d (%d-byte body not shown)", d.Name, code, len(out))
 			}
 			dests[d.Name] = true
 			fmt.Fprintf(os.Stderr, "  destination %q\n", d.Name)
@@ -538,7 +538,7 @@ func reannotate(id int64, s fixSource) {
 		"name": s.Name, "enabled": true, "ingest": ingest,
 	})
 	if code >= 300 {
-		die("annotate source %d: %d %s", id, code, out)
+		die("annotate source %d: HTTP %d (%d-byte body not shown)", id, code, len(out))
 	}
 }
 
@@ -635,10 +635,14 @@ func guardFixture(fx *fixture, host string) {
 // storedDest is one destination as the server holds it (the "destination" half
 // of a list or get response).
 type storedDest struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	URL       string `json:"url"`
-	BackupURL string `json:"backupUrl"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	URL             string `json:"url"`
+	BackupURL       string `json:"backupUrl"`
+	ExtraInputArgs  string `json:"extraInputArgs"`
+	ExtraOutputArgs string `json:"extraOutputArgs"`
+	AccountID       *int64 `json:"accountId"`
+	Multitrack      bool   `json:"multitrack"`
 }
 
 // listStored reads GET /destinations, whose rows wrap each destination in
@@ -657,8 +661,14 @@ func listStored() []storedDest {
 
 // guardLive is the second safety layer: it checks what the SERVER stored, not
 // what the fixture said, because those can differ (an edit in the console, a
-// reused data directory).
-func guardLive(host string) {
+// reused data directory). It reads the list ONCE and returns exactly the rows
+// it checked, so a caller that starts them starts only what was guarded.
+//
+// Beyond the host it refuses what could reach a real platform without the URL:
+// a platform account (its API is called at go-live), Enhanced Broadcasting
+// negotiation, and raw FFmpeg arguments (which can name any output). The
+// fixture sets none of them.
+func guardLive(host string) []storedDest {
 	stored := listStored()
 	if len(stored) == 0 {
 		die("the server holds no destinations to check")
@@ -670,7 +680,20 @@ func guardLive(host string) {
 	if err := demorig.CheckHosts(rows, []string{host}); err != nil {
 		die("%v", err)
 	}
+	for _, d := range stored {
+		switch {
+		case d.ExtraOutputArgs != "":
+			die("destination %q has extraOutputArgs set; the rig refuses raw FFmpeg arguments", d.Name)
+		case d.ExtraInputArgs != "":
+			die("destination %q has extraInputArgs set; the rig refuses raw FFmpeg arguments", d.Name)
+		case d.AccountID != nil:
+			die("destination %q has accountId set; a platform account would be called at go-live", d.Name)
+		case d.Multitrack:
+			die("destination %q has multitrack on; Enhanced Broadcasting negotiates with a real platform", d.Name)
+		}
+	}
 	fmt.Fprintf(os.Stderr, "  guard ok: %d stored destinations, every host is %s\n", len(rows), host)
+	return stored
 }
 
 // routeAll sets every fixture destination's track selection. "initial": all
@@ -732,12 +755,16 @@ func routeAll(fx *fixture, state string) {
 // startAll starts every destination, one at a time, after re-checking what the
 // server stored. Never the bulk route, which would skip the guard
 // between rows.
+//
+// The rows come from guardLive's single read. The destinations are left
+// enabled: a server restart would start them again WITHOUT this guard, and only
+// the internal Docker network (no route off the machine) covers that case. The
+// rig's --down removes everything.
 func startAll(host string) {
-	guardLive(host)
-	for _, d := range listStored() {
+	for _, d := range guardLive(host) {
 		path := fmt.Sprintf("/destinations/%d", d.ID) + "/start"
 		if code, out := send("POST", path, map[string]any{}); code >= 300 {
-			die("start %q: %d %s", d.Name, code, truncate(string(out)))
+			die("start %q: HTTP %d (%d-byte body not shown)", d.Name, code, len(out))
 		}
 		fmt.Fprintf(os.Stderr, "  started %s\n", d.Name)
 	}
@@ -750,7 +777,7 @@ func stopAll() {
 	for _, d := range listStored() {
 		path := fmt.Sprintf("/destinations/%d", d.ID) + "/stop"
 		if code, out := send("POST", path, map[string]any{"confirm": true}); code >= 300 {
-			die("stop %q: %d %s", d.Name, code, truncate(string(out)))
+			die("stop %q: HTTP %d (%d-byte body not shown)", d.Name, code, len(out))
 		}
 		fmt.Fprintf(os.Stderr, "  stopped %s\n", d.Name)
 	}
@@ -859,8 +886,10 @@ func waitLive(fx *fixture, timeout time.Duration) {
 // the server) and each destination's stream key (from the fixture). It refuses
 // a terminal, so the values can only go to a file the caller chose.
 func printSecrets(fx *fixture) {
-	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice != 0 {
-		die("secrets writes credentials; redirect stdout to a file (mode 600), not a terminal")
+	// A regular file only: not a terminal, and not a pipe either, because
+	// `| less` would show them.
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice != 0 || !fi.Mode().IsRegular() {
+		die("secrets writes credentials; redirect stdout to a file (mode 600), not a terminal or a pipe")
 	}
 	ids := sourcesByName()
 	for _, s := range fx.Sources {
@@ -961,13 +990,13 @@ func authenticate() {
 			"username": "admin", "password": password,
 			"setupCode": os.Getenv("POLYEMESIS_SETUP_CODE"),
 		}); code >= 300 {
-			die("first-run setup: %d %s", code, out)
+			die("first-run setup: HTTP %d (%d-byte body not shown)", code, len(out))
 		}
 	} else if code, out := send("POST", "/auth/login", map[string]any{
 		"username": "admin", "password": password,
 	}); code >= 300 {
-		die("sign in: %d %s (a stale data directory from an earlier run has a "+
-			"different password; remove it, or pass --reset)", code, out)
+		die("sign in: HTTP %d, %d-byte body not shown (a stale data directory from an earlier run has a "+
+			"different password; remove it, or pass --reset)", code, len(out))
 	}
 	grabCSRF()
 }
@@ -998,7 +1027,12 @@ func grabCSRF() {
 	}
 }
 
+// lastRequest names the most recent request for failure messages that have
+// nothing else to say about where a response came from.
+var lastRequest string
+
 func getRaw(path string) []byte {
+	lastRequest = "GET " + path
 	r, err := client.Get(base + path)
 	if err != nil {
 		die("GET %s: %v", path, err)
@@ -1006,7 +1040,7 @@ func getRaw(path string) []byte {
 	defer r.Body.Close()
 	b, _ := io.ReadAll(r.Body)
 	if r.StatusCode >= 300 {
-		die("GET %s: %d %s", path, r.StatusCode, strings.TrimSpace(string(b)))
+		die("GET %s: HTTP %d (%d-byte body not shown)", path, r.StatusCode, len(b))
 	}
 	return b
 }
@@ -1018,21 +1052,16 @@ func get(path string) map[string]any {
 }
 
 func decode(b []byte, into any) {
-	if err := json.Unmarshal(b, into); err != nil {
-		die("decode response: %v (%s)", err, truncate(string(b)))
+	if json.Unmarshal(b, into) != nil {
+		// Neither the body nor the parser's message: either can quote content,
+		// and a destination list begins with a stream key.
+		die("decode response to %s: unexpected shape (%d bytes)", lastRequest, len(b))
 	}
-}
-
-func truncate(s string) string {
-	if len(s) > 200 {
-		return s[:200] + "…"
-	}
-	return s
 }
 
 func put(path string, body any) {
 	if code, out := send("PUT", path, body); code >= 300 {
-		die("PUT %s: %d %s", path, code, out)
+		die("PUT %s: HTTP %d (%d-byte body not shown)", path, code, len(out))
 	}
 }
 
@@ -1040,6 +1069,7 @@ func put(path string, body any) {
 // callers differ: a duplicate name on a re-run is expected, a rejected profile
 // is fatal, and only the caller knows which it asked for.
 func send(method, path string, body any) (int, []byte) {
+	lastRequest = method + " " + path
 	b, err := json.Marshal(body)
 	if err != nil {
 		die("encode %s %s: %v", method, path, err)
