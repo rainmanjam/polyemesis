@@ -151,3 +151,16 @@ __pycache__/
 *.stp
 *.step
 /web/scripts/stream-deck-model/*.glb
+
+# The tour's source lives in scripts/tour/; what it records and renders does not
+# (raw captures are about 1.2 GB, the trimmed clips about 32 MB). HyperFrames
+# writes AGENTS.md and CLAUDE.md into its project folder; they are generated.
+/scripts/tour/raw/
+/scripts/tour/out/
+/scripts/tour/check/
+/scripts/tour/edit.json
+/scripts/tour/hf/assets/
+/scripts/tour/hf/node_modules/
+/scripts/tour/hf/AGENTS.md
+/scripts/tour/hf/CLAUDE.md
+/scripts/tour/__pycache__/
