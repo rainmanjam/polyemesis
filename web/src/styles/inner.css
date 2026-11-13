@@ -20,6 +20,13 @@
     letter-spacing: -0.035em;
     text-wrap: balance;
   }
+  /* A long-form page keeps its old sentence-length headline; at the full
+     display size it ran three lines and pushed the page off the first screen. */
+  .ph:has(+ .lay > .longform) h1 {
+    font-size: clamp(2.125rem, 4.4vw, 3.25rem);
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+  }
   .ph h1 .it {
     color: var(--color-accent);
     font-size: 1.12em;
@@ -172,10 +179,18 @@
   .longform > :first-child { margin-top: 0; }
   .longform h2 { margin-top: 2.5em; font-size: 2rem; }
   .longform h3 { margin-top: 2em; font-size: 1.375rem; }
-  .longform a {
-    color: var(--color-primary-bright);
+  /* Links inside running copy are ink with a quiet underline, as in the docs:
+     the site has no blue, and coral is kept for audio and the primary action. */
+  .longform a:not([class]),
+  .inner-main :is(p, li, dd, td, figcaption) a:not([class]) {
+    color: var(--color-fg);
     text-decoration: underline;
+    text-decoration-color: var(--color-line-strong);
     text-underline-offset: 3px;
+  }
+  .longform a:not([class]):hover,
+  .inner-main :is(p, li, dd, td, figcaption) a:not([class]):hover {
+    text-decoration-color: currentColor;
   }
 
 
@@ -924,6 +939,11 @@
     margin: 28px 0 20px;
     border-bottom: 1px solid var(--color-line);
   }
+  /* Four tabs do not fit one phone line; two even rows instead of a ragged wrap. */
+  @media (max-width: 639.98px) {
+    .inst-tabs { display: grid; grid-template-columns: 1fr 1fr; }
+    .inst-tabs .inst-tab { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; }
+  }
   .inst-tabs[hidden] { display: none; }
   .inst-tab {
     display: inline-flex;
@@ -1116,7 +1136,8 @@
   .fe-body { margin-top: 16px; max-width: 42rem; color: var(--color-muted); font-size: 1.0625rem; line-height: 1.6; }
   .fe-body + .fe-body { margin-top: 12px; }
   .fe-links { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 20px; }
-  .fe a:not(.more):not(.btn) { color: var(--color-primary-bright); text-decoration: underline; text-underline-offset: 3px; }
+  .fe a:not(.more):not(.btn) { color: var(--color-fg); text-decoration: underline; text-decoration-color: var(--color-line-strong); text-underline-offset: 3px; }
+  .fe a:not(.more):not(.btn):hover { text-decoration-color: currentColor; }
 
   /* audio: five rooms, each a panel with its routing table */
   .fe-rooms { display: grid; gap: 16px; margin-top: 32px; }
@@ -1154,7 +1175,11 @@
   .fe-fail { display: grid; gap: 28px; margin-top: 28px; }
   .fe-fail > * { min-width: 0; }
   .fe-fail .fx { margin-top: 0; }
-  @media (min-width: 1024px) { .fe-fail { grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); align-items: start; } }
+  @media (min-width: 1024px) {
+    .fe-fail { grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); align-items: start; }
+    /* The demo is shorter than the facts beside it: it stays in view while they are read. */
+    .fe-fail > .fx { position: sticky; top: calc(var(--stack-h) + 24px); }
+  }
   .fe-facts { max-width: 46rem; }
   .fe-facts li { color: var(--color-muted); font-size: 1rem; line-height: 1.55; }
 
@@ -1351,7 +1376,8 @@
   .vs-note a,
   .vs-card a,
   .vs-list a,
-  .vs-links a { text-decoration: underline; text-underline-offset: 3px; color: var(--color-primary-bright); }
+  .vs-links a { text-decoration: underline; text-decoration-color: var(--color-line-strong); text-underline-offset: 3px; color: var(--color-fg); }
+  .vs-links a:hover { text-decoration-color: currentColor; }
   .vs-note {
     max-width: 44rem;
     margin-top: 20px;
