@@ -628,20 +628,23 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   // supervisor never heard that media was flowing.
   await expect(page.getByText("--:--:--", { exact: true })).toHaveCount(0);
   await expect(page.getByText("No lines match this view.", { exact: true })).toHaveCount(0);
-  // From the Processes heading to the bottom of its table, a little wider than
-  // the table: the log card below it is outside the clip.
-  // Scrolled back from the top so the app's sticky header is not in the clip.
-  await page.locator("main").evaluate((m) => m.scrollBy(0, -90));
-  await settle(page, 400);
-  const head = (await processes.boundingBox())!;
-  expect(head.y - 28, "the clip would take in the app header").toBeGreaterThanOrEqual(48);
+  // The window is cut just below the process table, so the log pane is below
+  // the frame. The width and the table's position are as before: the site
+  // crops this image by percentages of its width (Why.astro .why-crop-mon),
+  // so a differently framed image would show the wrong part of the page.
+  const vp = page.viewportSize()!;
   const table = (await processTable.boundingBox())!;
   const logBox = (await logPane.boundingBox())!;
-  const bottom = table.y + table.height + 16;
-  expect(bottom, "the Processes table runs into the log pane").toBeLessThanOrEqual(logBox.y);
-  await snap(page, "07-monitoring.png", {
-    clip: { x: Math.max(0, table.x - 20), y: Math.max(0, head.y - 28), width: table.width + 40, height: bottom - Math.max(0, head.y - 28) },
-  });
+  const cut = Math.ceil(table.y + table.height + 16);
+  expect(cut, "the Processes table runs into the log pane").toBeLessThanOrEqual(logBox.y);
+  await page.setViewportSize({ width: vp.width, height: cut });
+  await settle(page, 400);
+  expect(
+    (await logPane.boundingBox())!.y,
+    "the log pane is inside the photographed window",
+  ).toBeGreaterThanOrEqual(cut);
+  await snap(page, "07-monitoring.png");
+  await page.setViewportSize(vp);
   await expect(falseErrors).toHaveCount(0);
   // The decoder lines are in the log pane only; none may be in the card.
   expect(await processTable.innerText(), "a decoder warm-up line is inside the photographed table").not.toMatch(/no frame|non-existing/i);
