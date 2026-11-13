@@ -1,0 +1,89 @@
+---
+/* A screenshot in the site's product frame, with the enlarge behaviour.
+ *
+ * The same figure the features page built by hand for each of its rooms, as one
+ * component: a .frame with an optional title bar, a button around the picture so
+ * the whole screenshot is the click target, and a caption that says what to
+ * notice. The Lightbox (a page sets `lightbox` on InnerPage, or renders
+ * <Lightbox /> itself) listens for `.shot-open` and reads `data-shot` and
+ * `data-shot-alt`; without JavaScript the picture still shows at normal size.
+ *
+ * MISSING FILES ARE A BUILD FAILURE: shotOf throws rather than falling back, so
+ * a renamed capture cannot ship as an empty box. The file is named by the page,
+ * never here.
+ */
+import { Picture, getImage } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+import { lqipStyle } from "../../lib/lqip";
+
+interface Props {
+  /** File name in src/assets/shots. */
+  shot: string;
+  /** What the picture shows, for someone who cannot see it. */
+  alt: string;
+  /** What to notice, for someone who can. Not a restatement of `alt`. */
+  caption?: string;
+  /** Title in the frame's bar. */
+  chrome?: string;
+  /** The `sizes` attribute; the default is the width of a half-page column. */
+  sizes?: string;
+  /** Lazy unless the screenshot is above the fold. */
+  lazy?: boolean;
+}
+
+const {
+  shot,
+  alt,
+  caption,
+  chrome,
+  sizes = "(min-width: 1024px) 690px, calc(100vw - 2.5rem)",
+  lazy = true,
+} = Astro.props;
+
+const shotFiles = import.meta.glob<{ default: ImageMetadata }>("../../assets/shots/*.png", { eager: true });
+
+const shotOf = (name: string): ImageMetadata => {
+  const mod = shotFiles[`../../assets/shots/${name}`];
+  if (!mod) {
+    throw new Error(
+      `Shot.astro references ../../assets/shots/${name}, which does not exist. ` +
+        `A screenshot named by a page must be in src/assets/shots.`,
+    );
+  }
+  return mod.default;
+};
+
+// Candidate widths stop at 1440: 690 CSS px on a 2x display is 1380 device px.
+// The full-size file is generated separately, for the enlarge view.
+const WIDTHS = [420, 690, 960, 1440];
+
+const image = shotOf(shot);
+const full = (await getImage({ src: image, format: "webp", width: image.width })).src;
+const placeholder = await lqipStyle(image);
+---
+
+<figure class="frame">
+  {chrome && <div class="frame-bar"><span>{chrome}</span></div>}
+  <button
+    type="button"
+    class="shot-open"
+    data-shot={full}
+    data-shot-alt={alt}
+    aria-label={`Expand screenshot: ${alt}`}
+  >
+    <Picture
+      src={image}
+      formats={["avif", "webp"]}
+      fallbackFormat="webp"
+      widths={WIDTHS}
+      sizes={sizes}
+      alt={alt}
+      loading={lazy ? "lazy" : undefined}
+      decoding="async"
+      style={placeholder}
+      pictureAttributes={{ class: "block" }}
+    />
+  </button>
+  {caption && <figcaption class="border-t border-line px-3.5 py-2.5 text-sm leading-relaxed text-muted">{caption}</figcaption>}
+</figure>
