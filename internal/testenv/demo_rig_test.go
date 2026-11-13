@@ -406,6 +406,8 @@ func TestDemoDriverDelegatesTheStoredRowCheck(t *testing.T) {
 		if strings.Contains(gl, f) {
 			t.Errorf("guardLive mentions %s: that decision belongs in demorig.CheckStored", f)
 		}
+	}
+}
 
 // The shell side of the same rule as TestDemoDriverNeverPrintsASecret: the demo
 // password, the setup code, the publish token and the stream keys go to files
