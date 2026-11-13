@@ -23,12 +23,13 @@ import {
   DOCKER_RUN,
   HEALTH_CHECK,
   INSTALL_SCRIPT,
+  REPO,
 } from "../data/install.mjs";
 import { FIRST_RUN, PORTS, REQUIREMENTS } from "../data/install-page.mjs";
 import { FFMPEG_FLOOR, GO_FLOOR, NODE_BUILD_FLOOR } from "../data/facts.mjs";
 
-const REPO = "https://github.com/rainmanjam/polyemesis";
-const DOCKER_ENGINE = "Docker Engine 20.10+";
+// "Engine 20.10+ or Docker Desktop": the one place the page names the Docker floor.
+const DOCKER_FLOOR = REQUIREMENTS.find((r) => r.name === "Docker")!.value;
 
 const floors = (s: string) =>
   s.replace("{ffmpeg}", FFMPEG_FLOOR).replace("{go}", GO_FLOOR).replace("{node}", NODE_BUILD_FLOOR);
@@ -51,7 +52,7 @@ const METHODS = [
     code: DOCKER_RUN,
     does: "Runs the published image: the console on :8080, SRT in on :6000/udp, RTMP in on :1935. Everything you keep lives in the polyemesis-data volume.",
     suits: "A first try. FFmpeg is pinned and bundled, so SRT support is known-good, and this is the build the container test suites run against.",
-    needs: `${DOCKER_ENGINE} or Docker Desktop. Nothing else on the host: FFmpeg is bundled.`,
+    needs: `Docker ${DOCKER_FLOOR}. Nothing else on the host: FFmpeg is bundled.`,
     notes: [
       "Keep the /udp on port 6000. SRT is UDP, and omitting the suffix is the classic reason an ingest silently receives nothing.",
       "Publish 1935 now even if you plan to use SRT. A container's port mappings are fixed when it is created: an RTMP source added later has nothing listening for it, and says so nowhere.",
@@ -65,7 +66,7 @@ const METHODS = [
     code: `${CLONE}\n${COMPOSE_UP}`,
     does: "Builds the image from your clone and starts it with the repository's compose file, which publishes 8080, 6000/udp and 1935 and sets restart: unless-stopped.",
     suits: "You already run compose stacks, or want to read the source first.",
-    needs: `${DOCKER_ENGINE} or Docker Desktop, and git.`,
+    needs: `Docker ${DOCKER_FLOOR}, and git.`,
     notes: [
       "This build comes from your clone, so a new version arrives with git pull and reaches the container only with up -d --build.",
     ],
@@ -97,7 +98,7 @@ const METHODS = [
     needs: `FFmpeg ${FFMPEG_FLOOR} or later with srt (a build configured with --enable-libsrt), supplied by you. To build: Go ${GO_FLOOR}+ and Node ${NODE_BUILD_FLOOR}.`,
     notes: [
       "Homebrew's FFmpeg on macOS ships without SRT. polyemesis needs FFmpeg " +
-        `${FFMPEG_FLOOR} or later, which carries SRT and Enhanced RTMP multitrack alike; Ubuntu 26.04 packages it, the installer can fetch a pinned 8.1 build, and the container bundles one. (OBS does not send multitrack audio over RTMP at any version we have tested, so for OBS users SRT is the path.)`,
+        `${FFMPEG_FLOOR} or later, which carries SRT and Enhanced RTMP multitrack alike; Ubuntu 26.04 packages it, the installer can fetch a pinned static build, and the container bundles one. (OBS does not send multitrack audio over RTMP at any version we have tested, so for OBS users SRT is the path.)`,
       "Linux is the operated target, and the broadcast path is tested on Windows and macOS in CI too; that suite has caught Windows-only bugs before they shipped. What is not yet proven on Windows is long-running service operation: the service wrapper is unexercised and recording can truncate on service stop. Run it on Linux for production, and on Windows or macOS to build and evaluate.",
       "Run this way it listens on this machine only. localhost works where the binary runs; to reach it from elsewhere pass -addr, or forward the port over SSH.",
       "make check runs go vet, the Go test suite and the UI typecheck; make help lists every target. The contributing guide states the constraints that are not negotiable, so you find out before writing rather than after.",
@@ -152,7 +153,7 @@ const KEEP = [
 const NEXT = [
   ["/docs/audio-routing", "Audio routing guide", "Give each destination its own mix of the tracks."],
   ["/docs/connecting-platforms", "Connecting platforms", "Sign in to Twitch, YouTube, Kick, Facebook and X for stream keys, go-live and chat."],
-  ["/docs/stream-deck", "Stream Deck plugin", "Control polyemesis from a Stream Deck +: install, pairing, each key."],
+  ["/docs/stream-deck", "Stream Deck plugin", "Control polyemesis from a Stream Deck: install, pairing, each key."],
   ["/docs/hardware", "Hardware guide", "GPU encoding for renditions: what each vendor needs."],
   ["/docs/troubleshooting", "Troubleshooting", "Organised by what you see, not by what is wrong."],
 ];
@@ -177,7 +178,7 @@ const NEXT = [
   }}
 >
   <div slot="actions" class="inst-acts">
-    <a class="btn btn-primary" href="#choose">Install polyemesis</a>
+    <a class="btn btn-primary" href="/download#choose">Install polyemesis</a>
     <a class="btn btn-ghost" href="/docs/quickstart">Quickstart: from install to a first stream</a>
     <a class="btn btn-ghost" href="/docs/install">Install guide: per-platform, service files, GPU images</a>
   </div>

@@ -215,7 +215,7 @@ const [, ...inputRows] = INPUTS;
       <a class="more" href="/#deck">See it on the homepage</a>
       <a class="more" href="/docs/stream-deck">Read the plugin guide</a>
     </p>
-    <p class="fe-fine">Stream Deck + model: Elgato</p>
+    <p class="fe-fine">Stream Deck + model: Elgato · <a class="more" href="/models/NOTICE.txt">model notice</a></p>
     <p class="fe-fine">
       polyemesis is not affiliated with or endorsed by YouTube, Twitch, Kick, Rumble, Facebook, Meta, X or Elgato; their names and logos are trademarks of their owners.
     </p>
@@ -237,7 +237,7 @@ const [, ...inputRows] = INPUTS;
                 <li>
                   <b>{i.name}</b>
                   <p>{i.text}</p>
-                  <a class="more" href={`/docs/${i.doc}`}>Docs</a>
+                  <a class="more" href={`/docs/${i.doc}`} aria-label={`${i.name}: docs`}>Docs</a>
                 </li>
               ))}
             </ul>

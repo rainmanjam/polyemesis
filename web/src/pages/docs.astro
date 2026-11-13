@@ -2,6 +2,7 @@
 import InnerPage from "../layouts/InnerPage.astro";
 import { SECTIONS, START_HERE, BY_FILE, docsIn, hrefOf, GITHUB_BLOB } from "../data/docs.mjs";
 import type { IndexItem } from "../lib/page-index";
+import { REPO } from "../data/install.mjs";
 
 /* A DIRECTORY THAT NOW POINTS AT PAGES, not at github.com.
  *
@@ -42,7 +43,7 @@ const index: IndexItem[] = [
   band={{
     heading: "Something wrong or missing?",
     lede: "The docs are in the same repository as the code, under docs/. Corrections are a pull request, and the ones that say “this was wrong and here is why” are the most useful kind.",
-    secondary: { label: "Open an issue", href: "https://github.com/rainmanjam/polyemesis/issues" },
+    secondary: { label: "Open an issue", href: `${REPO}/issues` },
   }}
 >
   <Fragment slot="actions">

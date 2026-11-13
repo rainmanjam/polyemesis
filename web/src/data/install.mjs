@@ -8,8 +8,11 @@ export const DOCKER_RUN = `docker run -d --name polyemesis \\
   -v polyemesis-data:/data \\
   rainmanjam/polyemesis:latest`;
 
+/** The repository, once: the pages that link to it and the clone command share it. */
+export const REPO = "https://github.com/rainmanjam/polyemesis";
+
 /** docs/INSTALL.md, Compose: show CLONE, then COMPOSE_UP. */
-export const CLONE = `git clone https://github.com/rainmanjam/polyemesis
+export const CLONE = `git clone ${REPO}
 cd polyemesis`;
 
 export const COMPOSE_UP = "docker compose up -d";

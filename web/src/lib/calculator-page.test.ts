@@ -29,7 +29,9 @@ describe("/calculator", () => {
   it("has no entrance animation, no card class and no coral pressed state", () => {
     expect(calc).not.toMatch(/\brise\b/);
     expect(calc).not.toMatch(/class="[^"]*\bcard\b/);
-    expect(calc).not.toMatch(/btn-primary/);
+    // The Install button in the header is the site's primary action; the pressed state of the mode switch is not.
+    expect(calc).not.toMatch(/class="[^"]*\bmode-btn\b[^"]*\bbtn-primary\b/);
+    expect(calc).not.toMatch(/class="[^"]*\bbtn-primary\b[^"]*\bmode-btn\b/);
   });
   it("has no text under 12px", () => {
     expect(calc).not.toMatch(/text-\[(?:[0-9]|1[01])px\]/);

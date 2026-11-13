@@ -69,9 +69,9 @@ export const DATA = {
     other: {
       heading: "Aitum Multistream fits when",
       items: [
-        "One mix suits every platform",
-        "Your track layout is settled and you are not editing it under load",
-        "You do not want to run, patch or pay for a server",
+        "one mix suits every platform",
+        "your track layout is settled and you are not editing it under load",
+        "you do not want to run, patch or pay for a server",
       ],
     },
   },

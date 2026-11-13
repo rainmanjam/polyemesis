@@ -74,9 +74,11 @@ const CLOSING = `Platform figures are the bitrates each platform recommends, tra
   crumbs={[{ label: "polyemesis", href: "/" }, { label: "calculator" }]}
   heading="What a multistream actually costs your connection"
   lede={LEDE}
-  band={{ heading: "Platform figures are advisory", lede: CLOSING, primary: { label: "Install polyemesis", href: "/download" } }}
+  band={{ heading: "Platform figures are advisory.", lede: CLOSING, primary: { label: "Install polyemesis", href: "/download" } }}
 >
-    <!-- MODE -->
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+
+    {/* MODE */}
     <div class="mode-switch flex flex-wrap items-center gap-2">
       <button id="mode-simple" type="button" class="btn btn-ghost mode-btn text-sm" aria-pressed="true">
         Simple
@@ -90,7 +92,7 @@ const CLOSING = `Platform figures are the bitrates each platform recommends, tra
     </div>
 
     <div class="mt-6 grid gap-6 lg:grid-cols-[1fr_22rem] lg:items-start">
-      <!-- ------------------------------------------------------- INPUTS -->
+      {/* ------------------------------------------------------- INPUTS */}
       <div class="flex flex-col gap-6">
         <div class="panel p-5">
           <h2 class="text-sm font-semibold text-fg">How often/much do you stream</h2>
@@ -166,9 +168,9 @@ const CLOSING = `Platform figures are the bitrates each platform recommends, tra
             }
           </div>
 
-          <!-- CUSTOM ENDPOINTS. The presets are a floor, not a ceiling: anything
+          {/* CUSTOM ENDPOINTS. The presets are a floor, not a ceiling: anything
                speaking RTMP or SRT is a destination, so a calculator that only
-               counts the ten it knows about understates every real setup. -->
+               counts only the presets it knows about understates every real setup. */}
           <div class="mt-5 border-t border-line pt-4">
             <h3 class="text-xs font-semibold text-fg">Other RTMP or SRT endpoints</h3>
             <p class="mt-1 text-xs text-muted">
@@ -279,7 +281,7 @@ const CLOSING = `Platform figures are the bitrates each platform recommends, tra
 
       </div>
 
-      <!-- ------------------------------------------------------ RESULTS -->
+      {/* ------------------------------------------------------ RESULTS */}
       <aside class="panel p-5 lg:sticky lg:top-24">
         <h2 class="text-sm font-semibold text-fg">What you need</h2>
 
@@ -315,8 +317,8 @@ const CLOSING = `Platform figures are the bitrates each platform recommends, tra
       </aside>
     </div>
 
-    <!-- The arithmetic, written out. A calculator that will not show its
-         working is asking to be trusted about someone's uplink bill. -->
+    {/* The arithmetic, written out. A calculator that will not show its
+         working is asking to be trusted about someone's uplink bill. */}
     <div class="mt-10 max-w-3xl">
       <h2 class="text-sm font-semibold text-fg">How this is worked out</h2>
       <ul class="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-subtle">

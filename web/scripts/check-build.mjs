@@ -1436,6 +1436,10 @@ const DROPPED = {
       cut: "install it what it costs you",
       why: "Link labels the old markup left without punctuation: 'Install it' is now 'Install polyemesis' (the primary action) and 'What it costs you' moved to the in-page index, away from the section after it. The eyebrow, the h2 and the sentence are checked.",
     },
+    {
+      cut: "ffmpeg 8 build",
+      why: "One wording for the installer's FFmpeg across /download and this page, the one docs/INSTALL.md uses ('the installer's pinned static build'). The rest of the sentence is checked.",
+    },
   ],
   "/how-to-multistream-from-obs": [
     {
@@ -1446,10 +1450,6 @@ const DROPPED = {
       cut: "the three routes walkthrough",
       why: "The old page ran two index labels (The three routes, Walkthrough) into the next index entries. The index now sits between the header and the body, so the run cannot recur; the real sentence after it is checked.",
     },
-  ],
-  "/twitch-vod-track": [
-    { cut: "polyemesis / multistream / twitch vod track twitch", why: CRUMB_EYEBROW },
-    {
     {
       cut: "a run with obs itself as the publisher is still unconfirmed here",
       why: "Contradicted by docs/OBS.md ('OBS cannot either, and that is now measured rather than open': OBS 30.2.3 sent no multitrack tag, and no service in OBS's services.json declares it, 0 of 91). The page now says that measured result, as /download does.",
@@ -1458,6 +1458,10 @@ const DROPPED = {
       cut: ", about ten minutes",
       why: "A promised time (the global copy rule bars one). The page now reads 'Six steps.'; the HowTo structured data's totalTime is unchanged.",
     },
+  ],
+  "/twitch-vod-track": [
+    { cut: "polyemesis / multistream / twitch vod track twitch", why: CRUMB_EYEBROW },
+    {
       cut: "ways install it",
       why: "The old link list ended with 'Install it', which is now 'Install polyemesis' (the primary action). The other labels are checked.",
     },
