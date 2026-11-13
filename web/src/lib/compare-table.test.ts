@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { columnModel, glyphFor } from "./compare-table";
+import { columnModel, glyphFor, statusText } from "./compare-table";
 
 describe("glyphFor", () => {
   it("maps yes, no and not assessed, ignoring case and padding", () => {
@@ -39,5 +39,16 @@ describe("columnModel", () => {
   it("throws when a row is not the label plus one cell per column", () => {
     expect(() => columnModel(cols, [["Recording", "Yes"]])).toThrow(/Recording/);
     expect(() => columnModel(cols, [["Recording", "Yes", "No", "x"]])).toThrow(/3/);
+  });
+});
+
+describe("statusText", () => {
+  it("names none, one, two and three or more products", () => {
+    expect(statusText([])).toBe("Showing ");
+    expect(statusText(["polyemesis"])).toBe("Showing polyemesis");
+    expect(statusText(["polyemesis", "Restreamer"])).toBe("Showing polyemesis and Restreamer");
+    expect(statusText(["polyemesis", "Restreamer", "restream.io"])).toBe(
+      "Showing polyemesis, Restreamer and restream.io",
+    );
   });
 });

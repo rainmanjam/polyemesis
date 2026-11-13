@@ -409,7 +409,7 @@
   .chooser-opt input {
     width: 1.125rem;
     height: 1.125rem;
-    accent-color: var(--color-accent);
+    accent-color: var(--color-fg);
   }
   .chooser-opt input:disabled + span { color: var(--color-muted); }
   .chooser-opt input:focus-visible {

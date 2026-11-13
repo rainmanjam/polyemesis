@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it } from "vitest";
-import { initChooser, statusText } from "./chooser";
+import { initChooser } from "./chooser";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -24,10 +24,10 @@ const table = (id: string) => `
 function page(tables = 1) {
   document.body.innerHTML = `
     <fieldset data-chooser>
-      <input type="checkbox" data-chooser-col="p" data-name="polyemesis" checked disabled>
+      <input type="checkbox" data-chooser-col="p" data-name="polyemesis" data-poly checked disabled>
       <input type="checkbox" data-chooser-col="a" data-name="Restreamer" checked>
       <input type="checkbox" data-chooser-col="b" data-name="restream.io" checked>
-      <span role="status"></span>
+      <span role="status">Showing polyemesis, Restreamer and restream.io</span>
     </fieldset>
     ${Array.from({ length: tables }, (_, i) => table(`t${i}`)).join("")}`;
   const root = document.querySelector<HTMLElement>("[data-chooser]")!;
@@ -38,23 +38,41 @@ function page(tables = 1) {
   return { root, box, hiddenIn, click, status: () => root.querySelector("[role=status]")!.textContent };
 }
 
-describe("statusText", () => {
-  it("names one, two and three or more products", () => {
-    expect(statusText([])).toBe("Showing ");
-    expect(statusText(["polyemesis"])).toBe("Showing polyemesis");
-    expect(statusText(["polyemesis", "Restreamer"])).toBe("Showing polyemesis and Restreamer");
-    expect(statusText(["polyemesis", "Restreamer", "restream.io"])).toBe(
-      "Showing polyemesis, Restreamer and restream.io",
-    );
-  });
-});
-
 describe("initChooser", () => {
   it("shows the full state on start", () => {
     const p = page();
     initChooser(p.root);
     expect(p.status()).toBe("Showing polyemesis, Restreamer and restream.io");
     expect(document.querySelector(".cmp")!.classList.contains("narrow")).toBe(false);
+  });
+
+  it("leaves the status text node untouched when the wording would not change", () => {
+    const p = page();
+    const node = p.root.querySelector("[role=status]")!.firstChild;
+    initChooser(p.root);
+    expect(p.root.querySelector("[role=status]")!.firstChild).toBe(node);
+    p.click("b");
+    expect(p.status()).toBe("Showing polyemesis and Restreamer");
+  });
+
+  it("matches columns by key even when the key holds quotes and brackets", () => {
+    const p = page();
+    document.querySelector("th[data-col=b]")!.setAttribute("data-col", 'a"]b');
+    const box = p.box("b");
+    box.setAttribute("data-chooser-col", 'a"]b');
+    initChooser(p.root);
+    expect(() => box.click()).not.toThrow();
+    expect(document.querySelector<HTMLElement>('th[data-col="a\\"]b"]')!.hidden).toBe(true);
+    expect(p.hiddenIn(document, "a")).toEqual([false, false]);
+  });
+
+  it("never hides the polyemesis column, even if its box is unchecked", () => {
+    const p = page();
+    initChooser(p.root);
+    p.box("p").checked = false;
+    p.click("b");
+    expect(p.hiddenIn(document, "p")).toEqual([false, false]);
+    expect(p.hiddenIn(document, "b")).toEqual([true, true]);
   });
 
   it("hides every cell and header of an unchecked column and no other", () => {

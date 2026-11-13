@@ -5,7 +5,7 @@
  * build (which reads cell text) still sees a bare "Yes" as "yes". The chooser
  * fieldset renders hidden: script un-hides it, and without script every
  * column shows. */
-import { columnModel, type Col } from "../../lib/compare-table";
+import { columnModel, statusText, type Col } from "../../lib/compare-table";
 
 interface Props {
   caption: string;
@@ -18,7 +18,6 @@ interface Props {
 
 const { caption, firstHeader, cols, rows, chooser = false, legend = false } = Astro.props;
 const model = columnModel(cols, rows);
-const others = cols.filter((c) => !c.poly);
 ---
 
 {
@@ -31,6 +30,7 @@ const others = cols.filter((c) => !c.poly);
             type="checkbox"
             data-chooser-col={c.key}
             data-name={c.name}
+            data-poly={c.poly ? "" : undefined}
             checked
             disabled={c.poly}
           />
@@ -38,7 +38,7 @@ const others = cols.filter((c) => !c.poly);
         </label>
       ))}
       <span class="chooser-status" role="status" aria-live="polite">
-        Showing {cols.map((c) => c.name).join(", ")}
+        {statusText(cols.map((c) => c.name))}
       </span>
     </fieldset>
   )
