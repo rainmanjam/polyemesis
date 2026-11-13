@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { DESTS, GAIN_MAX, GAIN_MIN, GAIN_STEP, HOLD_MS, KEYS, LOOP, REST, REST_LOG, START, createStore, dialDesc, keyDesc, step, takeOver, type Action, type DeckState } from "./state";
+import { DESTS, GAIN_MAX, GAIN_MIN, GAIN_STEP, HOLD_MS, KEYS, LOOP, REST, REST_LOG, START, createStore, dialDesc, logFor, keyDesc, step, takeOver, type Action, type DeckState } from "./state";
 
 const off = (): DeckState => ({ dests: ["off", "off", "off", "off", "off"], gain: [0, 0], muted: [false, false], held: null, viewers: 0 });
 
@@ -228,5 +228,17 @@ describe("the gain dial's range", () => {
     expect(num("DB_STEP")).toBe(GAIN_STEP);
     expect(num("DB_MIN")).toBe(GAIN_MIN);
     expect(num("DB_MAX")).toBe(GAIN_MAX);
+  });
+});
+
+describe("logFor release", () => {
+  it("a key let go before its hold completes is logged as released early, and a release with nothing held is not logged", () => {
+    const held = step(REST, { type: "hold", key: "preset" });
+    const entry = logFor(held, { type: "release" }, step(held, { type: "release" }));
+    expect(entry).toMatchObject({ verb: "hold", what: "Routing preset", audio: true });
+    expect(entry?.res).toMatch(/released early, nothing changed/);
+    const stop = step(REST, { type: "hold", key: "stopall" });
+    expect(logFor(stop, { type: "release" }, step(stop, { type: "release" }))).toMatchObject({ what: "Stop all", audio: false });
+    expect(logFor(REST, { type: "release" }, REST)).toBeNull();
   });
 });

@@ -132,4 +132,20 @@ describe("initCalc", () => {
       expect(dests.value).toBe(shown);
     }
   });
+
+  it("the disposer detaches every listener: after it, moving a slider or pressing a stepper changes nothing", () => {
+    const root = mount();
+    const dispose = initCalc(root, gate);
+    const before = text(root, "egress");
+    dispose();
+    const video = root.querySelector<HTMLInputElement>('[data-calc-in="video"]')!;
+    video.value = "20000";
+    video.dispatchEvent(new Event("input", { bubbles: true }));
+    const dests = root.querySelector<HTMLInputElement>('[data-calc-in="dests"]')!;
+    root.querySelector<HTMLButtonElement>('[data-calc-step="dests"][data-dir="1"]')!.click();
+    video.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(dests.value).toBe("2");
+    expect(text(root, "egress")).toBe(before);
+    expect(root.querySelector("[data-calc-live]")!.textContent).toBe("");
+  });
 });

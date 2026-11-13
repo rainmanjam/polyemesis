@@ -47,7 +47,7 @@ export function clockText(seconds: number): string {
 
 export function heroModel(key: CaseKey): HeroModel {
   const c = CASES[key];
-  const mixes = new Set(c.dests.map((d: { tracks: string[] }) => [...d.tracks].sort().join("|")));
+  const mixes = new Set(c.dests.map((d: { tracks: string[] }) => [...d.tracks].sort((a, b) => a.localeCompare(b)).join("|")));
   return {
     flow: `1 stream in → 1 video + ${c.tracks.length} audio tracks → ${c.dests.length} destinations`,
     header: { destinations: c.dests.length, mixes: mixes.size },

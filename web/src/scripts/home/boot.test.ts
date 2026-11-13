@@ -24,7 +24,7 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("./motion");
   vi.doUnmock("./hero");
-  vi.doUnmock("./how-steps");
+  for (const m of ["how-steps", "matrix", "panels", "tour", "deck/index", "calc-mini", "install", "journey"]) vi.doUnmock(`./${m}`);
   document.body.innerHTML = "";
 });
 
@@ -171,5 +171,38 @@ describe("boot", () => {
     await vi.waitFor(() => expect(initHowSteps).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(errSpy).toHaveBeenCalledTimes(1));
     expect(String(errSpy.mock.calls[0][0])).toContain("[data-hero]");
+  });
+
+  it("starts every section of the page from its own root, with the one shared gate", async () => {
+    stubMatchMedia();
+    const sections = {
+      "[data-hero]": ["./hero", "initHero"],
+      "[data-how]": ["./how-steps", "initHowSteps"],
+      "[data-matrix]": ["./matrix", "initMatrix"],
+      "[data-panels]": ["./panels", "initPanels"],
+      "[data-tour]": ["./tour", "initTour"],
+      "[data-deck]": ["./deck/index", "initDeck"],
+      "[data-calc]": ["./calc-mini", "initCalc"],
+      "[data-install]": ["./install", "initInstall"],
+      "[data-journey]": ["./journey", "initJourney"],
+    } as const;
+    const inits = new Map<string, ReturnType<typeof vi.fn>>();
+    for (const [selector, [path, name]] of Object.entries(sections)) {
+      const fn = vi.fn();
+      inits.set(selector, fn);
+      vi.doMock(path, () => ({ [name]: fn }));
+    }
+    const { boot } = await import("./boot");
+    document.body.innerHTML = Object.keys(sections)
+      .map((sel) => `<section ${sel.slice(1, -1)}></section>`)
+      .join("");
+    const gate = boot(document)!;
+    await vi.waitFor(() => {
+      for (const fn of inits.values()) expect(fn).toHaveBeenCalledTimes(1);
+    });
+    for (const [selector, fn] of inits) {
+      expect(fn.mock.calls[0][0]).toBe(document.querySelector(selector));
+      expect(fn.mock.calls[0][1]).toBe(gate);
+    }
   });
 });

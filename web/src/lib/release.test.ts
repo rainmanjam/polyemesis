@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { latestRelease, parseLatestRelease } from "./release";
 
@@ -29,5 +29,14 @@ describe("latestRelease", () => {
     const release = latestRelease();
     expect(release?.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(release?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("is null, not a throw, when the changelog cannot be read (the build must not fail on a missing file)", () => {
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue("/nonexistent/web");
+    try {
+      expect(latestRelease()).toBeNull();
+    } finally {
+      cwd.mockRestore();
+    }
   });
 });
