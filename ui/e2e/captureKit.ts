@@ -1,5 +1,16 @@
 import { expect } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
+
+import {
+  destinationsSettled,
+  loudnessRowsFromFeed,
+  parseSecretsFile,
+  progressFromStatus,
+  shootProblems,
+  type SecretEntry,
+} from "../src/lib/captureGuards";
+import { allowedFailedWords } from "./shotManifest";
 
 /* The capture harness's shared machinery, used by every media-capture spec.
  *
@@ -21,6 +32,81 @@ import { mkdirSync } from "node:fs";
  * this through. */
 export const OUT = process.env.SHOT_DIR ?? "../docs/media";
 mkdirSync(OUT, { recursive: true });
+
+/** Which scene this run photographs: "full" (the whole demo seed) or "sports"
+ *  (one programme, five live destinations). docs/media/shots.json says which
+ *  scene owns which shot. */
+export const SCENE: "full" | "sports" = process.env.SHOT_SCENE === "sports" ? "sports" : "full";
+
+/* THE REFUSALS. The decisions are in ui/src/lib/captureGuards.ts, where vitest
+ * measures them; what is here only reads the page, the API and the secrets
+ * file and hands the result over. */
+
+let secretEntries: SecretEntry[] | undefined;
+
+/** The rig's secrets (`kind<TAB>value` per line), read once from the file named
+ *  by SHOT_SECRETS_FILE. The sports scene refuses to run without it: a scene
+ *  with a password on its sign-in page and no list of what to look for would
+ *  pass every shot. */
+function secrets(): SecretEntry[] {
+  if (secretEntries) return secretEntries;
+  const file = process.env.SHOT_SECRETS_FILE;
+  if (!file) {
+    if (SCENE === "sports") throw new Error("SHOT_SECRETS_FILE is required for the sports scene");
+    return (secretEntries = []);
+  }
+  return (secretEntries = parseSecretsFile(readFileSync(file, "utf8")));
+}
+
+/** Throws unless the page, as it is NOW, may be photographed as `file`: dark
+ *  theme, no secret legible, no failed-state word the shot does not declare.
+ *  The message names the file and the kinds or words, never a value. */
+export async function assertShootable(page: import("@playwright/test").Page, file: string) {
+  const entries = secrets();
+  const facts = await page.evaluate(() => ({
+    theme: document.documentElement.getAttribute("data-theme"),
+    visibleText: [
+      document.body.innerText,
+      ...Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type=password]), textarea")).map(
+        (el) => el.value,
+      ),
+    ].join("\n"),
+  }));
+  const problems = shootProblems({ ...facts, secrets: entries, allow: allowedFailedWords(file) });
+  if (problems.length > 0) throw new Error(`${file}: refusing to photograph this page: ${problems.join("; ")}`);
+}
+
+/** A screenshot into OUT, after assertShootable. For the shots that are not
+ *  taken through shoot() because they have no placeholder to wait out. */
+export async function snap(
+  page: import("@playwright/test").Page,
+  file: string,
+  opts: { clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean } = {},
+) {
+  await assertShootable(page, file);
+  await page.screenshot({ path: `${OUT}/${file}`, ...opts });
+}
+
+/** Blocks until every enabled destination has run for minUptimeSec at a steady
+ *  speed with nothing dropped and its loudness is integrated and passing. A
+ *  shot taken earlier shows 0.84x in amber and no integrated loudness. Polls
+ *  GET /api/v1/status and GET /api/v1/loudness every 2 s for up to 120 s. */
+export async function waitSettled(page: import("@playwright/test").Page, minUptimeSec = 30) {
+  const deadline = Date.now() + 120_000;
+  let why = "never polled";
+  for (;;) {
+    const [status, loudness] = await Promise.all([
+      page.request.get("/api/v1/status").then((r) => r.json()),
+      page.request.get("/api/v1/loudness").then((r) => r.json()),
+    ]);
+    const verdict = destinationsSettled(progressFromStatus(status), loudnessRowsFromFeed(loudness), minUptimeSec);
+    if (verdict.ok) return;
+    why = verdict.why;
+    if (Date.now() >= deadline) break;
+    await page.waitForTimeout(2000);
+  }
+  throw new Error(`destinations did not settle within 120 s: ${why}`);
+}
 
 /* WAITING FOR REAL STATE, EXPRESSED AS THE ABSENCE OF THE EMPTY STATE.
  *
@@ -173,12 +259,18 @@ export async function shoot(
     // question about THIS instant, and waiting for it would reopen the gap.
     if (await present()) continue;
 
+    // Light, a legible secret or a failure on screen will not mend by waiting:
+    // thrown, not retried.
+    await assertShootable(page, basename(path));
     await page.screenshot({ path, ...shotOpts });
 
     // And still true after the shutter. A screenshot is not instantaneous, and
     // the frame that matters is the one on disk.
     const broke = await present();
-    if (!broke) return;
+    if (!broke) {
+      await assertShootable(page, basename(path));
+      return;
+    }
     console.warn(`re-shooting ${path}: "${broke}" reappeared during the capture`);
   }
   throw new Error(
