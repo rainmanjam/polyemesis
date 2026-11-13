@@ -11,7 +11,18 @@ export interface DocHeading {
 }
 
 const HEADING = /^ {0,3}(#{2,3})[ \t]+(.*?)[ \t]*$/;
-const HTML_BLOCK_OPEN = /^ {0,3}<\/?[a-zA-Z]/;
+// CommonMark's block-level HTML start conditions: the type 6 tag names (opening
+// or closing), plus <pre, <script, <style and comments. An inline tag such as
+// <kbd> or <a> at the start of a line is a paragraph, not a block.
+const BLOCK_TAGS =
+  "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|" +
+  "fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|" +
+  "menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|" +
+  "track|ul";
+const HTML_BLOCK_OPEN = new RegExp(
+  `^ {0,3}(?:<!--|<(?:pre|script|style)(?=[\\s>]|$)|</?(?:${BLOCK_TAGS})(?=[\\s>]|/>|$))`,
+  "i",
+);
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
 
 const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };

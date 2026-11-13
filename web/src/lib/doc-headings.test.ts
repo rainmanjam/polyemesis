@@ -97,6 +97,18 @@ describe("extractHeadings", () => {
     expect(extractHeadings("<div>\n## inside\n\n## after\n").map((h) => h.text)).toEqual(["after"]);
   });
 
+  it("does not mistake an inline tag at the start of a line for an HTML block", () => {
+    expect(extractHeadings("<kbd>Ctrl</kbd> opens it\n## Real heading\n").map((h) => h.text)).toEqual(["Real heading"]);
+    expect(extractHeadings('<a href="x">link</a> text\n### Also real\n').map((h) => h.text)).toEqual(["Also real"]);
+  });
+
+  it("skips block-level HTML: type 6 tags, pre, script, style and comments", () => {
+    expect(extractHeadings("<div>\n## inside\n</div>\n\n## After\n").map((h) => h.text)).toEqual(["After"]);
+    for (const open of ["</div>", "<pre>", "<script>", "<style>", "<!-- note", "<H2>", "<hr/>", "<table>"]) {
+      expect(extractHeadings(`${open}\n## inside\n\n## after\n`).map((h) => h.text)).toEqual(["after"]);
+    }
+  });
+
   it("reads the real docs/AUDIO-ROUTING.md", () => {
     const md = readFileSync(new URL("../../../docs/AUDIO-ROUTING.md", import.meta.url), "utf8");
     const headings = extractHeadings(md);
