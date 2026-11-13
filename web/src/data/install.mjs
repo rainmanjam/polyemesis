@@ -19,3 +19,16 @@ export const INSTALL_SCRIPT = `curl --proto '=https' --proto-redir '=https' --tl
   https://raw.githubusercontent.com/rainmanjam/polyemesis/main/scripts/install.sh
 less install.sh          # it runs as root; read it first
 sudo bash install.sh`;
+
+/** README.md, "Try it": the build from a clone, comment included. `make build`
+ *  is what embeds the UI; `go build` alone gives a binary that serves nothing. */
+export const BUILD_FROM_CLONE = `${CLONE}
+make build            # builds the UI, embeds it, produces ./polyemesis
+./polyemesis -data ./data`;
+
+/** docs/INSTALL.md, "Verifying the install": the two lines that make the check. */
+export const HEALTH_CHECK = `export POLYEMESIS_URL=https://localhost      # from the table above
+curl -fsSk "\${POLYEMESIS_URL:?set it from the table above}/api/v1/health"`;
+
+/** docs/INSTALL.md, "The first-run setup code", the `docker run` / compose row. */
+export const SETUP_CODE = "docker logs polyemesis\ndocker exec polyemesis cat /data/setup-code";

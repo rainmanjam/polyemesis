@@ -678,6 +678,226 @@
 
   /* ===== install ===== */
 
+  .inst-acts { display: flex; flex-wrap: wrap; gap: 12px; }
+  .inst { scroll-margin-top: var(--anchor-offset); }
+  .inst + .inst { margin-top: 72px; }
+  .inst h2 {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 1rem + 2.4vw, 2.5rem);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .inst-sub {
+    margin: 36px 0 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .inst code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    color: var(--color-fg);
+  }
+  .inst-note {
+    margin-top: 12px;
+    max-width: 44rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--color-muted);
+  }
+  .inst-note a,
+  .inst-steps p a {
+    color: var(--color-fg);
+    text-decoration: underline;
+    text-decoration-color: var(--color-line-strong);
+    text-underline-offset: 3px;
+  }
+  .inst-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 28px;
+    margin-top: 28px;
+  }
+
+  /* Methods. With script the tablist shows and one panel at a time; without,
+     every panel stands under its own h3. */
+  .inst-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 28px 0 20px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .inst-tabs[hidden] { display: none; }
+  .inst-tab {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 12px 18px;
+    margin-bottom: -1px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    font: inherit;
+    font-weight: 500;
+    color: var(--color-muted);
+    cursor: pointer;
+  }
+  .inst-tab i {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-style: normal;
+  }
+  .inst-tab:hover { color: var(--color-fg); }
+  .inst-tab[aria-selected="true"] {
+    color: var(--color-fg);
+    border-bottom-color: var(--color-accent);
+  }
+  .inst-tab:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: -2px;
+  }
+  .inst-panel { margin-top: 36px; min-width: 0; }
+  .inst-panel[hidden] { display: none; }
+  .inst-panel-h {
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  [data-install][data-ready] .inst-panel { margin-top: 0; }
+  [data-install][data-ready] .inst-panel-h { display: none; }
+  .facts { margin-top: 16px; }
+  .facts > div {
+    display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+    gap: 12px;
+    padding-block: 10px;
+    border-top: 1px solid var(--color-line);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--color-muted);
+  }
+  .facts > div:last-child { border-bottom: 1px solid var(--color-line); }
+  .facts dt {
+    padding-top: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  /* Requirements: name, value, note. */
+  .inst-reqs { margin-top: 28px; }
+  .inst-req {
+    display: grid;
+    gap: 4px 24px;
+  }
+  .inst-req h3 { font-weight: 600; color: var(--color-fg); }
+  .inst-req .v { color: var(--color-fg); }
+  .inst-req .n { font-size: 0.9375rem; line-height: 1.5; color: var(--color-muted); }
+  @media (min-width: 900px) {
+    .inst-req { grid-template-columns: 11rem minmax(0, 14rem) minmax(0, 1fr); }
+  }
+  .inst-ports th[scope="row"] { font-family: var(--font-mono); }
+  /* Phone: tighten the pinned Port column and give the text columns room, so
+     "What it is" sits beside Port and "When" wraps at a readable width. */
+  @media (max-width: 48rem) {
+    .cmp.inst-ports { min-width: 34rem; }
+    .cmp.inst-ports :is(thead th, tbody th):first-child { width: 4.5rem; min-width: 4.5rem; }
+    .inst-ports th,
+    .inst-ports td { padding-inline: 10px; }
+    .inst-ports td:nth-child(2) { width: 3.5rem; }
+    .inst-ports td:nth-child(3) { width: 8rem; }
+    .inst-ports td:nth-child(4) { min-width: 14rem; }
+  }
+  .inst-ports td:nth-child(2) { font-family: var(--font-mono); font-size: 0.875rem; }
+
+  /* The first stream: a real sequence, numbered. */
+  .inst-steps {
+    list-style: none;
+    margin: 32px 0 0;
+    padding: 0;
+    counter-reset: inst;
+  }
+  .inst-steps > li {
+    display: grid;
+    grid-template-columns: 2rem minmax(0, 1fr);
+    padding: 24px 0;
+    border-top: 1px solid var(--color-line);
+    counter-increment: inst;
+  }
+  .inst-steps > li:last-child { border-bottom: 1px solid var(--color-line); }
+  .inst-steps > li::before {
+    content: counter(inst);
+    grid-row: 1 / span 6;
+    padding-top: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    color: var(--color-accent);
+  }
+  .inst-steps > li > * { grid-column: 2; min-width: 0; }
+  .inst-steps h3 { font-weight: 600; color: var(--color-fg); }
+  .inst-steps li > p:first-of-type {
+    margin-top: 6px;
+    max-width: 44rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--color-muted);
+  }
+  .inst-steps .code,
+  .inst-steps .frame { margin-top: 16px; }
+
+  .inst-seen {
+    list-style: disc;
+    margin: 0 0 28px;
+    padding-left: 1.25rem;
+    max-width: 44rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--color-muted);
+  }
+  .inst-seen li + li { margin-top: 8px; }
+
+  /* Problems and upkeep: a heading, a sentence, a link. */
+  .inst-prob {
+    display: grid;
+    gap: 6px;
+    justify-items: start;
+  }
+  .inst-prob h3,
+  .inst-prob h4 { font-weight: 600; color: var(--color-fg); }
+  .inst-prob p {
+    max-width: 44rem;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    color: var(--color-muted);
+  }
+
+  .inst-next { margin-top: 28px; }
+  .inst-next a {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 24px;
+    color: var(--color-fg);
+  }
+  .inst-next a b { font-weight: 500; }
+  .inst-next a span { font-size: 0.9375rem; color: var(--color-muted); }
+  .inst-next a:hover b,
+  .inst-next a:focus-visible b { color: var(--color-accent); }
+  .inst-next a:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+
 
 
 
