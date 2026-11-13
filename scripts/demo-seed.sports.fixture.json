@@ -1,0 +1,326 @@
+{
+  "scene": "sports",
+  "settings": {
+    "recording": {
+      "enabled": false,
+      "segmentSeconds": 600,
+      "maxGb": 500,
+      "maxAgeHours": 8760,
+      "minFreeGb": 1
+    },
+    "preview": {
+      "enabled": true
+    },
+    "playout": {
+      "enabled": true
+    }
+  },
+  "sources": [
+    {
+      "name": "Match feed — Manchester",
+      "video": {
+        "kbps": 9000
+      },
+      "audio": [
+        {
+          "label": "English",
+          "role": "commentary",
+          "language": "en"
+        },
+        {
+          "label": "Español",
+          "role": "commentary",
+          "language": "es"
+        },
+        {
+          "label": "Português",
+          "role": "commentary",
+          "language": "pt"
+        },
+        {
+          "label": "Français",
+          "role": "commentary",
+          "language": "fr"
+        },
+        {
+          "label": "Arabic",
+          "role": "commentary",
+          "language": "ar"
+        },
+        {
+          "label": "Crowd",
+          "role": "other"
+        }
+      ],
+      "renditions": [],
+      "destinations": [
+        {
+          "name": "YouTube · English",
+          "kind": "rtmp",
+          "platform": "youtube",
+          "url": "rtmp://polyemesis-demo-recv:1935/live",
+          "streamKey": "demo-local-en-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              {
+                "track": 0,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 1,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 2,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 3,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 4,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 5,
+                "enabled": true,
+                "gain": 1.0
+              }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "excludeRoles": [
+              "music"
+            ],
+            "loudness": {
+              "targetLufs": -14,
+              "truePeakDb": -1
+            }
+          }
+        },
+        {
+          "name": "YouTube · Español",
+          "kind": "rtmp",
+          "platform": "youtube",
+          "url": "rtmp://polyemesis-demo-recv:1935/live",
+          "streamKey": "demo-local-es-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              {
+                "track": 0,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 1,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 2,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 3,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 4,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 5,
+                "enabled": true,
+                "gain": 1.0
+              }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "excludeRoles": [
+              "music"
+            ],
+            "loudness": {
+              "targetLufs": -14,
+              "truePeakDb": -1
+            }
+          }
+        },
+        {
+          "name": "YouTube · Português",
+          "kind": "rtmp",
+          "platform": "youtube",
+          "url": "rtmp://polyemesis-demo-recv:1935/live",
+          "streamKey": "demo-local-pt-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              {
+                "track": 0,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 1,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 2,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 3,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 4,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 5,
+                "enabled": true,
+                "gain": 1.0
+              }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "excludeRoles": [
+              "music"
+            ],
+            "loudness": {
+              "targetLufs": -14,
+              "truePeakDb": -1
+            }
+          }
+        },
+        {
+          "name": "YouTube · Français",
+          "kind": "rtmp",
+          "platform": "youtube",
+          "url": "rtmp://polyemesis-demo-recv:1935/live",
+          "streamKey": "demo-local-fr-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              {
+                "track": 0,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 1,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 2,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 3,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 4,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 5,
+                "enabled": true,
+                "gain": 1.0
+              }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "excludeRoles": [
+              "music"
+            ],
+            "loudness": {
+              "targetLufs": -14,
+              "truePeakDb": -1
+            }
+          }
+        },
+        {
+          "name": "YouTube · Arabic",
+          "kind": "rtmp",
+          "platform": "youtube",
+          "url": "rtmp://polyemesis-demo-recv:1935/live",
+          "streamKey": "demo-local-ar-not-a-real-key",
+          "enabled": false,
+          "audioBitrate": 160,
+          "profile": {
+            "mode": "simple",
+            "tracks": [
+              {
+                "track": 0,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 1,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 2,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 3,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 4,
+                "enabled": true,
+                "gain": 1.0
+              },
+              {
+                "track": 5,
+                "enabled": true,
+                "gain": 1.0
+              }
+            ],
+            "normalize": "loudnorm",
+            "sampleRate": 48000,
+            "excludeRoles": [
+              "music"
+            ],
+            "loudness": {
+              "targetLufs": -14,
+              "truePeakDb": -1
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "recordings": []
+}
