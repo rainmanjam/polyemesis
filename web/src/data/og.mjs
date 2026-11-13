@@ -62,8 +62,8 @@ const FIXED = [
   {
     path: "/features",
     eyebrow: "FEATURES",
-    title: "Every destination, its own mix.",
-    accent: "mix",
+    title: "A server built around one feature.",
+    accent: "feature",
     table: sportsTable(),
     visual: "table",
   },
@@ -150,8 +150,8 @@ const FIXED = [
   {
     path: "/vs/restreamer",
     eyebrow: "COMPARED",
-    title: "A different mix per destination, on your own server.",
-    accent: "mix",
+    title: "Two Restreams. Neither mixes per platform.",
+    accent: "Neither",
     sub: "Self-hosted and MIT licensed, with audio mixed separately for every platform.",
     visual: "none",
   },
