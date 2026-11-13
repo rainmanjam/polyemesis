@@ -66,6 +66,37 @@ describe("extractHeadings", () => {
     expect(extractHeadings("")).toEqual([]);
   });
 
+  it("decodes the entities a heading can carry, so the slug matches the page", () => {
+    const [a, b, c, d] = extractHeadings(
+      "## Tom &amp; Jerry\n## &lt;b&gt; &quot;x&quot; &apos;y&apos;\n## It&#39;s &#x41;&#65;\n## &nbsp; &bogus;\n",
+    );
+    expect(a).toEqual({ depth: 2, text: "Tom & Jerry", slug: "tom--jerry" });
+    expect(b.text).toBe('<b> "x" \'y\'');
+    expect(c.text).toBe("It's AA");
+    expect(d.text).toBe("&nbsp; &bogus;");
+  });
+
+  it("reads only top-level ATX headings: setext, block quote, list and HTML block headings give no entry", () => {
+    const md = [
+      "Setext two",
+      "----------",
+      "",
+      "Setext one",
+      "==========",
+      "",
+      "> ## In a quote",
+      "",
+      "- ## In a list",
+      "",
+      "<div>",
+      "## In an html block?",
+      "</div>",
+    ].join("\n");
+    expect(extractHeadings(md).map((h) => h.text)).toEqual([]);
+    // ...and the block ends at the blank line, so a heading after it is read.
+    expect(extractHeadings("<div>\n## inside\n\n## after\n").map((h) => h.text)).toEqual(["after"]);
+  });
+
   it("reads the real docs/AUDIO-ROUTING.md", () => {
     const md = readFileSync(new URL("../../../docs/AUDIO-ROUTING.md", import.meta.url), "utf8");
     const headings = extractHeadings(md);

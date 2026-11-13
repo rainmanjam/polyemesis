@@ -11,11 +11,22 @@ export interface DocHeading {
 }
 
 const HEADING = /^ {0,3}(#{2,3})[ \t]+(.*?)[ \t]*$/;
+const HTML_BLOCK_OPEN = /^ {0,3}<\/?[a-zA-Z]/;
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** Decodes the entities a heading can carry: &amp; &lt; &gt; &quot; &apos;, &#39;, &#x27;. */
+function decodeEntities(text: string): string {
+  return text.replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([a-z]+));/g, (whole, dec, hex, name) => {
+    if (name) return NAMED_ENTITIES[name] ?? whole;
+    return String.fromCodePoint(dec ? Number(dec) : parseInt(hex, 16));
+  });
+}
 
 /** Reduces inline markdown to the text a reader sees. */
 function plainText(raw: string): string {
-  return raw
+  return decodeEntities(raw)
     .replace(/[ \t]+#+$/, "") // closing run of #
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // links and images
     .replace(/`+([^`]*)`+/g, "$1") // inline code
@@ -24,13 +35,25 @@ function plainText(raw: string): string {
     .trim();
 }
 
-/** ATX `##` and `###` headings outside fenced code, in document order. */
+/** ATX `##` and `###` headings outside fenced code, in document order.
+ *
+ *  THE LIMIT IS DELIBERATE: only top-level ATX headings are read. Setext
+ *  headings (underlined with === or ---), headings inside block quotes or
+ *  lists, and headings inside HTML blocks are not, although the page's ids
+ *  cover them. A build check that the list equals the article's headings is
+ *  what catches a document that starts using one. */
 export function extractHeadings(markdown: string): DocHeading[] {
   const slug = uniqueSlugger();
   const headings: DocHeading[] = [];
   let fence: string | null = null;
+  let inHtmlBlock = false;
 
   for (const line of markdown.split(/\r?\n/)) {
+    if (inHtmlBlock) {
+      // An HTML block runs to the next blank line; markdown inside it is text.
+      inHtmlBlock = line.trim() !== "";
+      continue;
+    }
     const open = FENCE_OPEN.exec(line);
     if (fence) {
       // A fence closes on the same marker, at least as long, with nothing after.
@@ -41,6 +64,10 @@ export function extractHeadings(markdown: string): DocHeading[] {
     }
     if (open) {
       fence = open[1];
+      continue;
+    }
+    if (HTML_BLOCK_OPEN.test(line)) {
+      inHtmlBlock = true;
       continue;
     }
     const match = HEADING.exec(line);

@@ -20,25 +20,25 @@ export function slugify(text) {
     .replace(/ /g, "-");
 }
 
-/** A slugger for ONE document. The second heading that slugs to `overview`
- *  gets `overview-1`, the third `overview-2`; a suffixed id is also skipped when
- *  a heading really has it, so no two headings of a document share an id.
+/** A slugger for ONE document, with github-slugger's algorithm: the second
+ *  heading that slugs to `overview` gets `overview-1`, the third `overview-2`,
+ *  and a suffixed result is itself recorded, so headings `a`, `a`, `a-1` give
+ *  `a`, `a-1`, `a-1-1` and no two headings of a document share an id.
  *  @returns {(text: string) => string} */
 export function uniqueSlugger() {
   /** @type {Map<string, number>} */
-  const repeats = new Map();
-  /** @type {Set<string>} */
-  const taken = new Set();
+  const occurrences = new Map();
   return (text) => {
     const base = slugify(text);
-    let n = repeats.get(base) ?? 0;
-    let slug = n === 0 ? base : `${base}-${n}`;
-    while (n > 0 && taken.has(slug)) {
-      n++;
-      slug = `${base}-${n}`;
+    let result = base;
+    while (occurrences.has(result)) {
+      // `base` is in the map whenever the loop runs: the first pass is only
+      // entered with result === base.
+      const n = /** @type {number} */ (occurrences.get(base)) + 1;
+      occurrences.set(base, n);
+      result = `${base}-${n}`;
     }
-    repeats.set(base, n + 1);
-    taken.add(slug);
-    return slug;
+    occurrences.set(result, 0);
+    return result;
   };
 }

@@ -45,12 +45,11 @@ describe("uniqueSlugger", () => {
     expect(slug("Notes")).toBe("notes-1");
   });
 
-  it("does not hand out a slug a heading really has", () => {
-    // "Notes 1" really exists, so the second "Notes" must not collide with it.
+  it("never repeats an id a heading really has (github-slugger)", () => {
     const slug = uniqueSlugger();
-    expect(slug("Notes")).toBe("notes");
-    expect(slug("Notes-1")).toBe("notes-1");
-    expect(slug("Notes")).toBe("notes-2");
+    expect([slug("a"), slug("a"), slug("a-1")]).toEqual(["a", "a-1", "a-1-1"]);
+    const notes = uniqueSlugger();
+    expect([notes("Notes"), notes("Notes-1"), notes("Notes")]).toEqual(["notes", "notes-1", "notes-2"]);
   });
 
   it("starts clean for every slugger", () => {
