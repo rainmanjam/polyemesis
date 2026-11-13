@@ -1560,8 +1560,12 @@ const cutsFor = (route, sentences, built) => {
  * everywhere; maturity is stated as the release instead (`v0.18.0, released
  * ...`). Every built page is checked, so a docs page rendered from a markdown
  * file cannot bring it back either. */
+const ONE_MAINTAINER = /\bone[\s-]+maintainer/i;
 for (const f of pages) {
-  if (/one[- ]maintainer/i.test(readFileSync(join(DIST, f), "utf8"))) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  // The phrase can be wrapped across a line break, or split by a tag or a non-breaking space, so the built text is read as well.
+  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;|&#xa0;/gi, " ");
+  if (ONE_MAINTAINER.test(html) || ONE_MAINTAINER.test(text)) {
     fail.push(`${f}: contains the phrase "one maintainer", which is removed from the whole site (docs, README and source too).`);
   }
 }

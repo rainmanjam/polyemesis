@@ -9,12 +9,12 @@ import { describe, expect, it } from "vitest";
 
 const SRC = new URL("../", import.meta.url).pathname;
 
-function filesUnder(dir: string): string[] {
+function filesUnder(dir: string, match = /\.(astro|mjs)$/): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
-    if (e.isDirectory()) out.push(...filesUnder(p));
-    else if (/\.(astro|mjs)$/.test(e.name)) out.push(p);
+    if (e.isDirectory()) out.push(...filesUnder(p, match));
+    else if (match.test(e.name)) out.push(p);
   }
   return out;
 }
@@ -28,6 +28,8 @@ const FILES = [
   join(SRC, "data/features.mjs"),
   join(SRC, "data/install-page.mjs"),
   join(SRC, "data/vs-index.mjs"),
+  ...filesUnder(join(SRC, "data/vs")),
+  ...filesUnder(join(SRC, "scripts"), /(?<!\.test)\.ts$/),
 ];
 const SOURCES = FILES.map((f) => ({ name: relative(SRC, f), text: readFileSync(f, "utf8") }));
 
@@ -39,6 +41,10 @@ describe("inner page sources", () => {
   it("reads the pages it is meant to guard", () => {
     expect(pages.length).toBeGreaterThanOrEqual(14);
     expect(SOURCES.length).toBeGreaterThanOrEqual(25);
+    const names = SOURCES.map((s) => s.name);
+    expect(names.filter((n) => /^data\/vs\/[^/]+\.mjs$/.test(n)).length).toBeGreaterThanOrEqual(5);
+    expect(names).toContain("scripts/inner.ts");
+    expect(names.some((n) => n.endsWith(".test.ts"))).toBe(false);
   });
 
   it("uses none of the banned words, says Stream Deck + with its space, and quotes no star counts", () => {

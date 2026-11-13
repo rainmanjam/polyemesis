@@ -18,24 +18,29 @@
  *                  during a scroll from the top of the page to the bottom
  *   overflow       the page is no wider than the viewport
  *   index          the in-page index shows its links (a list with scripts off, a
- *                  disclosure on a phone docs page); /404 has no index at all, no
- *                  empty rail, and its column fills the content box
- *   small-text     at 390 no text in <main> renders under 12px (SVG text at its
- *                  on-screen scale; only <sup> and <sub> are skipped)
+ *                  disclosure on a phone docs page); /404 and /calculator have no
+ *                  index at all, no empty rail, and their column fills the content box
+ *   small-text     at 390, scripts on and off, no text in <main> renders under 12px
+ *                  (SVG text at its on-screen scale; only <sup> and <sub> are skipped)
  *   install-no-js  scripts off: the four install commands sit in visible panels
  *                  and the tab list is not shown
  *   install-tabs   scripts on: one panel at a time, arrows move through the tabs
- *   chooser-no-js  scripts off: every product column, no chooser
- *   chooser-js     scripts on: unchecking a product hides its column in both
- *                  tables and the status line says so
+ *   chooser-no-js  scripts off: every product column, no chooser (/comparison, /vs/restreamer)
+ *   chooser-js     scripts on: unchecking a product hides its column in every product
+ *                  table and the status line says so
  *   failover-no-js scripts off: #failover shows the live state, no controls
- *   failover-still reduced motion: two pictures of the failover demo a second
- *                  apart are identical, and it steps by hand
- *   landing        a page opened at #section lands on it (clear of the sticky strip)
+ *   failover-still reduced motion: a MutationObserver sees no change of the demo's
+ *                  data-state or log for 4.5 s at rest, and again for 4.5 s after a
+ *                  manual step; two pictures 4.5 s apart are identical; it steps by hand
+ *   landing        a page opened at #section lands on it: clear of whatever is stuck at
+ *                  the top (the site header, the index strip), and within 200px of it,
+ *                  with scripts on and off
  *   mermaid        scripts on: every diagram renders to an svg under the policy
  *   mermaid-no-js  scripts off: the diagram's source is shown in its reserved room
  *   doc-index      scrolling a docs page moves aria-current through "On this page"
- *   measure        article lines are 62-80 characters at 1440, body text is 17px
+ *   measure        paragraph lines are 62-80 characters at 1440 (the longest direct
+ *                  child paragraph of article.doc-prose, and of a long-form page's
+ *                  sections), and doc body text is 17px
  *   task-list      a docs task list stays inside the phone's width
  *
  * NO TIMING. Every wait is on a condition with a long timeout. The fixed waits
@@ -83,22 +88,51 @@ const MIN_TEXT_PX = 12;
 const SETTLE_MS = 2500; // the page holds a section for 2 s while its layout settles (inner.ts)
 const MEASURE = { min: 62, max: 80 };
 
-const ALL_ROUTES = [
-  "/download",
-  "/features",
-  "/comparison",
-  "/vs/restreamer",
-  "/docs/install",
-  "/docs/tls",
-  "/docs/platforms",
-  "/docs/configuration",
-  "/docs/connecting-platforms",
-  "/docs/meta-app-review",
-  "/docs/audio-routing",
-  "/404",
+/* Every route, and the contexts it is measured in. A route without `in` runs in all six contexts. The extra routes
+ * run only on a phone, scripts on and off (the two states that change what is on screen at 390: a stacked tab panel,
+ * a closed disclosure, a hidden chooser), because the wall-clock budget is the sum of every visit. check-layout.mjs
+ * already measures their sideways scroll at four widths. The one long-form route measured for line length also runs
+ * at 1440 with scripts on. */
+const PHONE_ONLY = ["390 js", "390 no-js"];
+const ROUTE_SPECS = [
+  { path: "/download" },
+  { path: "/features" },
+  { path: "/comparison" },
+  { path: "/vs/restreamer" },
+  { path: "/docs/install" },
+  { path: "/docs/tls" },
+  { path: "/docs/platforms" },
+  { path: "/docs/configuration" },
+  { path: "/docs/connecting-platforms" },
+  { path: "/docs/meta-app-review" },
+  { path: "/docs/audio-routing" },
+  { path: "/docs/quickstart" },
+  { path: "/docs/api" },
+  { path: "/404" },
+  { path: "/docs", in: PHONE_ONLY },
+  { path: "/calculator", in: PHONE_ONLY },
+  { path: "/multistream", in: PHONE_ONLY },
+  { path: "/how-to-multistream-from-obs", in: PHONE_ONLY },
+  { path: "/free-restream-service", in: [...PHONE_ONLY, "1440 js"] },
+  { path: "/twitch-vod-track", in: PHONE_ONLY },
+  { path: "/vs/aitum-multistream", in: PHONE_ONLY },
+  { path: "/vs/obs-multi-rtmp", in: PHONE_ONLY },
+  { path: "/vs/streamelements", in: PHONE_ONLY },
+  { path: "/vs/streamlabs", in: PHONE_ONLY },
 ];
+const ALL_ROUTES = ROUTE_SPECS.map((r) => r.path);
 // CHECK_INNER_ROUTES=/download,/404 narrows a LOCAL run to those routes (the proofs that a check can fail use it).
 const ROUTES = process.env.CHECK_INNER_ROUTES ? process.env.CHECK_INNER_ROUTES.split(",").map((x) => x.trim()) : ALL_ROUTES;
+/** The routes visited in one context. */
+const routesFor = (c) => ROUTES.filter((r) => (ROUTE_SPECS.find((s) => s.path === r)?.in ?? [c.name]).includes(c.name));
+// Pages with no headings to index: no rail, and the column fills the content box.
+const NO_INDEX_ROUTES = ["/404", "/calculator"];
+// A page whose comparison chooser is tested, with the number of product-column tables it drives (/vs/restreamer also
+// has a pricing table, which has no product columns and is not part of the chooser).
+const CHOOSER_TABLES = { "/comparison": 2, "/vs/restreamer": 1 };
+const CHOOSER_ROUTES = Object.keys(CHOOSER_TABLES);
+// A long-form page whose paragraph measure is tested at 1440.
+const LONGFORM_ROUTE = "/free-restream-service";
 const MERMAID_ROUTES = ["/docs/install", "/docs/tls"];
 const LANDINGS = [
   ["/download", "need"],
@@ -169,18 +203,18 @@ const CHECKS = [
   { id: "console", where: () => true, run: async () => {} }, // listeners are on from the start; the scroll is in visit()
   { id: "overflow", where: () => true, run: checkOverflow },
   { id: "index", where: () => true, run: checkIndex },
-  { id: "small-text", where: (c) => c.js && !c.reduced && phone(c), run: checkSmallText },
+  { id: "small-text", where: (c) => !c.reduced && phone(c), run: checkSmallText },
   { id: "install-no-js", where: (c, r) => !c.js && r === "/download", run: checkInstallNoJs },
   { id: "install-tabs", where: (c, r) => JS(c) && r === "/download", run: checkInstallTabs },
-  { id: "chooser-no-js", where: (c, r) => !c.js && r === "/comparison", run: checkChooserNoJs },
-  { id: "chooser-js", where: (c, r) => JS(c) && r === "/comparison", run: checkChooserJs },
+  { id: "chooser-no-js", where: (c, r) => !c.js && CHOOSER_ROUTES.includes(r), run: checkChooserNoJs },
+  { id: "chooser-js", where: (c, r) => JS(c) && CHOOSER_ROUTES.includes(r), run: checkChooserJs },
   { id: "failover-no-js", where: (c, r) => !c.js && r === "/features", run: checkFailoverNoJs },
   { id: "failover-still", where: (c, r) => c.reduced && r === "/features", run: checkFailoverStill },
-  { id: "landing", where: (c, r) => c.js && !c.reduced && LANDINGS.some(([p]) => p === r), run: checkLanding },
+  { id: "landing", where: (c, r) => !c.reduced && LANDINGS.some(([p]) => p === r), run: checkLanding },
   { id: "mermaid", where: (c, r) => JS(c) && MERMAID_ROUTES.includes(r), run: checkMermaid },
   { id: "mermaid-no-js", where: (c, r) => !c.js && MERMAID_ROUTES.includes(r), run: checkMermaidNoJs },
   { id: "doc-index", where: (c, r) => c.js && !c.reduced && !phone(c) && r === "/docs/audio-routing", run: checkDocIndex },
-  { id: "measure", where: (c, r) => c.js && !c.reduced && !phone(c) && r === "/docs/audio-routing", run: checkMeasure },
+  { id: "measure", where: (c, r) => c.js && !c.reduced && !phone(c) && (r === "/docs/audio-routing" || r === LONGFORM_ROUTE), run: checkMeasure },
   { id: "task-list", where: (c, r) => c.js && !c.reduced && r === "/docs/meta-app-review", run: checkTaskList },
 ];
 const ONLY = process.env.CHECK_INNER_ONLY ? process.env.CHECK_INNER_ONLY.split(",").map((x) => x.trim()) : null;
@@ -207,7 +241,7 @@ if (process.env.CHECK_INNER_ROUTES) {
   }
 }
 const wanted = (id) => !ONLY || ONLY.includes(id);
-const EXPECTED = CHECKS.filter((k) => wanted(k.id)).flatMap((k) => CONTEXTS.flatMap((c) => ROUTES.filter((r) => k.where(c, r)).map((r) => `${k.id}|${c.name} ${r}`)));
+const EXPECTED = CHECKS.filter((k) => wanted(k.id)).flatMap((k) => CONTEXTS.flatMap((c) => routesFor(c).filter((r) => k.where(c, r)).map((r) => `${k.id}|${c.name} ${r}`)));
 
 /** Run one named check; a throw (a missing element, a timeout) is a failure of that check. */
 async function check(k, ctx) {
@@ -332,10 +366,10 @@ async function checkIndex({ page, route, where }) {
       fill,
     };
   });
-  if (route === "/404") {
-    if (m.roots || m.rails) bad("index", where, `/404 has no headings to index but renders ${m.roots} [data-index] and ${m.rails} .rail`);
-    if (!m.fill) bad("index", where, "/404 has no [data-column] inside a .wrap");
-    else if (m.fill.col < 0.9 * m.fill.box) bad("index", where, `/404's column is ${m.fill.col.toFixed(0)}px of a ${m.fill.box.toFixed(0)}px content box (under 90%)`);
+  if (NO_INDEX_ROUTES.includes(route)) {
+    if (m.roots || m.rails) bad("index", where, `${route} has no headings to index but renders ${m.roots} [data-index] and ${m.rails} .rail`);
+    if (!m.fill) bad("index", where, `${route} has no [data-column] inside a .wrap`);
+    else if (m.fill.col < 0.9 * m.fill.box) bad("index", where, `${route}'s column is ${m.fill.col.toFixed(0)}px of a ${m.fill.box.toFixed(0)}px content box (under 90%)`);
     return;
   }
   if (m.roots === 0) bad("index", where, `${route} has no [data-index]`);
@@ -445,9 +479,9 @@ async function checkInstallTabs({ page, where }) {
   }
 }
 
-async function checkChooserNoJs({ page, where }) {
+async function checkChooserNoJs({ page, route, where }) {
   const m = await page.evaluate(() => {
-    const tables = [...document.querySelectorAll("table.cmp")];
+    const tables = [...document.querySelectorAll("table.cmp")].filter((t) => t.querySelector('thead th[data-col="polyemesis"]'));
     return {
       chooser: [...document.querySelectorAll("fieldset[data-chooser]")].map((f) => f.checkVisibility()),
       tables: tables.map((t) => [...t.querySelectorAll("thead th[data-col]")].filter((th) => th.checkVisibility()).map((th) => th.dataset.col)),
@@ -455,20 +489,20 @@ async function checkChooserNoJs({ page, where }) {
   });
   if (m.chooser.length === 0) bad("chooser-no-js", where, "no fieldset[data-chooser] to test");
   if (m.chooser.some(Boolean)) bad("chooser-no-js", where, "the chooser is shown without scripts");
-  if (m.tables.length < 2) bad("chooser-no-js", where, `expected two comparison tables, found ${m.tables.length}`);
+  if (m.tables.length !== CHOOSER_TABLES[route]) bad("chooser-no-js", where, `expected ${CHOOSER_TABLES[route]} product comparison table(s), found ${m.tables.length}`);
   m.tables.forEach((cols, i) => {
     if (cols.length !== 3) bad("chooser-no-js", where, `table ${i + 1} shows ${cols.length} product columns (${cols.join(", ")}), expected 3`);
   });
 }
 
-async function checkChooserJs({ page, where }) {
+async function checkChooserJs({ page, route, where }) {
   const box = page.locator('fieldset[data-chooser] input[data-chooser-col="restream-io"]');
   await page.locator("fieldset[data-chooser]").waitFor({ state: "visible" });
   await box.uncheck();
   const read = () =>
     page.evaluate(() => {
       const cols = [...document.querySelectorAll('[data-col="restream-io"]')];
-      const tables = [...document.querySelectorAll("table.cmp")];
+      const tables = [...document.querySelectorAll("table.cmp")].filter((t) => t.querySelector('thead th[data-col="polyemesis"]'));
       return {
         cols: cols.length,
         hiddenAttr: cols.filter((e) => e.hidden).length,
@@ -479,7 +513,7 @@ async function checkChooserJs({ page, where }) {
       };
     });
   const off = await read();
-  if (off.tables < 2 || off.tablesWith !== off.tables) bad("chooser-js", where, `the restream.io column is in ${off.tablesWith} of ${off.tables} tables`);
+  if (off.tables !== CHOOSER_TABLES[route] || off.tablesWith !== off.tables) bad("chooser-js", where, `the restream.io column is in ${off.tablesWith} of ${off.tables} tables`);
   if (off.cols === 0 || off.hiddenAttr !== off.cols) bad("chooser-js", where, `unchecking restream.io set hidden on ${off.hiddenAttr} of ${off.cols} of its cells`);
   if (off.shown !== 0) bad("chooser-js", where, `${off.shown} restream.io cells are still visible`);
   if (off.status !== "Showing polyemesis and Restreamer") bad("chooser-js", where, `status line reads ${JSON.stringify(off.status)}, expected "Showing polyemesis and Restreamer"`);
@@ -512,28 +546,67 @@ async function checkFailoverNoJs({ page, where }) {
   if (m.slate !== null || m.ready !== "ready") bad("failover-no-js", where, `slate row reads on-air ${JSON.stringify(m.slate)} / ready ${JSON.stringify(m.ready)} in the live state`);
 }
 
+/* The longest stage of the demo is 3.4 s and the shortest 1.8 s, so a one-second picture window can sit inside one stage
+ * of a demo that is playing. A window longer than the whole cycle's longest stage, watched for every change of the
+ * frame's data-state and of its log, cannot. */
+const STILL_WINDOW_MS = 4500;
+
 async function checkFailoverStill({ page, where }) {
   const frame = page.locator("#failover [data-failover] [data-frame]");
   await frame.scrollIntoViewIfNeeded();
   await page.locator("#failover [data-fo-controls]").waitFor({ state: "visible" }); // the demo has started and shows its controls
   const gate = await page.evaluate(() => document.documentElement.classList.contains("motion-on"));
   if (gate) bad("failover-still", where, "html.motion-on is set under prefers-reduced-motion");
+  // Every change to the frame's data-state, its encoder line, its destinations and its log, with the time it happened.
+  await page.evaluate(() => {
+    const root = document.querySelector("#failover [data-failover]");
+    window.__fo = [];
+    const t0 = performance.now();
+    const note = (what) => window.__fo.push(`${what} at ${Math.round(performance.now() - t0)}ms`);
+    new MutationObserver((rs) => {
+      for (const r of rs) {
+        if (r.type === "attributes") note(`${r.attributeName} -> ${r.target.getAttribute(r.attributeName)}`);
+        else note(r.type === "childList" ? "log or text changed" : "text changed");
+      }
+    }).observe(root, { attributes: true, attributeFilter: ["data-state"], childList: true, characterData: true, subtree: true });
+  });
+  const changes = () => page.evaluate(() => window.__fo.splice(0));
   const shot = () => frame.screenshot({ animations: "allow", caret: "initial" });
   const a = await shot();
-  await page.waitForTimeout(1000); // an absence window: nothing may change in it
+  await page.waitForTimeout(STILL_WINDOW_MS); // an absence window: nothing may change in it
   const b = await shot();
-  if (!a.equals(b)) bad("failover-still", where, "two pictures of the failover demo, a second apart, differ at rest");
+  const atRest = await changes();
+  if (atRest.length) bad("failover-still", where, `the demo changed ${atRest.length} time(s) at rest in ${STILL_WINDOW_MS} ms: ${atRest.slice(0, 4).join("; ")}`);
+  if (!a.equals(b)) bad("failover-still", where, `two pictures of the failover demo, ${STILL_WINDOW_MS} ms apart, differ at rest`);
   if ((await frame.getAttribute("data-state")) !== "live") bad("failover-still", where, "the resting state is not live");
   // By hand: stage 3 is "Slate on air" (data-stage 2).
   await page.locator('#failover [data-stage="2"]').click();
   await page.waitForFunction(() => document.querySelector("#failover [data-frame]")?.dataset.state === "slate");
-  await page.waitForTimeout(1000);
+  const stepped = await changes(); // the click's own change, and the window starts after it
+  if (stepped.length === 0) bad("failover-still", where, "the observer saw nothing when the step to the slate was made: it is not watching the demo");
   const c = await shot();
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(STILL_WINDOW_MS);
   const d = await shot();
-  if (!c.equals(d)) bad("failover-still", where, "after a manual step, two pictures of the demo a second apart differ");
+  const afterStep = await changes();
+  if (afterStep.length) bad("failover-still", where, `after a manual step the demo moved on by itself ${afterStep.length} time(s) in ${STILL_WINDOW_MS} ms: ${afterStep.slice(0, 4).join("; ")}`);
+  if ((await frame.getAttribute("data-state")) !== "slate") bad("failover-still", where, "after a manual step to the slate, the state is not slate");
+  if (!c.equals(d)) bad("failover-still", where, `after a manual step, two pictures of the demo ${STILL_WINDOW_MS} ms apart differ`);
   if (a.equals(c)) bad("failover-still", where, "stepping to the slate changed nothing on screen");
 }
+
+/** The bottom edge of whatever is stuck across the top of the screen: the site header, and the index strip where it
+ *  shows. Found by what the page computes (sticky or fixed, full width, at the top), not by a class name. */
+const STUCK_BOTTOM = () => {
+  let bottom = 0;
+  for (const el of document.body.querySelectorAll("*")) {
+    const pos = getComputedStyle(el).position;
+    if (pos !== "sticky" && pos !== "fixed") continue;
+    const r = el.getBoundingClientRect();
+    if (!el.checkVisibility() || r.width < innerWidth * 0.9 || r.height < 1 || r.top > 120 || r.bottom <= 0) continue;
+    bottom = Math.max(bottom, r.bottom);
+  }
+  return bottom;
+};
 
 async function checkLanding({ browserCtx, route, c, origin, where }) {
   const id = LANDINGS.find(([p]) => p === route)[1];
@@ -543,13 +616,15 @@ async function checkLanding({ browserCtx, route, c, origin, where }) {
     await page.waitForTimeout(SETTLE_MS); // the page holds the section for two seconds while the layout settles
     const m = await page.evaluate((target) => {
       const el = document.getElementById(target);
-      const strip = [...document.querySelectorAll(".idx-strip")].find((s) => s.checkVisibility());
-      return { top: el ? el.getBoundingClientRect().top : null, stripBottom: strip ? strip.getBoundingClientRect().bottom : null };
+      return { top: el ? el.getBoundingClientRect().top : null, scrolled: scrollY, strip: Boolean([...document.querySelectorAll(".idx-strip")].find((e) => e.checkVisibility())) };
     }, id);
+    m.stuckBottom = await page.evaluate(STUCK_BOTTOM);
     if (m.top === null) return bad("landing", where, `no #${id} on ${route}`);
-    if (m.top < -1 || m.top > 200) bad("landing", where, `${route}#${id} lands ${m.top.toFixed(0)}px from the top of the screen, expected 0 to 200`);
-    else if (m.stripBottom !== null && m.top < m.stripBottom - 1) bad("landing", where, `${route}#${id} lands at ${m.top.toFixed(0)}px, under the sticky index strip that ends at ${m.stripBottom.toFixed(0)}px`);
-    if (c.phone && m.stripBottom === null) bad("landing", where, `no visible .idx-strip on ${route} at 390 to land clear of`);
+    if (m.stuckBottom <= 0) return bad("landing", where, `nothing is stuck at the top of ${route} to land clear of (the site header should be)`);
+    if (m.scrolled <= 0) return bad("landing", where, `${route}#${id} did not scroll the page at all`);
+    if (c.phone && c.js && !m.strip) return bad("landing", where, `no visible .idx-strip on ${route} at 390 to land clear of`);
+    if (m.top < m.stuckBottom - 1) bad("landing", where, `${route}#${id} lands at ${m.top.toFixed(0)}px, under what is stuck at the top, which ends at ${m.stuckBottom.toFixed(0)}px`);
+    else if (m.top > 200) bad("landing", where, `${route}#${id} lands ${m.top.toFixed(0)}px from the top of the screen, expected clear of the header and within 200px`);
   } finally {
     await page.close();
   }
@@ -617,9 +692,11 @@ async function checkDocIndex({ page, where }) {
   if (new Set(seen).size < 3) bad("doc-index", where, `aria-current did not move: it only ever marked ${JSON.stringify([...new Set(seen)])}`);
 }
 
-async function checkMeasure({ page, where }) {
-  const m = await page.evaluate(() => {
-    const paras = [...document.querySelectorAll("article.doc-prose p")].filter((p) => p.checkVisibility());
+async function checkMeasure({ page, route, where }) {
+  const sel = route === LONGFORM_ROUTE ? ".longform > section > p" : "article.doc-prose > p";
+  const m = await page.evaluate((sel) => {
+    // Direct children only: a paragraph inside a list, table or callout has its own, narrower measure.
+    const paras = [...document.querySelectorAll(sel)].filter((p) => p.checkVisibility());
     if (!paras.length) return null;
     const p = paras.reduce((a, b) => (b.textContent.length > a.textContent.length ? b : a));
     const lh = parseFloat(getComputedStyle(p).lineHeight) || parseFloat(getComputedStyle(p).fontSize) * 1.5;
@@ -634,8 +711,8 @@ async function checkMeasure({ page, where }) {
     }
     const chars = p.textContent.replace(/\s+/g, " ").trim().length;
     return { chars, lines, avg: chars / Math.max(lines, 1), size: getComputedStyle(p).fontSize, head: p.textContent.trim().slice(0, 40) };
-  });
-  if (!m) return bad("measure", where, "no article.doc-prose p on /docs/audio-routing");
+  }, sel);
+  if (!m) return bad("measure", where, `no ${sel} on ${route}`);
   if (m.lines < 4) bad("measure", where, `the longest paragraph ("${m.head}") has only ${m.lines} lines: too short to measure`);
   else if (m.avg < MEASURE.min || m.avg > MEASURE.max) bad("measure", where, `the longest paragraph averages ${m.avg.toFixed(1)} characters a line (${m.chars} over ${m.lines} lines), expected ${MEASURE.min} to ${MEASURE.max}`);
   if (m.size !== "17px") bad("measure", where, `article paragraph font-size is ${m.size}, expected 17px`);
@@ -664,19 +741,19 @@ const srv = await serve();
 const origin = `http://127.0.0.1:${srv.address().port}`;
 const browser = await chromium.launch();
 try {
-  const units = CONTEXTS.map((c) => async () => {
-    for (const route of ROUTES) {
+  // One unit per (context, route), longest-visit work first being unnecessary: the queue is shared by `width` workers.
+  const units = CONTEXTS.flatMap((c) =>
+    routesFor(c).map((route) => async () => {
       try {
         await visit(browser, origin, c, route);
       } catch (e) {
         bad("visit", `${c.name} ${route}`, `threw: ${String(e?.message ?? e).split("\n")[0]}${process.env.CHECK_INNER_DEBUG ? "\n" + e?.stack : ""}`);
       }
-    }
-    console.log(`${at()} done ${c.name}`);
-  });
+    }),
+  );
   const width = Number(process.env.CHECK_INNER_CONCURRENCY) || Math.min(CONTEXTS.length, Math.max(2, availableParallelism()));
   const queue = [...units];
-  console.log(`serving ${DIST} at ${origin}; ${units.length} contexts x ${ROUTES.length} routes, ${width} at a time (${availableParallelism()} CPUs)`);
+  console.log(`serving ${DIST} at ${origin}; ${CONTEXTS.length} contexts, ${units.length} visits, ${width} at a time (${availableParallelism()} CPUs)`);
   await Promise.all(Array.from({ length: width }, async () => { while (queue.length && !stopped) await queue.shift()(); }));
 } finally {
   // Never hang here: a wedged browser gets ten seconds to close, then the process leaves regardless.
@@ -696,4 +773,4 @@ if (fail.length) {
   process.exit(1);
 }
 if (ONLY || process.env.CHECK_INNER_ROUTES) console.log(`PARTIAL RUN, NOT A PASS: only ${ONLY?.join(", ") ?? "every check"} on ${ROUTES.join(", ")} ran (CHECK_INNER_ONLY / CHECK_INNER_ROUTES). No failures in what ran. ${total}`);
-else console.log(`inner pages passed (${CONTEXTS.length} contexts x ${ROUTES.length} routes, ${ran.size} check runs, ${total})`);
+else console.log(`inner pages passed (${CONTEXTS.length} contexts, ${ran.size} check runs, ${total})`);
