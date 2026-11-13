@@ -24,5 +24,12 @@ export function bootInner(doc: Document): MotionGate | undefined {
       })
       .catch((err) => console.error("inner: the page index failed to start", err));
   }
+
+  const chooser = doc.querySelector<HTMLElement>("[data-chooser]");
+  if (chooser) {
+    import("./chooser")
+      .then((m) => m.initChooser(chooser))
+      .catch((err) => console.error("inner: the product chooser failed to start", err));
+  }
   return gate;
 }
