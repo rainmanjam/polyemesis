@@ -11,6 +11,7 @@ import { bootInner } from "./inner";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("./page-index");
+  vi.doUnmock("./chooser");
   vi.resetModules();
   document.body.innerHTML = "";
 });
@@ -47,6 +48,35 @@ describe("bootInner", () => {
     }));
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     document.body.innerHTML = `<div data-index></div>`;
+    bootInner(document);
+    await vi.waitFor(() => expect(err).toHaveBeenCalled());
+  });
+
+  it("starts the chooser when a [data-chooser] root exists", async () => {
+    const initChooser = vi.fn();
+    vi.doMock("./chooser", () => ({ initChooser }));
+    document.body.innerHTML = `<fieldset data-chooser hidden></fieldset>`;
+    bootInner(document);
+    await vi.waitFor(() => expect(initChooser).toHaveBeenCalledWith(document.querySelector("[data-chooser]")));
+  });
+
+  it("does not import the chooser module on a page without the root", async () => {
+    const factory = vi.fn(() => ({ initChooser: vi.fn() }));
+    vi.doMock("./chooser", factory);
+    document.body.innerHTML = "<p>plain</p>";
+    bootInner(document);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it("logs, and does not throw, when the chooser fails to start", async () => {
+    vi.doMock("./chooser", () => ({
+      initChooser: () => {
+        throw new Error("boom");
+      },
+    }));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    document.body.innerHTML = `<fieldset data-chooser></fieldset>`;
     bootInner(document);
     await vi.waitFor(() => expect(err).toHaveBeenCalled());
   });

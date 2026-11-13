@@ -1,0 +1,83 @@
+---
+/* The shared comparison table. Each row is [label, ...one cell per column]; a
+ * cell's visible text is exactly the string given. The glyph is an empty,
+ * aria-hidden span before it, so the words always carry the meaning and the
+ * build (which reads cell text) still sees a bare "Yes" as "yes". The chooser
+ * fieldset renders hidden: script un-hides it, and without script every
+ * column shows. */
+import { columnModel, type Col } from "../../lib/compare-table";
+
+interface Props {
+  caption: string;
+  firstHeader: string;
+  cols: Col[];
+  rows: string[][];
+  chooser?: boolean;
+  legend?: boolean;
+}
+
+const { caption, firstHeader, cols, rows, chooser = false, legend = false } = Astro.props;
+const model = columnModel(cols, rows);
+const others = cols.filter((c) => !c.poly);
+---
+
+{
+  chooser && (
+    <fieldset class="chooser" data-chooser data-js-only hidden>
+      <legend>Compare polyemesis with</legend>
+      {cols.map((c) => (
+        <label class="chooser-opt">
+          <input
+            type="checkbox"
+            data-chooser-col={c.key}
+            data-name={c.name}
+            checked
+            disabled={c.poly}
+          />
+          <span>{c.name}</span>
+        </label>
+      ))}
+      <span class="chooser-status" role="status" aria-live="polite">
+        Showing {cols.map((c) => c.name).join(", ")}
+      </span>
+    </fieldset>
+  )
+}
+<div
+  class="scroll-hint cmp-wrap"
+  tabindex="0"
+  role="region"
+  aria-label={`${caption} (scrolls sideways on small screens)`}
+>
+  <table class="cmp">
+    <caption class="sr-only">{caption}</caption>
+    <thead>
+      <tr>
+        <th scope="col">{firstHeader}</th>
+        {cols.map((c) => (
+          <th scope="col" data-col={c.key} data-poly={c.poly ? "" : undefined}>{c.name}</th>
+        ))}
+      </tr>
+    </thead>
+    <tbody>
+      {model.rows.map((r) => (
+        <tr>
+          <th scope="row">{r.label}</th>
+          {r.cells.map((c, i) => (
+            <td data-col={c.col} data-poly={cols[i].poly ? "" : undefined}>{c.glyph && <span class="glyph" data-glyph={c.glyph} aria-hidden="true" />}{c.text}</td>
+          ))}
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+{
+  legend && (
+    <p class="cmp-legend">
+      <span><span class="glyph" data-glyph="y" aria-hidden="true" />Yes</span>
+      <span><span class="glyph" data-glyph="n" aria-hidden="true" />No</span>
+      <span><span class="glyph" data-glyph="q" aria-hidden="true" />not assessed on this page</span>
+      <span>— not stated</span>
+    </p>
+  )
+}

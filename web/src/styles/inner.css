@@ -299,25 +299,128 @@
 
   /* ===== table ===== */
 
-  /* A symbol in a table cell. */
+  /* The shared comparison table (CompareTable). The pinned first column, its
+     opaque background and the scroll fade are the .cmp and .scroll-hint rules in
+     global.css; these add the frame, the polyemesis rule and the glyphs. */
+  .cmp-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+  }
+  .cmp-wrap:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+  .cmp-wrap .cmp {
+    width: 100%;
+    min-width: 46rem;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+  }
+  /* With two or fewer columns showing there is nothing to scroll to. */
+  .cmp-wrap .cmp.narrow { min-width: 0; }
+  /* On a phone the pinned label takes a fixed share, so the first answer
+     column is on screen beside it. */
+  @media (max-width: 48rem) {
+    .cmp-wrap .cmp { min-width: 38rem; }
+    .cmp-wrap .cmp.narrow { min-width: 0; }
+    .cmp :is(thead th, tbody th):first-child { width: 9.5rem; min-width: 9.5rem; }
+  }
+  .cmp th,
+  .cmp td {
+    padding: 12px 16px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .cmp tbody tr:last-child :is(th, td) { border-bottom: 0; }
+  .cmp thead th {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-muted);
+  }
+  .cmp tbody th {
+    font-weight: 400;
+    color: var(--color-fg);
+  }
+  .cmp td { color: var(--color-muted); }
+  .cmp [data-col] { width: 9.5rem; min-width: 9.5rem; }
+  .cmp thead th[data-poly] {
+    color: var(--color-fg);
+    border-top: 2px solid var(--color-accent);
+  }
+  .cmp td[data-poly] { color: var(--color-fg); }
+  .cmp [hidden] { display: none; }
+
+  /* A symbol before a cell's words: a shape, so colour is never the only cue.
+     Yes is a filled dot, No an empty ring, not assessed a dashed ring. The
+     words stay in the cell; the span is aria-hidden and holds no text. */
   .glyph {
     display: inline-block;
-    min-width: 1.25em;
-    text-align: center;
-    font-family: var(--font-mono);
+    box-sizing: border-box;
+    width: 0.625rem;
+    height: 0.625rem;
+    margin-right: 0.5rem;
+    border-radius: 50%;
+    vertical-align: baseline;
   }
-  /* The product chooser above a comparison table; script un-hides it. */
+  .glyph[data-glyph="y"] { background: var(--color-ok); }
+  .glyph[data-glyph="n"] { border: 1.5px solid var(--color-muted); }
+  .glyph[data-glyph="q"] { border: 1.5px dashed var(--color-muted); }
+
+  .cmp-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin-top: 12px;
+    font-size: 0.8125rem;
+    color: var(--color-muted);
+  }
+
+  /* The product chooser above the table; script un-hides it. */
   .chooser {
-    margin-bottom: 20px;
-    padding: 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 24px;
+    margin-bottom: 16px;
+    padding: 12px 16px;
     border: 1px solid var(--color-line);
     border-radius: 4px;
     background: var(--color-surface);
   }
   .chooser[hidden] { display: none; }
-
-
-
+  .chooser legend {
+    float: left;
+    margin-right: 8px;
+    padding: 0;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-muted);
+  }
+  .chooser-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 2.75rem;
+    cursor: pointer;
+  }
+  .chooser-opt input {
+    width: 1.125rem;
+    height: 1.125rem;
+    accent-color: var(--color-accent);
+  }
+  .chooser-opt input:disabled + span { color: var(--color-muted); }
+  .chooser-opt input:focus-visible {
+    outline: 2px solid var(--color-primary-bright);
+    outline-offset: 2px;
+  }
+  .chooser-status {
+    flex-basis: 100%;
+    font-size: 0.8125rem;
+    color: var(--color-muted);
+  }
 
   /* ===== docs ===== */
 
