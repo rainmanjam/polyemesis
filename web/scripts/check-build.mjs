@@ -1341,6 +1341,9 @@ const legacyMain = (route) => {
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
 };
 {
+  for (const key of Object.keys(DROPPED)) {
+    if (!(key in LEGACY)) fail.push(`DROPPED has a key "${key}" that is not a route in legacy-inner.fixture.json, so it exempts nothing (typo?).`);
+  }
   const sentencesOf = (text) => text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
   for (const [route, legacy] of Object.entries(LEGACY)) {
     const built = norm(legacyMain(route).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " "));
