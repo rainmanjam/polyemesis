@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { BUILD_FROM_CLONE, CLONE, COMPOSE_UP, HEALTH_CHECK, SETUP_CODE } from "../data/install.mjs";
+import { BUILD_FROM_CLONE, CLONE, COMPOSE_UP, HEALTH_CHECK, INSTALL_WITH_FLAGS, SETUP_CODE } from "../data/install.mjs";
 import { FIRST_RUN, PORTS, REQUIREMENTS } from "../data/install-page.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -60,6 +60,17 @@ describe("the install page takes its commands from install.mjs", () => {
   it("takes BUILD_FROM_CLONE verbatim from the README", () => {
     expect(readme).toContain(BUILD_FROM_CLONE);
     expect(BUILD_FROM_CLONE.startsWith(CLONE)).toBe(true);
+  });
+
+  it("shows where installer flags go with the doc's own example", () => {
+    expect(installDoc).toContain(INSTALL_WITH_FLAGS);
+    expect(page).toContain("INSTALL_WITH_FLAGS");
+    expect(page).not.toContain("--mode binary");
+  });
+
+  it("links Back up to the doc's before-you-upgrade section", () => {
+    expect(page).toContain("/docs/upgrading#before-you-upgrade");
+    expect(read("docs", "UPGRADING.md")).toContain("## Before you upgrade");
   });
 
   it("reads the setup code the way docs/INSTALL.md says for docker run", () => {

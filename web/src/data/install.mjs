@@ -32,3 +32,6 @@ curl -fsSk "\${POLYEMESIS_URL:?set it from the table above}/api/v1/health"`;
 
 /** docs/INSTALL.md, "The first-run setup code", the `docker run` / compose row. */
 export const SETUP_CODE = "docker logs polyemesis\ndocker exec polyemesis cat /data/setup-code";
+
+/** docs/INSTALL.md, "Installing a specific release": how flags follow the script. */
+export const INSTALL_WITH_FLAGS = "sudo bash install.sh --mode binary --version v0.11.0-rc.1";

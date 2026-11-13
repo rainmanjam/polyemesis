@@ -715,6 +715,17 @@
     .inst-req { grid-template-columns: 11rem minmax(0, 14rem) minmax(0, 1fr); }
   }
   .inst-ports th[scope="row"] { font-family: var(--font-mono); }
+  /* Phone: tighten the pinned Port column and give the text columns room, so
+     "What it is" sits beside Port and "When" wraps at a readable width. */
+  @media (max-width: 48rem) {
+    .cmp.inst-ports { min-width: 34rem; }
+    .cmp.inst-ports :is(thead th, tbody th):first-child { width: 4.5rem; min-width: 4.5rem; }
+    .inst-ports th,
+    .inst-ports td { padding-inline: 10px; }
+    .inst-ports td:nth-child(2) { width: 3.5rem; }
+    .inst-ports td:nth-child(3) { width: 8rem; }
+    .inst-ports td:nth-child(4) { min-width: 14rem; }
+  }
   .inst-ports td:nth-child(2) { font-family: var(--font-mono); font-size: 0.875rem; }
 
   /* The first stream: a real sequence, numbered. */
