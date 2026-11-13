@@ -5,7 +5,7 @@ import { DATA as obs } from "../data/vs/obs-multi-rtmp.mjs";
 import { DATA as restreamer } from "../data/vs/restreamer.mjs";
 import { DATA as streamelements } from "../data/vs/streamelements.mjs";
 import { DATA as streamlabs } from "../data/vs/streamlabs.mjs";
-import { allowedTagProblems, validateVs, type VsData } from "./vs";
+import { allowedTagProblems, hrefProblem, validateVs, type VsData } from "./vs";
 
 const ALL: VsData[] = [aitum, obs, restreamer, streamelements, streamlabs];
 const bySlug = (slug: string) => ALL.find((d) => d.slug === slug) as VsData;
@@ -78,23 +78,70 @@ describe("the five /vs data files", () => {
   });
 
   describe("facts rule: nothing about another product that is not already written", () => {
+    /* A string of four or more words must occur whole in the page's frozen text
+     * or in docs/COMPARISON.md. A shorter one matches almost anything as a
+     * substring ("Yes" is inside every page), so it must either be a whole table
+     * cell or list item of COMPARISON.md, or be listed here with the old-page
+     * sentence or document line it stands for. Keys are normalised. */
+    const SHORT_CELLS: Record<string, string> = {
+      "actively maintained": "obs-multi-rtmp merit heading, as the old page had it (card title over the sorayuki sentence).",
+      "free, and gpl-2.0": "aitum merit heading and the plugin's cost, from the old note dated 15 August 2026.",
+      "free, gpl-2.0": "obs-multi-rtmp cost: the old merit heading \"Free, GPL-2.0, and inside OBS already\".",
+      "free, mit, self-hosted": "polyemesis's own price: the old restreamer pricing row for polyemesis (another page's text, allowed for column 1).",
+      "free, apache-2.0, self-hosted": "Restreamer's price: the old restreamer pricing row \"Restreamer (datarhei)\".",
+      "no per-destination charge": "Restreamer's destinations: the old restreamer pricing row's note.",
+      "one per destination": "obs-multi-rtmp outbound streams / audio encodes: the old outbound table cell.",
+      "the server": "aitum: the old \"The mixing desk is the server\" sentence.",
+      "multitrack srt": "polyemesis's transport: old streamelements sentence \"receiving your separated audio tracks over multitrack SRT\".",
+      "multitrack srt in": "polyemesis's ingest: old streamlabs heading \"RTMP in, or multitrack SRT in\".",
+      "rtmp in": "Streamlabs's ingest: same old heading.",
+      "their servers": "Streamlabs: old streamlabs heading \"Their servers, or yours\".",
+      "yours": "polyemesis: same old heading.",
+      "per-destination encoding": "Aitum merit heading, as the old page had it.",
+      "restream.io keeps shipping": "restream.io merit heading, as the old page had it.",
+      "streamsuite": "Aitum merit heading, as the old page had it.",
+    };
+    const docCells = new Set<string>();
+    for (const line of comparisonMd.split("\n")) {
+      if (line.startsWith("|")) {
+        for (const c of line.slice(1).split("|")) docCells.add(norm(c.replace(/<sup>\d<\/sup>/g, "")));
+      } else if (line.startsWith("- ")) {
+        docCells.add(norm(line.slice(2)));
+      }
+    }
+    const used = new Set<string>();
+
     it.each(ALL.map((d) => [d.slug, d] as const))("%s", (slug, d) => {
       const own = norm(fixture[`/vs/${slug}`].text);
-      const known = (s: string, extra = "") => {
-        const n = norm(s);
-        return own.includes(n) || docText.includes(n) || (extra !== "" && extra.includes(n));
-      };
       const unsupported: string[] = [];
+      const check = (where: string, s: string, extra = "") => {
+        const n = norm(s);
+        if (n === "") return void unsupported.push(`${where}: empty`);
+        const written = own.includes(n) || docText.includes(n) || (extra !== "" && extra.includes(n));
+        if (!written) return void unsupported.push(`${where}: ${s}`);
+        if (n.split(" ").length >= 4) return;
+        if (docCells.has(n)) return;
+        if (n in SHORT_CELLS) return void used.add(n);
+        unsupported.push(`${where}: short string needs SHORT_CELLS or a whole doc cell: ${s}`);
+      };
       for (const row of d.glance) {
-        row.slice(2).forEach((cell) => known(cell) || unsupported.push(`glance: ${cell}`));
+        row.slice(2).forEach((cell) => check("glance", cell));
         // polyemesis's own column may also be written on the other pages.
-        known(row[1], legacyAll) || unsupported.push(`glance (polyemesis): ${row[1]}`);
+        check("glance (polyemesis)", row[1], legacyAll);
       }
-      for (const s of [...d.fits.poly, ...d.fits.other.items]) known(s) || unsupported.push(`fits: ${s}`);
-      for (const s of strings(d.merits?.items)) known(s) || unsupported.push(`merits: ${s}`);
-      for (const s of strings(d.useOther?.items)) known(s) || unsupported.push(`useOther: ${s}`);
+      for (const s of [...d.fits.poly, ...d.fits.other.items]) check("fits", s);
+      for (const s of strings(d.merits?.items)) check("merits", s);
+      for (const s of strings(d.useOther?.items)) check("useOther", s);
       expect(unsupported).toEqual([]);
     });
+
+    it("has no stale SHORT_CELLS entry", () => {
+      expect(Object.keys(SHORT_CELLS).filter((k) => !used.has(k))).toEqual([]);
+    });
+  });
+
+  it("has merits on every page but streamlabs", () => {
+    expect(ALL.filter((d) => !d.merits).map((d) => d.slug)).toEqual(["streamlabs"]);
   });
 
   it("uses only the four allowed tags and never says pre-release", () => {
@@ -231,6 +278,101 @@ describe("validateVs", () => {
     const d = clone();
     d.lede = "still Pre-release";
     expect(problems(d)).toContain("pre-release");
+  });
+});
+
+describe("validateVs hardening", () => {
+  const full = () => structuredClone(restreamer);
+  const problems = (d: VsData) => validateVs(d).join("\n");
+  const evil = "<script>alert(1)</script>";
+
+  it("finds an attack in every kind of nested string", () => {
+    const cases: [string, (d: VsData) => void, string][] = [
+      ["prose", (d) => (d.sections[0] = { kind: "prose", id: "p", heading: "h", paragraphs: [evil] }), "sections[0].paragraphs[0]"],
+      ["table", (d) => (d.sections[0] = { kind: "table", id: "t", heading: "h", caption: "c", head: ["a", "b"], rows: [["x", evil]] }), "sections[0].rows[0][1]"],
+      ["steps", (d) => (d.sections[0] = { kind: "steps", id: "s", heading: "h", columns: [{ title: "t", steps: [evil] }] }), "sections[0].columns[0].steps[0]"],
+      ["items", (d) => (d.sections[0] = { kind: "items", id: "i", heading: "h", items: [{ h: "h", p: "p", more: evil }] }), "sections[0].items[0].more"],
+      ["which", (d) => ((d.which as NonNullable<VsData["which"]>).items[0].body = evil), "which.items[0].body"],
+      ["closing", (d) => (d.closing.lede = evil), "closing.lede"],
+      ["footer", (d) => (d.footer = evil), "footer"],
+      ["after", (d) => (d.sections[0].after = ['<a href="x" onclick="y">z</a>']), "sections[0].after[0]"],
+    ];
+    for (const [name, mutate, path] of cases) {
+      const d = full();
+      mutate(d);
+      expect(problems(d), name).toContain(path);
+    }
+  });
+
+  it("rejects comments, processing instructions and CDATA", () => {
+    for (const s of ["a <!-- b -->", "a <?php x ?>", "a <![CDATA[ b ]]>"]) {
+      expect(allowedTagProblems(s), s).not.toEqual([]);
+    }
+  });
+
+  it("rejects unbalanced, mismatched and nested tags", () => {
+    expect(allowedTagProblems("<em>never closed")).not.toEqual([]);
+    expect(allowedTagProblems("never opened</em>")).not.toEqual([]);
+    expect(allowedTagProblems("<em>a</strong>")).not.toEqual([]);
+    expect(allowedTagProblems('<a href="/x">a <a href="/y">b</a></a>')).not.toEqual([]);
+    expect(allowedTagProblems("<strong>a <em>b</em></strong>")).toEqual([]);
+  });
+
+  it("rejects any tag in a field the template shows as plain text", () => {
+    const plain: [(d: VsData) => void, string][] = [
+      [(d) => (d.glance[0][1] = "<em>x</em>"), "glance[0][1]"],
+      [(d) => (d.glance[0][0] = "<em>x</em>"), "glance[0][0]"],
+      [(d) => (d.heading = "a <em>b</em>"), "heading"],
+      [(d) => (d.lede = "a <code>b</code>"), "lede"],
+      [(d) => (d.sections[2] = { kind: "table", id: "t", heading: "h", caption: "c", head: ["x", "<em>y</em>"], rows: [["a", "<em>b</em>"]] }), "sections[2].head[1]"],
+      [(d) => (d.closing.lede = "a <em>b</em>"), "closing.lede"],
+      [(d) => (d.closing.heading = "a <em>b</em>"), "closing.heading"],
+      [(d) => (d.merits as NonNullable<VsData["merits"]>).items[0].h = "<em>h</em>", "merits.items[0].h"],
+      [(d) => ((d.which as NonNullable<VsData["which"]>).items[0].name = "<em>n</em>"), "which.items[0].name"],
+    ];
+    for (const [mutate, path] of plain) {
+      const d = full();
+      mutate(d);
+      expect(problems(d), path).toContain(`${path}: a tag is not allowed here`);
+    }
+  });
+
+  it("still allows the four tags in the fields rendered as HTML", () => {
+    const d = full();
+    d.footer = "see <code>x</code> and <a href=\"/y\">y</a>";
+    d.callout = { lead: "Lead", body: "a <em>b</em> <strong>c</strong>" };
+    expect(validateVs(d)).toEqual([]);
+  });
+
+  it("rejects a table section whose first header is Capability", () => {
+    const d = full();
+    d.sections[2] = { kind: "table", id: "t", heading: "h", caption: "c", head: [" capability ", "b"], rows: [["x", "y"]] };
+    expect(problems(d)).toContain("Capability");
+  });
+
+  it("validates the href of every link the template renders", () => {
+    const bad = ["javascript:alert(1)", "data:text/html,x", "//evil.example/x", "http://example.com", "", " /x"];
+    for (const href of bad) {
+      const d = structuredClone(bySlug("streamlabs"));
+      (d.useOther as NonNullable<VsData["useOther"]>).links = [{ label: "x", href }];
+      expect(problems(d), href).toContain("useOther.links[0].href");
+    }
+    for (const href of ["/docs/x", "https://example.com/x", "#glance"]) {
+      const d = structuredClone(bySlug("streamlabs"));
+      (d.useOther as NonNullable<VsData["useOther"]>).links = [{ label: "x", href }];
+      expect(validateVs(d), href).toEqual([]);
+    }
+  });
+});
+
+describe("hrefProblem", () => {
+  it("accepts a path, a fragment and https, and nothing else", () => {
+    expect(hrefProblem("/docs/x")).toBeNull();
+    expect(hrefProblem("#a")).toBeNull();
+    expect(hrefProblem("https://example.com")).toBeNull();
+    for (const h of ["javascript:x", "data:x", "//evil", "http://x", "mailto:a@b", ""]) {
+      expect(hrefProblem(h), h).not.toBeNull();
+    }
   });
 });
 

@@ -54,7 +54,6 @@ export const DATA = {
   checked: "15 August 2026",
   products: [{ key: "se-live", name: "SE.Live" }],
   glance: [
-    ["Operating system", "Containers", "Windows, and only Windows"],
     ["Transport", "multitrack SRT", "RTMP and RTMPS out"],
     ["Audio per platform", "a mix assembled per platform", "one OBS audio track (any of the six)"],
     ["Price", "Free, MIT, self-hosted", "Free at $0 with no paywall above it"],

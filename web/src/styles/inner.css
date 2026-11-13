@@ -671,7 +671,7 @@
   /* The /vs/<product> pages (layouts/VsPage.astro). One column of sections on
      one rhythm; the tables are the shared .cmp-wrap, the lists of other
      comparisons are the shared .rows. */
-  .vs-sec { margin-top: 72px; scroll-margin-top: 88px; }
+  .vs-sec { margin-top: 72px; }
   .vs > :first-child { margin-top: 0; }
   .vs-sec h2 {
     font-family: var(--font-display);

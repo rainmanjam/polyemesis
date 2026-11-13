@@ -92,7 +92,7 @@ const glanceCaption = `polyemesis compared with ${data.products.map((p) => p.nam
 
     <section id="glance" class="vs-sec">
       <h2>At a glance</h2>
-      <p class="vs-intro">Every figure about another product is dated {data.checked}.</p>
+      <p class="vs-intro">Every figure about another product is dated {data.checked}, or carries its own date.</p>
       <CompareTable caption={glanceCaption} firstHeader="At a glance" cols={cols} rows={data.glance} chooser legend />
     </section>
 

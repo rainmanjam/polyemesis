@@ -58,7 +58,7 @@ export const DATA = {
       "One upload leaves the stream PC",
       "Every destination uploads from your connection",
     ],
-    ["Cost", "Free, MIT, self-hosted", "Free, and GPL-2.0"],
+    ["Cost (checked 15 August 2026)", "Free, MIT, self-hosted", "Free, and GPL-2.0"],
   ],
   fits: {
     poly: [

@@ -78,24 +78,60 @@ const RESERVED_IDS = ["glance", "fits", "which", "does-well", "use-other", "othe
 
 const ALLOWED_TAGS = new Set(["a", "code", "em", "strong"]);
 const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^<>]*)>/g;
-const SAFE_HREF = /^<a href="(\/[^"\s]*|#[^"\s]*|https:\/\/[^"\s]+)"$/;
+const HREF_ATTR = /^ href="([^"]*)"$/;
+/* A path on this site (not protocol-relative), a fragment, or https. */
+const SAFE_HREF = /^(\/(?!\/)[^\s"<>]*|#[^\s"<>]*|https:\/\/[^\s"<>]+)$/;
+
+/** Why a link target is refused; null when it is fine. */
+export function hrefProblem(href: string): string | null {
+  return SAFE_HREF.test(href) ? null : `"${href}" is not a path, a fragment or an https link`;
+}
+
+/* Fields the template renders with `set:html`. Every other string is rendered
+ * as escaped text, so a tag in one would show as literal characters. */
+const HTML_PATHS = [
+  /^callout\.body$/,
+  /^fits\.poly\[\d+\]$/,
+  /^fits\.other\.items\[\d+\]$/,
+  /^which\.intro$/,
+  /^which\.items\[\d+\]\.(body|then)$/,
+  /^sections\[\d+\]\.(intro|after\[\d+\]|paragraphs\[\d+\]|columns\[\d+\]\.steps\[\d+\])$/,
+  /^(merits|sections\[\d+\])\.items\[\d+\]\.(p|more)$/,
+  /^merits\.(note|after\[\d+\])$/,
+  /^useOther\.(items|after)\[\d+\]$/,
+  /^footer$/,
+];
 
 /** What is wrong with the markup in one string; [] when it only uses the allowed tags. */
 export function allowedTagProblems(s: string): string[] {
   const out: string[] = [];
+  if (/<!--|<\?|<!\[CDATA\[/i.test(s)) out.push("comments, processing instructions and CDATA are not allowed");
+  const open: string[] = [];
   for (const m of s.matchAll(TAG)) {
-    const [, closing, name, attrs] = m;
-    if (!ALLOWED_TAGS.has(name.toLowerCase())) {
-      out.push(`<${closing}${name}> is not allowed`);
-    } else if (!closing && name === "a") {
-      if (!SAFE_HREF.test(`<a${attrs}`)) out.push(`<a${attrs}> may only carry a plain href`);
-    } else if (!closing && attrs.trim() !== "") {
-      out.push(`<${name}${attrs}> may not have attributes`);
+    const [, closing, rawName, attrs] = m;
+    const name = rawName.toLowerCase();
+    if (!ALLOWED_TAGS.has(name)) {
+      out.push(`<${closing}${rawName}> is not allowed`);
+    } else if (closing) {
+      if (open.pop() !== name) out.push(`</${name}> has no matching opening tag`);
+    } else {
+      out.push(...openTagProblems(name, attrs, open));
+      open.push(name);
     }
   }
+  for (const name of open) out.push(`<${name}> is never closed`);
   // A `<` that starts a tag but never closes it is not matched above.
-  const stripped = s.replace(TAG, "");
-  if (/<[a-zA-Z/]/.test(stripped)) out.push("an unterminated tag");
+  if (/<[a-zA-Z/]/.test(s.replace(TAG, ""))) out.push("an unterminated tag");
+  return out;
+}
+
+function openTagProblems(name: string, attrs: string, open: string[]): string[] {
+  if (name !== "a") return attrs.trim() === "" ? [] : [`<${name}${attrs}> may not have attributes`];
+  const out: string[] = [];
+  if (open.includes("a")) out.push("an <a> may not sit inside another <a>");
+  const href = HREF_ATTR.exec(attrs)?.[1];
+  const bad = href === undefined ? "<a> needs exactly one href" : hrefProblem(href);
+  if (bad) out.push(bad);
   return out;
 }
 
@@ -111,7 +147,11 @@ function stringsIn(v: unknown, path: string): [string, string][] {
 function checkText(d: VsData): string[] {
   const out: string[] = [];
   for (const [path, s] of stringsIn(d, "")) {
-    for (const p of allowedTagProblems(s)) out.push(`${path}: ${p}`);
+    if (HTML_PATHS.some((re) => re.test(path))) {
+      for (const p of allowedTagProblems(s)) out.push(`${path}: ${p}`);
+    } else if (/<[a-zA-Z/!?]/.test(s)) {
+      out.push(`${path}: a tag is not allowed here`);
+    }
     if (/pre-release/i.test(s)) out.push(`${path}: says pre-release (state the release instead)`);
   }
   return out;
@@ -160,6 +200,10 @@ function checkLists(d: VsData): string[] {
   if (d.which && d.which.items.length === 0) out.push("which has no items");
   if (d.merits && d.merits.items.length === 0) out.push("merits has no items");
   if (d.useOther && d.useOther.items.length === 0) out.push("useOther has no items");
+  d.useOther?.links?.forEach((l, i) => {
+    const bad = hrefProblem(l.href);
+    if (bad) out.push(`useOther.links[${i}].href: ${bad}`);
+  });
   return out;
 }
 
@@ -168,6 +212,9 @@ function sectionProblem(s: VsSection): string | null {
     case "prose":
       return s.paragraphs.length === 0 ? "has no paragraphs" : null;
     case "table":
+      if (s.head[0]?.trim().toLowerCase() === "capability") {
+        return 'may not start with a "Capability" header (the build reads such a table as the capability table)';
+      }
       return s.rows.some((r) => r.length !== s.head.length) ? "has a row that does not match its header" : null;
     case "steps":
       return s.columns.length === 0 || s.columns.some((c) => c.steps.length === 0) ? "has an empty column" : null;
