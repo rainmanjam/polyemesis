@@ -48,6 +48,13 @@ describe("comparison.astro source", () => {
     expect(src).not.toContain("pre-release");
     expect(src).toContain("fillRelease");
   });
+  it("leads the header with the install action", () => {
+    expect(src).toMatch(/slot="actions" class="btn btn-primary" href="\/download">Install polyemesis</);
+    expect(src.indexOf("Install polyemesis")).toBeLessThan(src.indexOf("See the table"));
+  });
+  it("explains the Filter only cell", () => {
+    expect(src).toContain("“Filter only” for Restreamer");
+  });
   it("uses the shared table for both tables", () => {
     expect(src).toContain('firstHeader="Capability"');
     expect(src).toContain("rows={wins}");

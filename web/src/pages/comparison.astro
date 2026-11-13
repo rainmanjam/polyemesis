@@ -275,6 +275,7 @@ const index = [
     secondary: { label: "This page, with its sources", href: "/docs/comparison" },
   }}
 >
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
   <a slot="actions" class="btn btn-ghost" href="#glance">See the table</a>
   {releaseLine(release) && <Fragment slot="meta">Here: {releaseLine(release)}</Fragment>}
 
@@ -340,6 +341,16 @@ const index = [
           mechanism and is not covered by this. Nothing is gated either way: a
           negotiation that does not succeed falls back to the ordinary Twitch ingest.
         </span>
+      </p>
+      {/* Footnote 4 of docs/COMPARISON.md, which explains the "Filter only" cell. */}
+      <p class="cp-note">
+        On the loudness-target row, “Filter only” for Restreamer: it mounts a
+        filter select per publication service, and <code>loudnorm</code> is one of
+        the filters it offers, so it does apply a per-destination loudness filter.
+        What it does not offer is a target you set: its control is an on/off
+        checkbox that emits the bare string <code>loudnorm</code> with no I, LRA or
+        TP, so it takes FFmpeg’s defaults and an operator cannot ask for −16 LUFS
+        rather than −24.
       </p>
       <p class="cp-note">
         The multitrack ask is not hypothetical. “Multiple audio tracks for Twitch”
