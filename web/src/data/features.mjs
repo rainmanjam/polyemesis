@@ -190,39 +190,45 @@ export const DECK_FACTS = [
   "The packaged plugin is attached to every release since 0.12.0.",
 ];
 
-/** Everything else, in four groups; `doc` is a slug in data/docs.mjs.
- * @type {{ group: string, blurb: string, items: { name: string, text: string, doc: string }[] }[]} */
+/** Everything else, in four groups; `doc` is a slug in data/docs.mjs, and an item's `slug` is the key its receipt in feature-claims.mjs hangs on.
+ * @type {{ group: string, blurb: string, items: { slug: string, name: string, text: string, doc: string }[] }[]} */
 export const ALSO = [
   {
     group: "On air",
     blurb: "what the broadcast does",
     items: [
       {
+        slug: "dashboard",
         name: "Dashboard",
         text: "The programme you picked in the header: its ingest (bitrate, uptime, how many audio tracks arrived, and the address to publish to), the live picture, the pipeline behind it, and every destination it feeds, each with the tracks it carries and a button to start or stop it.",
         doc: "quickstart",
       },
       {
+        slug: "shared-renditions",
         name: "Shared renditions",
         text: "One encode feeds every destination that selects it, ref-counted. It re-encodes video only, so audio still routes per destination.",
         doc: "renditions",
       },
       {
+        slug: "meters-loudness",
         name: "Live meters and loudness",
         text: "A meter on every channel of every track, and loudness measured per destination, after routing, from one ingest.",
         doc: "audio-routing",
       },
       {
+        slug: "live-captions",
         name: "Live captions",
         text: "Transcribed on your own machine, with a caption route per destination where the platform offers one. Every destination starts with captions off.",
         doc: "captions",
       },
       {
+        slug: "broadcast-delay",
         name: "Broadcast delay",
         text: "Hold a destination back by up to 15 minutes.",
         doc: "broadcast-delay",
       },
       {
+        slug: "broadcast-from-file",
         name: "Broadcast from a file",
         text: "A file that plays on a loop as the ingest, switched on by a schedule.",
         doc: "scheduled-broadcast",
@@ -234,21 +240,25 @@ export const ALSO = [
     blurb: "sign-in, keys and destinations",
     items: [
       {
+        slug: "platform-sign-in",
         name: "Platform sign-in",
         text: "Connect YouTube, Twitch, Facebook or Kick and polyemesis fetches the stream key itself, then pushes your title, category and description at go-live. Nothing proxies your video. X sign-in, go-live and chat are built and on by default (set POLYEMESIS_X_LIVESTREAM=0 to switch them off).",
         doc: "connecting-platforms",
       },
       {
+        slug: "any-target",
         name: "Any RTMP, RTMPS or SRT target",
         text: "A pasted key is a fully supported destination, not a degraded one: twenty-three other presets in the catalogue work exactly that way, over RTMP, RTMPS or SRT.",
         doc: "platforms",
       },
       {
+        slug: "youtube-broadcast",
         name: "A YouTube broadcast made for you",
         text: "A destination linked to your channel gets its own broadcast when it goes live, bound to your stored stream key, which is never changed. It ends when you switch the destination off.",
         doc: "connecting-platforms",
       },
       {
+        slug: "obs-bridge",
         name: "OBS bridge",
         text: "OBS starting a stream starts the destinations you picked; a scene change applies a routing preset.",
         doc: "obs-bridge",
@@ -260,11 +270,13 @@ export const ALSO = [
     blurb: "who is watching",
     items: [
       {
+        slug: "own-player",
         name: "Your own player",
         text: "A player page polyemesis serves itself, public or protected by a playback token, beside the fan-out rather than instead of it.",
         doc: "quickstart",
       },
       {
+        slug: "audience",
         name: "Audience across platforms",
         text: "Viewer counts from YouTube, Twitch, Kick and your own player on the Dashboard while you are live, and a report per stream afterwards.",
         doc: "api",
@@ -276,31 +288,37 @@ export const ALSO = [
     blurb: "keeping it running",
     items: [
       {
+        slug: "monitoring",
         name: "Monitoring",
         text: "Host CPU, memory, relay throughput, ingest loss and the live FFmpeg output of each process.",
         doc: "monitoring",
       },
       {
+        slug: "prometheus",
         name: "Prometheus metrics and alerts",
         text: "Everything the dashboard draws is also available as Prometheus metrics, plus in-process alert rules with webhook delivery.",
         doc: "grafana",
       },
       {
+        slug: "webhooks",
         name: "Signed lifecycle webhooks",
         text: "One signed POST per transition, in order.",
         doc: "hooks",
       },
       {
+        slug: "home-assistant",
         name: "Home Assistant",
         text: "Retained MQTT telemetry with Home Assistant discovery.",
         doc: "mqtt",
       },
       {
+        slug: "tls",
         name: "TLS that configures itself",
         text: "Let's Encrypt on a public DNS name; a self-signed CA otherwise.",
         doc: "tls",
       },
       {
+        slug: "hot-reload",
         name: "Changes that do not drop the stream",
         text: "Most of what an operator can change applies without touching a process.",
         doc: "hot-reload",
