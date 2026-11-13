@@ -1367,7 +1367,7 @@ const DROPPED = {
   "/docs": [
     { contains: "documentation the docs live with the code", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page now has a breadcrumb instead, and the h1 itself is kept." },
     { contains: "getting it running the routing operating it automating it understanding it", why: "The old sidebar list ran straight into the first section's blurb; the list is now the in-page index and every blurb is kept beside its own heading." },
-    { contains: "the docs are in the same repository as the code, under docs/", why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the sentence is otherwise kept." },
+    { contains: "the docs are in the same repository as the code, under docs/", why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the link moved to a 'Browse docs/ on GitHub' line after the last group and the sentence is otherwise kept." },
   ],
 };
 const legacyMain = (route) => {

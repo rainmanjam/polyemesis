@@ -1,6 +1,6 @@
 ---
 import InnerPage from "../layouts/InnerPage.astro";
-import { SECTIONS, START_HERE, BY_FILE, docsIn, hrefOf } from "../data/docs.mjs";
+import { SECTIONS, START_HERE, BY_FILE, docsIn, hrefOf, GITHUB_BLOB } from "../data/docs.mjs";
 import type { IndexItem } from "../lib/page-index";
 
 /* A DIRECTORY THAT NOW POINTS AT PAGES, not at github.com.
@@ -20,7 +20,11 @@ import type { IndexItem } from "../lib/page-index";
  * the originals.
  */
 
-const startHere = START_HERE.map((f) => BY_FILE.get(f)).filter((d) => d !== undefined);
+const startHere = START_HERE.map((f) => {
+  const doc = BY_FILE.get(f);
+  if (!doc) throw new Error(`docs index: START_HERE lists ${f}, which is not a published doc`);
+  return doc;
+});
 const index: IndexItem[] = [
   { id: "start-here", label: "Start here" },
   ...SECTIONS.map((s) => ({ id: s.id, label: s.title })),
@@ -95,4 +99,8 @@ const index: IndexItem[] = [
       );
     })
   }
+
+  <p class="docs-more">
+    <a class="more" href={`${GITHUB_BLOB}/docs`} rel="noopener">Browse docs/ on GitHub</a>
+  </p>
 </InnerPage>

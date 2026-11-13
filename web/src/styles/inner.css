@@ -582,6 +582,7 @@
   /* ===== docs-index ===== */
 
   .docs-start { padding-bottom: 36px; }
+  .docs-more { border-top: 1px solid var(--color-line); padding-top: 22px; }
   .docs-start > h2 {
     font-family: var(--font-display);
     font-size: 1.5rem;
@@ -592,7 +593,12 @@
   .grp {
     border-top: 1px solid var(--color-line);
     padding-bottom: 30px;
-    scroll-margin-top: 16px;
+  }
+  /* Below 1024px the index is a sticky strip under the nav: land the group
+     below both. From 1024px only the nav sticks and the global anchor offset
+     (on [id]) is enough. */
+  @media (max-width: 1023px) {
+    .grp { scroll-margin-top: calc(var(--anchor-offset) + 3rem); }
   }
   .grp > summary {
     list-style: none;

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { BY_FILE, SECTIONS, START_HERE } from "../data/docs.mjs";
+import { BY_FILE, GITHUB_BLOB, SECTIONS, START_HERE } from "../data/docs.mjs";
 
 /* The docs index: the data by value, the page by source text (rendering is
  * check-build's job). */
@@ -24,6 +24,12 @@ describe("docs index", () => {
     expect(SECTIONS.length).toBeGreaterThan(0);
     expect(page).toContain("docsIn(");
     expect(page).toContain("SECTIONS.map");
+  });
+
+  it("links the repository's docs folder and fails the build on a missing start doc", () => {
+    expect(GITHUB_BLOB).toMatch(/^https:/);
+    expect(page).toContain("${GITHUB_BLOB}/docs");
+    expect(page).toContain("throw new Error");
   });
 
   it("carries no page-level style", () => {
