@@ -948,7 +948,7 @@ const DEMO_SCHEDULES = [
   "Saturday rehearsal — on air 11:00",
 ];
 
-test("automation — schedules and alert rules", async ({ page }) => {
+test("automation — alert rules, with the schedules asserted on their tab", async ({ page }) => {
   await page.goto("/automation");
   await populated(page, "No alert rules yet");
   // The schedules live on their own tab, so one frame holds one of the two: the
@@ -963,10 +963,25 @@ test("automation — schedules and alert rules", async ({ page }) => {
     await expect(page.getByText(name, { exact: true }).first(), `alert rule ${name} is not on the Alerts tab`).toBeVisible({ timeout: 30_000 });
   }
   await settle(page, 1500);
+  // A HEALTHY RIG DELIVERS NOTHING. The Delivery card must read Failed 0 and
+  // Retried 0 and hold no error box at the shutter: a failed delivery on a demo
+  // install is a rule subscribed to an event the run itself produces (the
+  // fixture's note says which are avoided). Read from the card, then asserted
+  // again after the shutter's settle by the guard's own failed-word check.
+  const delivery = page.locator("[data-slot=card]").filter({ has: page.locator("[data-slot=card-title]", { hasText: "Delivery" }) }).first();
+  await expect(delivery, "no Delivery card").toBeVisible();
+  const counters = await delivery.innerText();
+  for (const label of ["Failed", "Retried"]) {
+    const m = new RegExp(`${label}\\s*\\n?\\s*(\\d+)`, "i").exec(counters);
+    expect(m, `the Delivery card has no ${label} count`).not.toBeNull();
+    expect(Number(m![1]), `the Delivery card reads ${label} ${m![1]}: an alert delivery failed during the run`).toBe(0);
+  }
+  await expect(delivery.getByText(/no such host|lookup|Post https?:/i), "the Delivery card holds an error box").toHaveCount(0);
+  await expect(delivery.locator('[class*="border-down"]'), "the Delivery card holds an alert box").toHaveCount(0);
   await snap(page, "13-automation.png");
 });
 
-test("clips — the editor", async ({ page }) => {
+test("clips — the rolling buffer and a captured clip", async ({ page }) => {
   await page.goto("/clips");
   // THE BUFFER ARMED AND A CLIP CAPTURED FROM IT: neither the "rolling buffer is
   // off" empty state nor "No clips yet." is the picture.

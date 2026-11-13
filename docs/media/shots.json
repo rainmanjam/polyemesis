@@ -163,7 +163,7 @@
     {
       "file": "13-automation.png",
       "scene": "full",
-      "test": "automation — schedules and alert rules",
+      "test": "automation — alert rules, with the schedules asserted on their tab",
       "screen": "/automation",
       "site": false,
       "usedBy": [],
@@ -171,12 +171,12 @@
       "allowFailedWords": [
         "failed"
       ],
-      "caption": "\"Failed\" is the label of the Delivery card's counter, which reads 0; it is the column name, not a state."
+      "caption": "\"Failed\" is the Delivery card's static label; the test asserts the count beside it is 0."
     },
     {
       "file": "14-clips.png",
       "scene": "full",
-      "test": "clips — the editor",
+      "test": "clips — the rolling buffer and a captured clip",
       "screen": "/clips",
       "site": false,
       "usedBy": [],

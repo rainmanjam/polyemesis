@@ -235,8 +235,16 @@ for name in ("dashboard-1-programme.png", "dashboard-2-programmes.png", "dashboa
     path = os.path.join(sys.argv[1], name)
     was = os.path.getsize(path)
     im = Image.open(path).convert("RGB")
-    im.quantize(colors=256, method=Image.MEDIANCUT,
-                dither=Image.FLOYDSTEINBERG).save(path, optimize=True)
+    # Written beside the target and renamed over it, as demo-seed.sh does: a
+    # kill mid-save leaves the old file, never a truncated one.
+    tmp = path + ".tmp"
+    try:
+        im.quantize(colors=256, method=Image.MEDIANCUT,
+                    dither=Image.FLOYDSTEINBERG).save(tmp, format="PNG", optimize=True)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     before, after = before + was, after + os.path.getsize(path)
 print(f"    {before // 1024}K -> {after // 1024}K "
       f"({100 - 100 * after / before:.0f}% smaller, resolution unchanged)")
