@@ -98,11 +98,22 @@ fi
 echo "==> building the UI and the capture image"
 ( cd "$ROOT" && make build >/dev/null ) || { echo "make build failed"; exit 1; }
 GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+# The console header prints this. A build without it reads "dev", which is not
+# a version anyone runs; the latest release tag is what demo-seed.sh stamps too.
+LANES_VERSION="${CAPTURE_VERSION:-$(cd "$ROOT" && git describe --tags --abbrev=0 2>/dev/null || echo dev)}"
+if [ "$LANES_VERSION" = dev ]; then
+  echo "no release tag found (shallow clone?): the header would read \"dev\". git fetch --tags, or set CAPTURE_VERSION." >&2
+  exit 1
+fi
 ( cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH_LOCAL" \
-    go build -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
+    go build -trimpath -ldflags "-s -w -X main.version=$LANES_VERSION" \
+    -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
   echo "cross-compile for the container failed"; exit 1; }
 docker build -q -t "$IMAGE" -f - "$WORK" >/dev/null <<'DOCKERFILE' || { echo "docker build failed"; exit 1; }
-FROM alpine:3.20
+# 3.24, as demo-seed.sh and capture-media.sh use: polyemesis refuses to start on
+# the FFmpeg 6.1 that 3.20 ships, and the server exited before the seeder's
+# first request.
+FROM alpine:3.24
 RUN apk add --no-cache ffmpeg ca-certificates
 COPY polyemesis-linux /usr/local/bin/polyemesis
 ENTRYPOINT ["/usr/local/bin/polyemesis"]
