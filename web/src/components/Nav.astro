@@ -36,17 +36,17 @@ const active = (href: string) => here === href || here.startsWith(href + "/");
           <a
             href={l.href}
             aria-current={active(l.href) ? "page" : undefined}
-            class:list={["transition-colors", active(l.href) ? "text-fg" : "text-muted hover:text-fg"]}
+            class:list={["nav-link", "transition-colors", active(l.href) ? "text-fg" : "text-muted hover:text-fg"]}
           >
             {l.label}
           </a>
         ))
       }
-      <a href={GITHUB} rel="noopener" class="text-muted transition-colors hover:text-fg">GitHub</a>
+      <a href={GITHUB} rel="noopener" class="nav-link text-muted transition-colors hover:text-fg">GitHub</a>
       <a
         href="/download"
         aria-current={active("/download") ? "page" : undefined}
-        class="btn btn-ghost !px-3.5 !py-2 !font-mono !text-[13px] !font-normal"
+        class="nav-install btn btn-ghost !px-3.5 !py-2 !font-mono !text-[13px] !font-normal"
       >
         Install polyemesis
       </a>
@@ -74,17 +74,17 @@ const active = (href: string) => here === href || here.startsWith(href + "/");
             <a
               href={l.href}
               aria-current={active(l.href) ? "page" : undefined}
-              class:list={["py-2.5", active(l.href) ? "text-fg" : "text-muted hover:text-fg"]}
+              class:list={["nav-link", "py-2.5", active(l.href) ? "text-fg" : "text-muted hover:text-fg"]}
             >
               {l.label}
             </a>
           ))
         }
-        <a href={GITHUB} rel="noopener" class="py-2.5 text-muted hover:text-fg">GitHub</a>
+        <a href={GITHUB} rel="noopener" class="nav-link py-2.5 text-muted hover:text-fg">GitHub</a>
         <a
           href="/download"
           aria-current={active("/download") ? "page" : undefined}
-          class="btn btn-ghost mt-2 !font-mono !text-[13px] !font-normal"
+          class="nav-install btn btn-ghost mt-2 !font-mono !text-[13px] !font-normal"
         >
           Install polyemesis
         </a>

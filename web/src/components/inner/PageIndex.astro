@@ -1,0 +1,62 @@
+---
+/* The in-page index. Both forms are server-rendered and CSS shows one at a
+ * time (the rail from 1024px, the phone form below it), so it is a plain list
+ * of working anchors with scripts off. `scripts/page-index.ts` marks the
+ * current section with aria-current="true" in every copy. */
+import type { IndexItem } from "../../lib/page-index";
+
+interface Props {
+  items: IndexItem[];
+  label?: string;
+  variant?: "both" | "rail" | "phone";
+  phone?: "strip" | "disclosure";
+}
+
+const { items, label = "On this page", variant = "both", phone = "strip" } = Astro.props;
+---
+
+<div data-index data-variant={variant}>
+  {
+    variant !== "phone" && (
+      <nav class="rail" aria-label={label}>
+        <p class="idx-hd">{label}</p>
+        <ol>
+          {items.map((it) => (
+            <li class={it.depth === 3 ? "d3" : undefined}>
+              <a href={`#${it.id}`}>{it.label}</a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    )
+  }
+  {
+    variant !== "rail" && phone === "strip" && (
+      <nav class="idx-strip" aria-label={label}>
+        <ol>
+          {items.map((it) => (
+            <li class={it.depth === 3 ? "d3" : undefined}>
+              <a href={`#${it.id}`}>{it.label}</a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    )
+  }
+  {
+    variant !== "rail" && phone === "disclosure" && (
+      <details class="idx-details">
+        <summary>{label}</summary>
+        <nav aria-label={label}>
+          <ol>
+            {items.map((it) => (
+              <li class={it.depth === 3 ? "d3" : undefined}>
+                <a href={`#${it.id}`}>{it.label}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      </details>
+    )
+  }
+</div>
