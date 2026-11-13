@@ -24,6 +24,18 @@
 //	go run scripts/demo_seed_driver.go <base> recordings <fixture>
 //	go run scripts/demo_seed_driver.go <base> census     <fixture>
 //
+// The sports scene adds (see scripts/lib-demo-sports.sh); <base> is "-" for the
+// one that needs no server:
+//
+//	go run scripts/demo_seed_driver.go -      guardfixture <fixture> <host>
+//	go run scripts/demo_seed_driver.go <base> guard        <fixture> <host>
+//	go run scripts/demo_seed_driver.go <base> routing      <fixture> <initial|final>
+//	go run scripts/demo_seed_driver.go <base> start        <fixture> <host>
+//	go run scripts/demo_seed_driver.go <base> stop         <fixture>
+//	go run scripts/demo_seed_driver.go <base> status       <fixture>
+//	go run scripts/demo_seed_driver.go <base> waitlive     <fixture> [seconds]
+//	go run scripts/demo_seed_driver.go <base> secrets      <fixture>   (stdout must be a file)
+//
 // Stdout is machine-readable, one record per line, tab-separated. Everything a
 // human reads goes to stderr, so the caller can consume the first without
 // filtering the second.
@@ -37,9 +49,11 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/demorig"
 	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
@@ -47,7 +61,10 @@ import (
 // creates. REQUIRED rather than defaulted for the reason scripts/seed_demo.go
 // gives: a literal here is a password in a public repository, however
 // short-lived the account it protects.
-var password = mustEnv("E2E_PASSWORD")
+//
+// Read in authenticate, not at package level: the offline commands (recordings,
+// guardfixture) must run with no credential in the environment at all.
+var password string
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)
@@ -125,7 +142,7 @@ var (
 
 func main() {
 	if len(os.Args) < 4 {
-		die("usage: demo_seed_driver.go <base> <setup|wait|finish|recordings|census> <fixture>")
+		die("usage: demo_seed_driver.go <base> <setup|wait|finish|recordings|census|guardfixture|guard|routing|start|stop|status|waitlive|secrets> <fixture> [args...]")
 	}
 	base = strings.TrimSuffix(os.Args[1], "/") + "/api/v1"
 	cmd := os.Args[2]
@@ -135,6 +152,12 @@ func main() {
 	// needs a server. The shell calls it while the container is still starting.
 	if cmd == "recordings" {
 		printRecordingPlan(fx)
+		return
+	}
+	// Same for the allow-list check on the fixture itself: it runs before any
+	// container exists, which is the point of it.
+	if cmd == "guardfixture" {
+		guardFixture(fx, argOrDie(4, "guardfixture <fixture> <host>"))
 		return
 	}
 
@@ -152,6 +175,28 @@ func main() {
 		finish(fx)
 	case "census":
 		census(fx)
+	case "guard":
+		guardLive(argOrDie(4, "guard <fixture> <host>"))
+	case "routing":
+		routeAll(fx, argOrDie(4, "routing <fixture> <initial|final>"))
+	case "start":
+		startAll(argOrDie(4, "start <fixture> <host>"))
+	case "stop":
+		stopAll()
+	case "status":
+		statusAll()
+	case "waitlive":
+		secs := 120
+		if len(os.Args) > 4 {
+			n, err := strconv.Atoi(os.Args[4])
+			if err != nil || n <= 0 {
+				die("waitlive: %q is not a positive number of seconds", os.Args[4])
+			}
+			secs = n
+		}
+		waitLive(fx, time.Duration(secs)*time.Second)
+	case "secrets":
+		printSecrets(fx)
 	default:
 		die("unknown command %q", cmd)
 	}
@@ -553,6 +598,284 @@ func census(fx *fixture) {
 	fmt.Printf("recordings\t%d\t%d\n", len(recs), len(fx.Recordings))
 }
 
+// --------------------------------------------------------- 6. the sports rig
+
+// The commands below drive the sports scene (one programme, five destinations
+// that publish only to a local receiver). They are small on purpose; the one
+// part that must be right, the host allow-list, is package demorig and is
+// unit-tested.
+
+func argOrDie(i int, usage string) string {
+	if len(os.Args) <= i || os.Args[i] == "" {
+		die("usage: demo_seed_driver.go <base> %s", usage)
+	}
+	return os.Args[i]
+}
+
+// guardFixture refuses a fixture whose destinations point anywhere but host.
+// Offline: runs before any container is started.
+func guardFixture(fx *fixture, host string) {
+	var rows []demorig.DestRow
+	for _, s := range fx.Sources {
+		for _, d := range s.Destinations {
+			url, _ := d.Rest["url"].(string)
+			backup, _ := d.Rest["backupUrl"].(string)
+			rows = append(rows, demorig.DestRow{Name: d.Name, URL: url, BackupURL: backup})
+		}
+	}
+	if len(rows) == 0 {
+		die("the fixture has no destinations to check")
+	}
+	if err := demorig.CheckHosts(rows, []string{host}); err != nil {
+		die("%v", err)
+	}
+	fmt.Fprintf(os.Stderr, "  fixture guard ok: %d destinations, every host is %s\n", len(rows), host)
+}
+
+// storedDest is one destination as the server holds it (the "destination" half
+// of a list or get response).
+type storedDest struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	BackupURL string `json:"backupUrl"`
+}
+
+// listStored reads GET /destinations, whose rows wrap each destination in
+// {"destination": ...}. Order is the server's list order.
+func listStored() []storedDest {
+	var rows []struct {
+		Destination storedDest `json:"destination"`
+	}
+	decode(getRaw("/destinations"), &rows)
+	out := make([]storedDest, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Destination)
+	}
+	return out
+}
+
+// guardLive is the second safety layer: it checks what the SERVER stored, not
+// what the fixture said, because those can differ (an edit in the console, a
+// reused data directory).
+func guardLive(host string) {
+	stored := listStored()
+	if len(stored) == 0 {
+		die("the server holds no destinations to check")
+	}
+	rows := make([]demorig.DestRow, 0, len(stored))
+	for _, d := range stored {
+		rows = append(rows, demorig.DestRow{Name: d.Name, URL: d.URL, BackupURL: d.BackupURL})
+	}
+	if err := demorig.CheckHosts(rows, []string{host}); err != nil {
+		die("%v", err)
+	}
+	fmt.Fprintf(os.Stderr, "  guard ok: %d stored destinations, every host is %s\n", len(rows), host)
+}
+
+// routeAll sets every fixture destination's track selection. "initial": all
+// tracks at gain 1.0. "final": for the destination at position i, the i-th
+// commentary track plus every track that is not commentary (the crowd bed).
+// Only profile.tracks changes; the rest of what GET returned is sent back as it was.
+func routeAll(fx *fixture, state string) {
+	if state != "initial" && state != "final" {
+		die("routing: unknown state %q (want initial or final)", state)
+	}
+	ids := map[string]int64{}
+	for _, d := range listStored() {
+		ids[d.Name] = d.ID
+	}
+	for _, s := range fx.Sources {
+		var commentary []int
+		for i, a := range s.Audio {
+			if a.Role == "commentary" {
+				commentary = append(commentary, i)
+			}
+		}
+		for pos, d := range s.Destinations {
+			id, ok := ids[d.Name]
+			if !ok {
+				die("routing: destination %q is not on the server", d.Name)
+			}
+			on := map[int]bool{}
+			for i := range s.Audio {
+				on[i] = state == "initial"
+			}
+			if state == "final" {
+				if pos >= len(commentary) {
+					die("routing: destination %q is number %d but %q has only %d commentary tracks", d.Name, pos+1, s.Name, len(commentary))
+				}
+				for i, a := range s.Audio {
+					on[i] = a.Role != "commentary" || i == commentary[pos]
+				}
+			}
+			tracks := make([]map[string]any, 0, len(s.Audio))
+			for i := range s.Audio {
+				tracks = append(tracks, map[string]any{"track": i, "enabled": on[i], "gain": 1.0})
+			}
+			body, _ := get(fmt.Sprintf("/destinations/%d", id))["destination"].(map[string]any)
+			if body == nil {
+				die("routing: GET /destinations/%d returned no destination", id)
+			}
+			profile, _ := body["profile"].(map[string]any)
+			if profile == nil {
+				profile = map[string]any{}
+				body["profile"] = profile
+			}
+			profile["tracks"] = tracks
+			put(fmt.Sprintf("/destinations/%d", id), body)
+			fmt.Fprintf(os.Stderr, "  %s: routing %s\n", d.Name, state)
+		}
+	}
+}
+
+// startAll starts every destination, one at a time, after re-checking what the
+// server stored. Never the bulk route, which would skip the guard
+// between rows.
+func startAll(host string) {
+	guardLive(host)
+	for _, d := range listStored() {
+		path := fmt.Sprintf("/destinations/%d", d.ID) + "/start"
+		if code, out := send("POST", path, map[string]any{}); code >= 300 {
+			die("start %q: %d %s", d.Name, code, truncate(string(out)))
+		}
+		fmt.Fprintf(os.Stderr, "  started %s\n", d.Name)
+	}
+}
+
+// stopAll stops every destination. The confirmation is sent although the
+// per-destination route does not ask for it: stop-all does, and a caller that
+// always says it means it never trips either.
+func stopAll() {
+	for _, d := range listStored() {
+		path := fmt.Sprintf("/destinations/%d", d.ID) + "/stop"
+		if code, out := send("POST", path, map[string]any{"confirm": true}); code >= 300 {
+			die("stop %q: %d %s", d.Name, code, truncate(string(out)))
+		}
+		fmt.Fprintf(os.Stderr, "  stopped %s\n", d.Name)
+	}
+}
+
+// liveStatus is the part of GET /status the rig reads.
+type liveStatus struct {
+	Destinations []struct {
+		ID      int64  `json:"id"`
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+		Process *struct {
+			State    string `json:"state"`
+			Progress struct {
+				Frame int64   `json:"frame"`
+				FPS   float64 `json:"fps"`
+			} `json:"progress"`
+		} `json:"process"`
+	} `json:"destinations"`
+	Loudness []struct {
+		DestinationID int64   `json:"destinationId"`
+		Mix           string  `json:"mix"`
+		Seconds       float64 `json:"seconds"`
+		Momentary     float64 `json:"momentaryLufs"`
+		Verdict       string  `json:"verdict"`
+	} `json:"loudness"`
+}
+
+// readStatus reads GET /status, which answers for the DEFAULT engine only. The
+// sports scene has one programme, so that is the whole install; do not use it
+// for the multi-programme fixture.
+func readStatus() liveStatus {
+	var st liveStatus
+	decode(getRaw("/status"), &st)
+	return st
+}
+
+// liveLoudness picks each destination's live-mix report (a report with no mix is the live one).
+func (st liveStatus) liveLoudness(id int64) (seconds, momentary float64, verdict string, ok bool) {
+	for _, l := range st.Loudness {
+		if l.DestinationID == id && (l.Mix == "" || l.Mix == "live") {
+			return l.Seconds, l.Momentary, l.Verdict, true
+		}
+	}
+	return 0, 0, "", false
+}
+
+// statusAll prints one line per destination: name, enabled, state, fps,
+// momentary LUFS and the loudness verdict.
+func statusAll() {
+	st := readStatus()
+	for _, d := range st.Destinations {
+		state, fps := "off", 0.0
+		if d.Process != nil {
+			state, fps = d.Process.State, d.Process.Progress.FPS
+		}
+		lufs, verdict := "-", "-"
+		if sec, m, v, ok := st.liveLoudness(d.ID); ok && sec > 0 {
+			lufs, verdict = strconv.FormatFloat(m, 'f', 1, 64), v
+		}
+		fmt.Printf("%s\tenabled=%t\t%s\tfps=%.1f\tmomentary=%s\tverdict=%s\n", d.Name, d.Enabled, state, fps, lufs, verdict)
+	}
+}
+
+// waitLive blocks until every fixture destination is running, has output
+// frames and has a measured momentary loudness; it dies naming the laggards.
+// GET /status is the default engine's, which is every destination here.
+func waitLive(fx *fixture, timeout time.Duration) {
+	want := map[string]bool{}
+	for _, s := range fx.Sources {
+		for _, d := range s.Destinations {
+			want[d.Name] = true
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		st := readStatus()
+		ready := map[string]bool{}
+		for _, d := range st.Destinations {
+			sec, _, _, measured := st.liveLoudness(d.ID)
+			if d.Process != nil && d.Process.State == "running" && d.Process.Progress.Frame > 0 && measured && sec > 0 {
+				ready[d.Name] = true
+			}
+		}
+		var lag []string
+		for _, s := range fx.Sources {
+			for _, d := range s.Destinations {
+				if !ready[d.Name] {
+					lag = append(lag, d.Name)
+				}
+			}
+		}
+		if len(lag) == 0 {
+			fmt.Fprintf(os.Stderr, "  %d/%d destinations live with measured loudness\n", len(want), len(want))
+			return
+		}
+		if time.Now().After(deadline) {
+			die("not live with measured loudness after %s: %s", timeout, strings.Join(lag, ", "))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// printSecrets writes "<kind>\t<value>" lines for the credentials the capture
+// must keep out of every screenshot: each programme's publish token (read from
+// the server) and each destination's stream key (from the fixture). It refuses
+// a terminal, so the values can only go to a file the caller chose.
+func printSecrets(fx *fixture) {
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice != 0 {
+		die("secrets writes credentials; redirect stdout to a file (mode 600), not a terminal")
+	}
+	ids := sourcesByName()
+	for _, s := range fx.Sources {
+		row := getSource(ids[s.Name])
+		if token, _ := row["token"].(string); token != "" {
+			fmt.Printf("token\t%s\n", token)
+		}
+		for _, d := range s.Destinations {
+			if key, _ := d.Rest["streamKey"].(string); key != "" {
+				fmt.Printf("streamkey\t%s\n", key)
+			}
+		}
+	}
+}
+
 // ----------------------------------------------------------------- inventory
 
 func sourcesByName() map[string]int64 {
@@ -632,6 +955,7 @@ func waitUp() {
 // authenticate handles first run and returning user alike, because re-seeding a
 // still-running demo has to work: adjusting a shot is something you do twice.
 func authenticate() {
+	password = mustEnv("E2E_PASSWORD")
 	if setupNeeded() {
 		if code, out := send("POST", "/setup", map[string]any{
 			"username": "admin", "password": password,

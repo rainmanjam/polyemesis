@@ -2,6 +2,9 @@ package testenv
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -139,5 +142,111 @@ func TestSportsMediaHasNoSweepingVibrato(t *testing.T) {
 		if strings.Contains(body, "("+hz+"+6*sin(") {
 			t.Errorf("voice %s Hz uses a sweeping vibrato", hz)
 		}
+	}
+}
+
+// The seed driver is //go:build ignore, so no unit test can call it; these read
+// its source (parsed, so a comment or a string cannot satisfy them).
+
+type driverSource struct {
+	text string
+	file *ast.File
+	fset *token.FileSet
+}
+
+func loadDriver(t *testing.T) driverSource {
+	t.Helper()
+	path := filepath.Join(repoRootFromTest(t), "scripts", "demo_seed_driver.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, raw, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse driver: %v", err)
+	}
+	return driverSource{text: string(raw), file: f, fset: fset}
+}
+
+// funcText returns the source text of the named top-level function.
+func (d driverSource) funcText(t *testing.T, name string) string {
+	t.Helper()
+	for _, decl := range d.file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name {
+			return d.text[d.fset.Position(fn.Pos()).Offset:d.fset.Position(fn.End()).Offset]
+		}
+	}
+	t.Fatalf("scripts/demo_seed_driver.go has no func %s", name)
+	return ""
+}
+
+func TestDemoDriverGuardsBeforeEveryStart(t *testing.T) {
+	d := loadDriver(t)
+	body := d.funcText(t, "startAll")
+	guard := strings.Index(body, "guardLive(")
+	start := strings.Index(body, `/start"`)
+	if guard < 0 || start < 0 || guard > start {
+		t.Errorf("startAll must call guardLive( before it builds a /start path (guardLive at %d, /start at %d)", guard, start)
+	}
+	// No other function may start a destination, and the bulk route would skip
+	// the per-row guard above.
+	if n := strings.Count(d.text, `/start"`); n != 1 {
+		t.Errorf(`"/start" appears %d times in the driver, want exactly once (in startAll)`, n)
+	}
+	if strings.Contains(d.text, "start-all") {
+		t.Error("the driver must not call the bulk start-all route; startAll guards then starts one by one")
+	}
+}
+
+func TestDemoDriverNeverPrintsASecret(t *testing.T) {
+	d := loadDriver(t)
+	secret := map[string]bool{"password": true, "csrf": true, "setupCode": true}
+	printers := map[string]bool{"Printf": true, "Fprintf": true, "Println": true, "Fprintln": true, "Print": true, "Fprint": true, "die": true}
+	checked := 0
+	ast.Inspect(d.file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		var name string
+		switch f := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			name = f.Sel.Name
+		case *ast.Ident:
+			name = f.Name
+		}
+		if !printers[name] {
+			return true
+		}
+		checked++
+		for _, a := range call.Args {
+			ast.Inspect(a, func(m ast.Node) bool {
+				if id, ok := m.(*ast.Ident); ok && secret[id.Name] {
+					t.Errorf("%s: %s( is given %s", d.fset.Position(id.Pos()), name, id.Name)
+				}
+				return true
+			})
+		}
+		return true
+	})
+	if checked < 10 {
+		t.Errorf("only %d print calls found; this guard has stopped matching", checked)
+	}
+	if !strings.Contains(d.funcText(t, "printSecrets"), "ModeCharDevice") {
+		t.Error("printSecrets must refuse a terminal (os.ModeCharDevice)")
+	}
+}
+
+func TestDemoDriverStopsAreConfirmed(t *testing.T) {
+	if !strings.Contains(loadDriver(t).funcText(t, "stopAll"), `"confirm"`) {
+		t.Error(`stopAll must send {"confirm": true}`)
+	}
+}
+
+func TestDemoDriverRoutesByRole(t *testing.T) {
+	// The behavioural check is the rig's receiver proof (plan 3, Task 13).
+	if !strings.Contains(loadDriver(t).funcText(t, "routeAll"), `"commentary"`) {
+		t.Error(`routeAll must choose tracks by the "commentary" role`)
 	}
 }
