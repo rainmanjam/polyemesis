@@ -766,6 +766,34 @@ for (const f of pages.filter((p) => p.startsWith("docs/"))) {
   }
 }
 
+/* ==================================================================== */
+/* DOC HEADING IDS (plan 2, task 2)                                      */
+/* ==================================================================== */
+/* EVERY h2 AND h3 IN A DOCUMENT HAS A STABLE, UNIQUE ID.
+ *
+ * The "On this page" list links to #<slug> for each heading, and the slugs are
+ * computed from the markdown by src/lib/doc-headings.ts. Those links only work
+ * if the built page carries exactly the same ids, which is the job of
+ * src/lib/hast-heading-ids.mjs. A heading with no id, an empty one, or a
+ * duplicate would make a list entry (or a cross-document link written for
+ * GitHub) land nowhere. */
+for (const f of pages.filter((p) => p.startsWith("docs/"))) {
+  const html = readFileSync(join(DIST, f), "utf8");
+  const article = /<article[^>]*doc-prose[^>]*>([\s\S]*?)<\/article>/.exec(html);
+  if (!article) continue; // the render check above reports this
+  const seen = new Set();
+  for (const m of article[1].matchAll(/<h([23])([^>]*)>/g)) {
+    const id = /\sid="([^"]*)"/.exec(m[2])?.[1];
+    if (!id) {
+      fail.push(`${f}: an <h${m[1]}> has no id (or an empty one), so the "On this page" list cannot link to it`);
+    } else if (seen.has(id)) {
+      fail.push(`${f}: heading id "${id}" appears more than once`);
+    } else {
+      seen.add(id);
+    }
+  }
+}
+
 /* EXACTLY ONE <h1> PER PAGE.
  *
  * Verified by hand once, during an audit of the six original pages, and worth
