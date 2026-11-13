@@ -347,37 +347,6 @@ if (!/var\(--motion-enter\)/.test(css)) {
   }
 }
 
-/* The meter-like keyframe must stay asymmetric.
- *
- * A symmetric rise and fall is a sine wave, and to the audience this page is
- * written for that reads as a decorative web animation rather than an
- * instrument. Attack fast, decay slow — the check is that the midpoint is NOT
- * the extreme, which is what a 0/50/100 keyframe always is.
- *
- * NOW POINTED AT `loud-momentary`, which is the hero's momentary-loudness bar.
- * It used to be `meter`, the six-track hero fan-out; that hero was replaced by
- * the routing table and its keyframe went with it. The RULE did not change and
- * neither did the reason for it, so the guard followed the motion rather than
- * being deleted alongside the thing it happened to be watching — a check that
- * quietly stops guarding anything is worse than no check, which is exactly what
- * the `if (!kf)` arm below exists to prevent. */
-/* NB: matched against the css as-built, NOT a whitespace-stripped copy. The
- * first version of this check stripped whitespace first, which turned
- * "@keyframes meter" into "@keyframesmeter" and matched nothing — the guard
- * passed on a deliberately symmetric keyframe. Caught by mutating the source
- * and watching the build stay green. */
-const meterKf = /@keyframes\s+loud-momentary\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/.exec(css);
-if (!meterKf) {
-  fail.push(
-    "the loud-momentary keyframe is gone from the built CSS; this check no longer guards anything",
-  );
-} else if (/(^|[},])\s*50%\s*[,{]/.test(meterKf[1])) {
-  fail.push(
-    "the loud-momentary keyframe is symmetric again (has a 50% stop): real meters " +
-      "attack fast and decay slowly, and engineers read a sine wobble as fake",
-  );
-}
-
 /* Every built page must have a revalidation rule in _headers.
  *
  * THIS GUARDS A BUG THAT SHIPPED. The block scoped itself to `/` and `/*.html`

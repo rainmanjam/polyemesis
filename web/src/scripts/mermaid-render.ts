@@ -26,6 +26,15 @@ function token(name: string, fallback: string): string {
   return v || fallback;
 }
 
+/** Records the diagram's natural width on its svg as --diagram-w. Mermaid fits an svg to its frame, which on a phone
+ *  shrinks a wide flowchart until its labels are 5px tall; inner.css uses this width to keep the diagram at its drawn
+ *  size on a narrow screen and let the frame scroll instead. */
+function recordNaturalWidth(el: HTMLElement): void {
+  const svg = el.querySelector("svg");
+  const width = Number.parseFloat(svg?.getAttribute("viewBox")?.split(/[\s,]+/)[2] ?? "");
+  if (svg && width > 0) svg.style.setProperty("--diagram-w", `${Math.round(width)}px`);
+}
+
 async function render(): Promise<void> {
   const targets = document.querySelectorAll<HTMLElement>(NODES);
   if (targets.length === 0) return;
@@ -90,6 +99,7 @@ async function render(): Promise<void> {
          of it -- there is no path from a reader to this string. Anything laxer
          on securityLevel would change that, which is why it is pinned. */
       el.innerHTML = svg;
+      recordNaturalWidth(el);
       el.dataset.mermaid = "done";
     } catch (err) {
       /* LEAVE THE SOURCE ON THE PAGE. A diagram that fails to a blank space is
