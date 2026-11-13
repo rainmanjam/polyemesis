@@ -109,7 +109,7 @@ describe("initChooser", () => {
     expect(narrow()).toBe(false);
   });
 
-  it("applies to every table on a page with two", () => {
+  it("hides the columns in every table it controls, and decides narrow table by table", () => {
     const p = page(2);
     initChooser(p.root);
     p.click("a");
@@ -118,6 +118,23 @@ describe("initChooser", () => {
       expect(t.classList.contains("narrow")).toBe(true);
       expect(p.hiddenIn(t, "a")).toEqual([true, true]);
     }
+  });
+
+  it("leaves a table whose columns are not the chooser's alone: neither hidden nor narrow", () => {
+    const p = page();
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      `<table class="cmp" id="costs"><thead><tr><th scope="col">Item</th>
+        <th data-col="costs-0">One</th><th data-col="costs-1">Two</th><th data-col="costs-2">Three</th>
+      </tr></thead><tbody><tr><th scope="row">r</th><td data-col="costs-0">1</td><td data-col="costs-1">2</td><td data-col="costs-2">3</td></tr></tbody></table>`,
+    );
+    initChooser(p.root);
+    p.click("a");
+    p.click("b");
+    const costs = document.getElementById("costs")!;
+    expect(costs.classList.contains("narrow")).toBe(false);
+    expect([...costs.querySelectorAll<HTMLElement>("[data-col]")].some((e) => e.hidden)).toBe(false);
+    expect(document.getElementById("t0")!.classList.contains("narrow")).toBe(true);
   });
 
   it("stops listening once disposed", () => {
