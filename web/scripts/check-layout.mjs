@@ -13,7 +13,8 @@
  * four viewport widths (rule 1 also for every bordered `.scroll-hint` table):
  *
  *   1. EDGES. The grid's left and right edges sit on the content column's
- *      edges, within 1px. The column is the `.wrap` content box, or the
+ *      edges, within 1px. The column is the content box of the nearest
+ *      `[data-column]` (rail layouts), else the `.wrap` content box, or the
  *      article on a documentation page. This is the rule a `max-w-5xl` on one
  *      grid broke on five pages: the row stopped 216px short of the grid above
  *      it on the same page.
@@ -54,9 +55,7 @@ const TOLERANCE = 1;
  * another. Change a number alongside the markup change that adds or removes a
  * grid. */
 const REQUIRED = {
-  // 0 is falsy, so the count check at `REQUIRED[route] && ...` is SKIPPED for the homepage: it is still visited
-  // and every other layout check runs on it, but "exactly zero .card-grid" is not asserted. (The 2026-11
-  // homepage has its own section layouts and no .card-grid; this is ruling-backed, not an assertion of zero.)
+  // 0 is enforced (`!== undefined`): "/" has no .card-grid, and a page that gains one must say so here.
   "/": 0,
   "/features": 1,
   "/comparison": 3,
@@ -70,6 +69,10 @@ const REQUIRED = {
   "/vs/streamelements": 3,
   "/vs/streamlabs": 1,
   "/docs/install": 1,
+  "/docs/tls": 1,
+  "/docs/platforms": 1,
+  "/docs/configuration": 1,
+  "/docs/connecting-platforms": 1,
 };
 
 /* How many cards the FIRST row of each variant holds at a viewport width --
@@ -140,6 +143,17 @@ function serve() {
 function measure() {
   const px = (v) => parseFloat(v) || 0;
   const columnOf = (grid) => {
+    // A rail layout names its main column; tables and grids are held to its content box.
+    const column = grid.closest("[data-column]");
+    if (column) {
+      const b = column.getBoundingClientRect();
+      const cs = getComputedStyle(column);
+      return {
+        left: b.left + px(cs.paddingLeft) + px(cs.borderLeftWidth),
+        right: b.right - px(cs.paddingRight) - px(cs.borderRightWidth),
+        host: "column",
+      };
+    }
     const article = grid.closest("[data-doc-column]")?.querySelector("article.doc-prose");
     if (article) {
       const b = article.getBoundingClientRect();
@@ -230,7 +244,7 @@ try {
 
       if (m.overflow > 0) fail.push(`${at}: the page scrolls sideways by ${m.overflow}px`);
       const cardGrids = m.grids.filter((g) => g.isCardGrid).length;
-      if (REQUIRED[route] && cardGrids !== REQUIRED[route]) {
+      if (REQUIRED[route] !== undefined && cardGrids !== REQUIRED[route]) {
         fail.push(`${at}: ${cardGrids} .card-grid found, expected ${REQUIRED[route]} -- update REQUIRED with the markup change`);
       }
 

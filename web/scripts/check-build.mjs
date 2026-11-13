@@ -1323,6 +1323,105 @@ for (const { rel, page, factsDate } of sourcedPages) {
   }
 }
 
+/* ==== INNER-PAGE REDESIGN (plan 2): the three checks that keep the rebuild honest ==== */
+
+/* LEGACY COPY IS KEPT. src/lib/legacy-inner.fixture.json is the text of twelve
+ * inner pages as they were before the redesign (scripts/freeze-legacy-copy.mjs,
+ * run once, never regenerated). A page may be restructured and its text
+ * reordered, but a sentence of 40 characters or more must not be lost. Both
+ * sides are normalised by norm() above, so typography and whitespace cannot
+ * fail it; the " | " seam the freeze script leaves where it cut a retired
+ * sentence also ends a sentence. A sentence that is dropped on purpose goes in DROPPED with the
+ * reason: route -> [{ contains, why }]; any legacy sentence containing the
+ * `contains` text is exempt. */
+const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
+const DROPPED = {};
+const legacyMain = (route) => {
+  const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
+  return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
+};
+{
+  for (const key of Object.keys(DROPPED)) {
+    if (!(key in LEGACY)) fail.push(`DROPPED has a key "${key}" that is not a route in legacy-inner.fixture.json, so it exempts nothing (typo?).`);
+  }
+  const sentencesOf = (text) => text.split(/(?<=[.?!])\s+|\s+\|\s+/).filter((t) => t.length >= 40);
+  for (const [route, legacy] of Object.entries(LEGACY)) {
+    const built = norm(legacyMain(route).replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<style[\s\S]*?<\/style>/g, " "));
+    const sentences = sentencesOf(legacy.text);
+    // An exemption must be specific: long enough, explained, and naming exactly one legacy sentence.
+    const exempt = [];
+    for (const d of DROPPED[route] ?? []) {
+      const needle = norm(String(d.contains ?? ""));
+      const label = `DROPPED entry for ${route} (contains: "${d.contains ?? ""}")`;
+      if (needle.length < 25) {
+        fail.push(`${label} is too short: "contains" must be at least 25 characters once normalised.`);
+      } else if (typeof d.why !== "string" || d.why.trim() === "") {
+        fail.push(`${label} has no "why".`);
+      } else {
+        const hits = sentences.filter((t) => t.includes(needle)).length;
+        if (hits !== 1) fail.push(`${label} matches ${hits} legacy sentences; it must match exactly one.`);
+        else exempt.push(needle);
+      }
+    }
+    for (const sentence of sentences) {
+      if (built.includes(sentence) || exempt.some((needle) => sentence.includes(needle))) continue;
+      fail.push(`${route} lost legacy copy: "${sentence}". Keep it, or add it to DROPPED with a reason.`);
+    }
+  }
+}
+
+/* HEADINGS KEPT. The h1 of each of those pages and every h2 in the fixture
+ * must still be an h1 or h2 of the rebuilt page (tags stripped, whitespace
+ * collapsed, same case-insensitive typography as the copy check). */
+{
+  const headings = (html, tag) =>
+    (html.match(new RegExp(`<${tag}[\\s\\S]*?</${tag}>`, "g")) || []).map(norm);
+  for (const [route, legacy] of Object.entries(LEGACY)) {
+    const main = legacyMain(route);
+    const have = new Set([...headings(main, "h1"), ...headings(main, "h2")]);
+    for (const wanted of [legacy.h1, ...legacy.h2]) {
+      if (!have.has(norm(wanted))) fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
+    }
+  }
+}
+
+/* NO EMPTY ON-THIS-PAGE. An in-page index with fewer than two links is a rail
+ * with nothing in it, and a documentation page whose article has no h2 or h3
+ * has nothing to index at all. Every element labelled "On this page" must hold
+ * at least two links; a docs page with no h2/h3 in its article must not have
+ * one. */
+{
+  const linksIn = (html, from) => {
+    const tag = /^<([a-z0-9]+)/i.exec(html.slice(from))?.[1];
+    if (!tag) return -1;
+    const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
+    re.lastIndex = from + 1;
+    let depth = 1;
+    let end = -1;
+    for (let m = re.exec(html); m; m = re.exec(html)) {
+      depth += m[1] ? -1 : 1;
+      if (depth === 0) { end = m.index; break; }
+    }
+    if (end < 0) return -1; // never closed: fail rather than count to the end of the page
+    return (html.slice(from, end).match(/<a\s[^>]*href=/g) || []).length;
+  };
+  for (const page of pages) {
+    const html = readFileSync(join(DIST, page), "utf8");
+    const labelled = [...html.matchAll(/<[a-z0-9]+\b[^>]*aria-label="On this page"[^>]*>/gi)];
+    if (labelled.length === 0) continue;
+    for (const m of labelled) {
+      const n = linksIn(html, m.index);
+      if (n < 0) fail.push(`${page} has an "On this page" element whose closing tag was not found.`);
+      else if (n < 2) fail.push(`${page} has an "On this page" index with ${n} link(s); it needs at least two or must not be rendered.`);
+    }
+    const article = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(html)?.[0];
+    if (page.startsWith("docs/")) {
+      if (!article) fail.push(`${page} has an "On this page" index but no article.doc-prose to index.`);
+      else if (!/<h[23][\s>]/.test(article)) fail.push(`${page} has an "On this page" index but its article has no h2 or h3.`);
+    }
+  }
+}
+
 /* SITE FACTS: the numbers the site states about the server.
  *
  * src/data/facts.json is written by the Go test TestWireContract from routing.MaxTracks,
