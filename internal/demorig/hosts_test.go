@@ -156,3 +156,58 @@ func TestCheckHostsNeedsAnAllowList(t *testing.T) {
 		t.Error("empty entry matched an empty host")
 	}
 }
+
+// Shape, not only host: a URL that names the receiver but is not a plain
+// rtmp, rtmps or srt address to it must not pass.
+func TestCheckHostsRefusesAnythingButAPlainURLToTheReceiver(t *testing.T) {
+	r := "polyemesis-demo-recv"
+	cases := []struct{ name, url, kind, mustNotLeak string }{
+		{"file scheme", "file://" + r + "/etc/passwd", "scheme", "passwd"},
+		{"http scheme", "http://" + r + "/x", "scheme", ""},
+		{"https scheme", "https://" + r + "/x", "scheme", ""},
+		{"scheme-relative", "//" + r + "/x", "scheme", ""},
+		{"scheme-less with port", r + ":1935/live", "scheme", ""},
+		{"trailing space", "rtmp://" + r + "/x ", "characters", ""},
+		{"leading space", " rtmp://" + r + "/x", "characters", ""},
+		{"trailing newline", "rtmp://" + r + "/x\n", "characters", ""},
+		{"nul", "rtmp://" + r + "/x\x00", "characters", ""},
+		{"tee string", "rtmp://" + r + "/live|[f=flv]rtmp://a.rtmp.youtube.com/k", "characters", "youtube"},
+		{"comma list", "rtmp://" + r + "/a,rtmp://youtube/k", "characters", "youtube"},
+		{"space list", "rtmp://" + r + "/a rtmp://youtube/k", "characters", "youtube"},
+		{"backslash", "rtmp://" + r + "\\@evil.com/x", "characters", "evil"},
+		{"srt query", "srt://" + r + ":1935?streamid=x&host=evil.com", "query", "evil"},
+		{"rtmp query", "rtmp://" + r + "/live?x=1", "query", ""},
+		{"empty query", "rtmp://" + r + "/live?", "query", ""},
+		{"fragment", "rtmp://" + r + "/live#frag", "query", "frag-x"},
+		{"fragment hiding a host", "rtmp://" + r + "#@evil/x", "query", "evil"},
+		{"port zero", "rtmp://" + r + ":0/x", "port", ""},
+		{"port too big", "rtmp://" + r + ":65536/x", "port", ""},
+		{"empty port", "rtmp://" + r + ":/x", "port", ""},
+	}
+	for _, c := range cases {
+		err := CheckHosts(row("Latin", c.url), []string{r})
+		if err == nil {
+			t.Errorf("%s: %q accepted", c.name, c.url)
+			continue
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "Latin") || !strings.Contains(msg, c.kind) {
+			t.Errorf("%s: error should name the destination and %q: %v", c.name, c.kind, err)
+		}
+		if c.mustNotLeak != "" && strings.Contains(msg, c.mustNotLeak) {
+			t.Errorf("%s: error leaked part of the URL: %v", c.name, err)
+		}
+	}
+	for _, u := range []string{
+		"rtmp://" + r + "/live", "rtmps://" + r + ":443/live", "srt://" + r + ":6000", "SRT://" + r + ":65535",
+		"RtMp://" + r + ":1/live/key",
+	} {
+		if err := CheckHosts(row("Latin", u), []string{r}); err != nil {
+			t.Errorf("%q refused: %v", u, err)
+		}
+	}
+	// The same shape rules apply to the backup URL.
+	if err := CheckHosts([]DestRow{{Name: "L", URL: "rtmp://" + r + "/x", BackupURL: "http://" + r + "/y"}}, []string{r}); err == nil {
+		t.Error("backup with a bad scheme accepted")
+	}
+}

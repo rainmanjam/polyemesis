@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // DestRow is one destination as the fixture or the server holds it.
@@ -46,23 +48,55 @@ func CheckHosts(rows []DestRow, allowed []string) error {
 	return fmt.Errorf("demo rig: destinations outside the allow-list: %s", strings.Join(bad, "; "))
 }
 
-// hostProblem returns "" when raw is acceptable, else a message with no userinfo.
+// hostProblem returns "" when raw is acceptable, else a short kind of problem
+// (or the offending hostname) that never contains userinfo, path or key.
+//
+// Shape is checked before the host: a string that names the receiver but is a
+// list, a tee description, a file or http URL, or carries a query that could
+// redirect (srt streamid/host parameters) is refused even though its hostname
+// would pass.
 func hostProblem(raw string, allow []string) string {
 	if raw == "" {
 		return "empty URL"
+	}
+	for _, c := range raw {
+		if unicode.IsSpace(c) || unicode.IsControl(c) || strings.ContainsRune(`|,\`, c) {
+			return "URL has forbidden characters"
+		}
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "URL does not parse"
 	}
+	switch strings.ToLower(u.Scheme) {
+	case "rtmp", "rtmps", "srt":
+	default:
+		return "URL scheme is not rtmp, rtmps or srt"
+	}
 	host := u.Hostname()
 	if host == "" {
 		return "URL has no host"
 	}
+	allowedHost := false
 	for _, a := range allow {
 		if strings.EqualFold(host, a) {
-			return ""
+			allowedHost = true
+			break
 		}
 	}
-	return fmt.Sprintf("host %q is not allowed", host)
+	if !allowedHost {
+		return fmt.Sprintf("host %q is not allowed", host)
+	}
+	if strings.ContainsAny(raw, "?#") {
+		return "URL has a query or fragment"
+	}
+	if strings.HasSuffix(u.Host, ":") {
+		return "URL has an empty port"
+	}
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return "URL port is not 1 to 65535"
+		}
+	}
+	return ""
 }
