@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { KEPT_WITHOUT_USER, withoutComments } from "../../../scripts/check-shots.mjs";
+import { KEPT_WITHOUT_USER, sourceFiles, withoutComments } from "../../../scripts/check-shots.mjs";
 
 /* Every screenshot kept in the site folder is used by something under web/src.
  * A capture nothing references is dead weight in the repository and in every
@@ -16,20 +16,9 @@ const SHOTS = join(SRC, "assets", "shots");
 const WHITELIST = KEPT_WITHOUT_USER;
 const WHITELIST_LENGTH = 1; // it can only grow in plain sight: a new entry must change this number too
 
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (p === SHOTS) continue;
-    if (e.isDirectory()) out.push(...sourceFiles(p));
-    else if (!/\.test\.[a-z]+$/.test(e.name) && !/\.(png|jpe?g|webp|avif|woff2?|glb)$/.test(e.name)) out.push(p);
-  }
-  return out;
-}
-
 describe("screenshots in src/assets/shots", () => {
   const shots = readdirSync(SHOTS).filter((f) => f.endsWith(".png"));
-  const sources = sourceFiles(SRC).map((f) => withoutComments(readFileSync(f, "utf8")));
+  const sources = sourceFiles(SRC, SHOTS).map((f) => withoutComments(readFileSync(f, "utf8")));
 
   it("finds the folder and the sources it searches", () => {
     expect(shots.length).toBeGreaterThanOrEqual(8);

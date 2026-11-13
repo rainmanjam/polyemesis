@@ -76,6 +76,7 @@ on:
       - "scripts/demo-seed.fixture.json"
       - "scripts/check-shots.mjs"
       - "scripts/check-shots.test.mjs"
+      - "ui/e2e/capture.spec.ts"
       - "go.mod"
       - "ui/package.json"
       - "CHANGELOG.md"
@@ -172,7 +173,7 @@ jobs:
           echo "changed files:"; printf '%s\n' "$CHANGED" | sed 's/^/  /'
           # The globs the `pull_request:` filter used to carry, plus the files
           # web/scripts/check-build.mjs reads from outside web/ and docs/ (the
-          # root README, CHANGELOG.md (web/src/lib/release.ts reads it for the hero's version and date), go.mod, ui/package.json, the routing and ffmpeg constants, the demo-seed fixture and the shot-manifest script the site tests read, the
+          # root README, CHANGELOG.md (web/src/lib/release.ts reads it for the hero's version and date), go.mod, ui/package.json, the routing and ffmpeg constants, the demo-seed fixture, the shot-manifest script and the capture spec the site tests read, the
           # Stream Deck plugin's three Node-floor files, and the plugin's key-layout code
           # (src/, scripts/keyPalette.mjs and its key images) that the homepage's Stream Deck
           # section imports); the
@@ -180,7 +181,7 @@ jobs:
           # docs/** is load-bearing and not a courtesy -- astro.config.mjs maps
           # /docs/${slug} onto the repository's own docs/, so a docs-only change
           # IS a site change. See the comment on the triggers above.
-          if grep -qE '^(web/|docs/|README\.md$|go\.mod$|ui/package\.json$|CHANGELOG\.md$|internal/routing/profile\.go$|internal/ffmpeg/detect\.go$|scripts/demo-seed\.fixture\.json$|scripts/check-shots\.mjs$|scripts/check-shots\.test\.mjs$|integrations/streamdeck/(README\.md|package\.json|scripts/keyPalette\.mjs|src/.*|com\.polyemesis\.streamdeck\.sdPlugin/(manifest\.json|imgs/.*))$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
+          if grep -qE '^(web/|docs/|README\.md$|go\.mod$|ui/package\.json$|CHANGELOG\.md$|internal/routing/profile\.go$|internal/ffmpeg/detect\.go$|scripts/demo-seed\.fixture\.json$|scripts/check-shots\.mjs$|scripts/check-shots\.test\.mjs$|ui/e2e/capture\.spec\.ts$|integrations/streamdeck/(README\.md|package\.json|scripts/keyPalette\.mjs|src/.*|com\.polyemesis\.streamdeck\.sdPlugin/(manifest\.json|imgs/.*))$|\.github/workflows/pages\.yml$)' <<<"$CHANGED"; then
             echo "site=true" >> "$GITHUB_OUTPUT"
             echo "touches the site: building"
           else

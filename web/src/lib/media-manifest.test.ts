@@ -90,7 +90,16 @@ describe("docs/media/shots.json", () => {
 
   it("requires a caption for any allowed failed word", () => {
     for (const s of manifest.shots) {
-      if (s.allowFailedWords.length > 0) expect([s.file, (s.caption ?? "").length > 0]).toEqual([s.file, true]);
+      if (s.allowFailedWords.length > 0) expect([s.file, (s.caption ?? "").trim().length > 0]).toEqual([s.file, true]);
     }
+  });
+
+  it("pins the declared exceptions", () => {
+    const by = (f: string) => manifest.shots.find((s) => s.file === f)?.exception;
+    expect(by("09-chat.png")).toBe("fixture-messages");
+    expect(by("22-platforms-connected.png")).toBe("fixture-responses");
+    expect(by("02-routing-hero.png")).toBe("clip");
+    expect(by("07-monitoring.png")).toBe("framed");
+    expect(manifest.shots.filter((s) => s.exception !== null)).toHaveLength(4);
   });
 });

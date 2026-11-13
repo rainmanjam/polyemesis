@@ -16,7 +16,6 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const MANIFEST = join(HERE, "..", "docs", "media", "shots.json");
 
 /** Site copies kept with no page using them, on purpose. Plan 4 removes an
  *  entry when it uses the file. web/src/lib/shots-usage.test.ts pins the length. */
@@ -30,7 +29,13 @@ export function withoutComments(text) {
     .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1"); // line comments, not the // of a URL
 }
 
-function sourceFiles(dir, skipDir) {
+/** Every source file under `dir` a page could use an image from: not tests, not
+ *  binaries, not `skipDir` (the folder the shots themselves are in).
+ *  @param {string} dir
+ *  @param {string} skipDir
+ *  @returns {string[]} */
+export function sourceFiles(dir, skipDir) {
+  /** @type {string[]} */
   const out = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
@@ -78,14 +83,19 @@ export function missingOrStale(manifest, scene, dir, sinceMs, statFn = realStat)
   return { missing, stale, foreign };
 }
 
-function main(argv) {
-  const manifest = JSON.parse(readFileSync(MANIFEST, "utf8"));
+/** The CLI. Exit 0 all good, 1 something to report, 2 a usage or input error.
+ *  SHOT_MANIFEST, SHOT_WEB_SRC and SHOT_DIR move its three inputs (the tests
+ *  point them at a temporary folder). */
+export function main(argv, env = process.env) {
+  const manifestPath = env.SHOT_MANIFEST ?? join(HERE, "..", "docs", "media", "shots.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   if (argv[0] === "--write-used-by") {
+    const webSrc = env.SHOT_WEB_SRC ?? join(HERE, "..", "web", "src");
     for (const s of manifest.shots) {
-      s.usedBy = usersOf(s.file, join(HERE, "..", "web", "src"));
+      s.usedBy = usersOf(s.file, webSrc);
       s.site = s.usedBy.length > 0 || KEPT_WITHOUT_USER.includes(s.file);
     }
-    writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2) + "\n");
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
     return 0;
   }
   const [scene, marker] = argv;
@@ -93,8 +103,18 @@ function main(argv) {
     console.error("usage: check-shots.mjs <scene> <marker-file> | --write-used-by");
     return 2;
   }
-  const dir = process.env.SHOT_DIR ?? join(HERE, "..", "docs", "media");
-  const r = missingOrStale(manifest, scene, dir, statSync(marker).mtimeMs);
+  if (!manifest.shots.some((s) => s.scene === scene)) {
+    const known = [...new Set(manifest.shots.map((s) => s.scene))].join(", ");
+    console.error(`no shot in the manifest has scene "${scene}" (known: ${known})`);
+    return 2;
+  }
+  const markerStat = realStat(marker);
+  if (!markerStat) {
+    console.error(`marker file ${marker} does not exist`);
+    return 2;
+  }
+  const dir = env.SHOT_DIR ?? join(HERE, "..", "docs", "media");
+  const r = missingOrStale(manifest, scene, dir, markerStat.mtimeMs);
   for (const [label, list] of Object.entries(r)) {
     if (list.length > 0) console.log(`${label}: ${list.join(", ")}`);
   }
