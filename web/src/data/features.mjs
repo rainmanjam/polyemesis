@@ -48,7 +48,7 @@ export const LEAD = {
   heading: "Every destination, its own mix.",
   accent: "mix",
   body: [
-    "Your encoder sends separate audio tracks: host, commentary, room. Each destination picks its own mix of them, so every audience gets its language, its commentary or its clean feed, from one upload and one video.",
+    "One encoder sends up to 32 audio tracks, and every destination gets its own mix of them, from one upload and one video encode. Two languages, home and away commentary, a clean game feed: each is a destination that takes the tracks it needs.",
     "polyemesis ingests once and lets you pick, per destination, which tracks get summed into the stereo feed that destination receives.",
   ],
 };
@@ -130,7 +130,7 @@ export const FAILOVER_FACTS = [
   "The ladder: primary ingest, standby ingest, scheduled file, generated slate. The platform sees one continuous connection while the source underneath changes.",
   "A scheduled file is a fallback for nobody streaming, so it sits below a live encoder and above the slate.",
   "By hand: pin the source to primary, backup or slate, or hand it back to auto.",
-  "A weak primary counts as down when it stays below your floor: 800 kbps, 1500 ms round-trip time or 15% packet loss, held for 5 seconds. Those are the defaults, and 0 turns a threshold off. Round-trip time and loss are measured on SRT and SRTLA only.",
+  "A degraded link is left when the primary stays below your floor: 800 kbps, 1500 ms round-trip time or 15% packet loss, held for 5 seconds. Those are the defaults, and 0 turns a threshold off. Round-trip time and loss are measured on SRT and SRTLA only.",
   "Off by default: turn it on in Settings → Pipeline → Failover.",
   "Stop on ingest loss stops the live destinations instead of airing dead video, for any encoder. It is off until you turn it on.",
 ];
@@ -214,7 +214,7 @@ export const ALSO = [
       },
       {
         name: "Live captions",
-        text: "Transcribed on your own machine, then sent to each destination by the route that destination accepts.",
+        text: "Transcribed on your own machine, with a caption route per destination where the platform offers one. Every destination starts with captions off.",
         doc: "captions",
       },
       {

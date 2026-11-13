@@ -68,3 +68,22 @@ describe("does not carry the old patch bay", () => {
 
   it.each(['href="/#matrix"', 'href="/#deck"'])("page source links %s", (s) => expect(features).toContain(s));
 });
+
+/* A section's eyebrow must not repeat its own title (2026-11 design review;
+ * the old `{s.eyebrow}` guard from home-copy.test.ts, adapted to the new shape). */
+describe("the features page does not repeat a title as its eyebrow", () => {
+  const norm = (t: string) => t.replace(/<[^>]+>/g, "").replace(/[^a-z0-9 ]/gi, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+  it("the lead's eyebrow is not its heading, and its heading does not contain it", () => {
+    expect(norm(LEAD.eyebrow)).not.toBe(norm(LEAD.heading));
+    expect(norm(LEAD.heading)).not.toContain(norm(LEAD.eyebrow));
+  });
+
+  // Page-source case: green on the old page by absence; it guards Task 13's rebuild.
+  it("no section's eyebrow text equals its h2 text", () => {
+    const eyebrows = [...features.matchAll(/<p class="eyebrow">([^<{]+)<\/p>/g)].map((m) => norm(m[1]));
+    const h2s = [...features.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => norm(m[1]));
+    for (const e of eyebrows) expect(h2s, `eyebrow "${e}" repeats an h2`).not.toContain(e);
+    expect(features).not.toMatch(/<p class="eyebrow">\{s\.eyebrow\}<\/p>/);
+  });
+});
