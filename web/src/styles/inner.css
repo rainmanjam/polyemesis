@@ -254,6 +254,12 @@
   @media (min-width: 768px) {
     .idx-strip { margin-inline: -40px; padding-inline: 40px; }
   }
+  /* Below 1024px the strip is stuck under the nav, so an anchor has to clear
+     both. Same mechanism as the homepage's journey bar: the stack grows, and
+     the global rule on [id] lands every target below it. */
+  @media (max-width: 1023.98px) {
+    :root:has(.idx-strip) { --stack-h: calc(var(--nav-h) + 3rem); }
+  }
   .idx-strip ol {
     display: flex;
     overflow-x: auto;
@@ -593,12 +599,6 @@
   .grp {
     border-top: 1px solid var(--color-line);
     padding-bottom: 30px;
-  }
-  /* Below 1024px the index is a sticky strip under the nav: land the group
-     below both. From 1024px only the nav sticks and the global anchor offset
-     (on [id]) is enough. */
-  @media (max-width: 1023px) {
-    .grp { scroll-margin-top: calc(var(--anchor-offset) + 3rem); }
   }
   .grp > summary {
     list-style: none;
