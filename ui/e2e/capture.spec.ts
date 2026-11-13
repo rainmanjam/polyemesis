@@ -630,7 +630,11 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   await expect(page.getByText("No lines match this view.", { exact: true })).toHaveCount(0);
   // From the Processes heading to the bottom of its table, a little wider than
   // the table: the log card below it is outside the clip.
+  // Scrolled back from the top so the app's sticky header is not in the clip.
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -90));
+  await settle(page, 400);
   const head = (await processes.boundingBox())!;
+  expect(head.y - 28, "the clip would take in the app header").toBeGreaterThanOrEqual(48);
   const table = (await processTable.boundingBox())!;
   const logBox = (await logPane.boundingBox())!;
   const bottom = table.y + table.height + 16;
