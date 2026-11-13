@@ -628,18 +628,19 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   // supervisor never heard that media was flowing.
   await expect(page.getByText("--:--:--", { exact: true })).toHaveCount(0);
   await expect(page.getByText("No lines match this view.", { exact: true })).toHaveCount(0);
-  // From the top of the Processes card to the bottom of its table, full width of
-  // the content: the log card below it is outside the clip.
-  const card = processes.locator("xpath=ancestor::*[@data-slot='card'][1]");
-  const box = (await card.boundingBox())!;
+  // From the Processes heading to the bottom of its table, a little wider than
+  // the table: the log card below it is outside the clip.
+  const head = (await processes.boundingBox())!;
+  const table = (await processTable.boundingBox())!;
   const logBox = (await logPane.boundingBox())!;
-  expect(box.y + box.height, "the Processes card runs into the log pane").toBeLessThanOrEqual(logBox.y);
+  const bottom = table.y + table.height + 16;
+  expect(bottom, "the Processes table runs into the log pane").toBeLessThanOrEqual(logBox.y);
   await snap(page, "07-monitoring.png", {
-    clip: { x: box.x - 12, y: Math.max(0, box.y - 12), width: box.width + 24, height: box.height + 24 },
+    clip: { x: Math.max(0, table.x - 20), y: Math.max(0, head.y - 28), width: table.width + 40, height: bottom - Math.max(0, head.y - 28) },
   });
   await expect(falseErrors).toHaveCount(0);
   // The decoder lines are in the log pane only; none may be in the card.
-  expect(await card.innerText(), "a decoder warm-up line is inside the photographed card").not.toMatch(/no frame|non-existing/i);
+  expect(await processTable.innerText(), "a decoder warm-up line is inside the photographed table").not.toMatch(/no frame|non-existing/i);
 });
 
 /* ---------------------------------------------------------------- part two
