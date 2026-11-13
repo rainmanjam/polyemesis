@@ -1,251 +1,333 @@
 ---
-import Base from "../layouts/Base.astro";
+/* The install page: four methods as tabs, what the machine needs, the first
+ * stream, a check that it worked, upkeep and where to go next.
+ *
+ * Every command comes from data/install.mjs (the homepage's Install section
+ * imports the same strings); every port, requirement and step from
+ * data/install-page.mjs. Nothing here types a command or a version: the floors
+ * print from data/facts.mjs. The facts trace to docs/INSTALL.md, docs/QUICKSTART.md
+ * and docs/UPGRADING.md.
+ *
+ * NO SCRIPT: the tablist renders hidden and every method shows, stacked, each
+ * under its own h3. initTabs (started by boot, through scripts/home/install.ts)
+ * shows the panel named by the selected tab's aria-controls and hides the others,
+ * so this markup never relies on sibling order.
+ */
+import InnerPage from "../layouts/InnerPage.astro";
 import CodeBlock from "../components/CodeBlock.astro";
+import Shot from "../components/inner/Shot.astro";
+import {
+  BUILD_FROM_CLONE,
+  CLONE,
+  COMPOSE_UP,
+  DOCKER_RUN,
+  HEALTH_CHECK,
+  INSTALL_SCRIPT,
+} from "../data/install.mjs";
+import { FIRST_RUN, PORTS, REQUIREMENTS } from "../data/install-page.mjs";
 import { FFMPEG_FLOOR, GO_FLOOR, NODE_BUILD_FLOOR } from "../data/facts.mjs";
 
 const REPO = "https://github.com/rainmanjam/polyemesis";
+const DOCKER_ENGINE = "Docker Engine 20.10+";
+
+const floors = (s: string) =>
+  s.replace("{ffmpeg}", FFMPEG_FLOOR).replace("{go}", GO_FLOOR).replace("{node}", NODE_BUILD_FLOOR);
+
+const INDEX = [
+  { id: "choose", label: "Choose a method" },
+  { id: "need", label: "What you need" },
+  { id: "first", label: "Your first stream" },
+  { id: "check", label: "Check it worked" },
+  { id: "keep", label: "Keep it running" },
+  { id: "next", label: "Where to go next" },
+];
+
+const METHODS = [
+  {
+    key: "docker",
+    tab: "Docker",
+    note: "recommended",
+    label: "docker",
+    code: DOCKER_RUN,
+    does: "Runs the published image: the console on :8080, SRT in on :6000/udp, RTMP in on :1935. Everything you keep lives in the polyemesis-data volume.",
+    suits: "A first try. FFmpeg is pinned and bundled, so SRT support is known-good, and this is the build the container test suites run against.",
+    needs: `${DOCKER_ENGINE} or Docker Desktop. Nothing else on the host: FFmpeg is bundled.`,
+    notes: [
+      "Keep the /udp on port 6000. SRT is UDP, and omitting the suffix is the classic reason an ingest silently receives nothing.",
+      "Publish 1935 now even if you plan to use SRT. A container's port mappings are fixed when it is created: an RTMP source added later has nothing listening for it, and says so nowhere.",
+    ],
+  },
+  {
+    key: "compose",
+    tab: "Docker Compose",
+    note: "",
+    label: "docker compose, from a clone",
+    code: `${CLONE}\n${COMPOSE_UP}`,
+    does: "Builds the image from your clone and starts it with the repository's compose file, which publishes 8080, 6000/udp and 1935 and sets restart: unless-stopped.",
+    suits: "You already run compose stacks, or want to read the source first.",
+    needs: `${DOCKER_ENGINE} or Docker Desktop, and git.`,
+    notes: [
+      "This build comes from your clone, so a new version arrives with git pull and reaches the container only with up -d --build.",
+    ],
+  },
+  {
+    key: "script",
+    tab: "Install script",
+    note: "Linux server",
+    label: "install.sh, read it first",
+    code: INSTALL_SCRIPT,
+    does: "Asks Docker or binary, ports and TLS, shows the plan, and writes nothing until you confirm. A failure after that rolls back. It leaves update.sh and uninstall.sh beside the install.",
+    suits: "A Linux server you want kept up as a service.",
+    needs: `Linux with systemd, run as root. Docker mode bundles FFmpeg; binary mode needs FFmpeg ${FFMPEG_FLOOR} or later with SRT, and offers to install a pinned build.`,
+    notes: [
+      "Read it before you run it: it is one file and declares every flag up front.",
+      "It installs a self-signed certificate unless told otherwise. For Let's Encrypt pass --tls acme with --hostname and --email; it refuses acme without both. Behind a reverse proxy that already terminates TLS, pass --tls off.",
+      "In binary mode it also installs the fonts burned-in captions are drawn with (fontconfig, DejaVu and Noto CJK), so Chinese, Japanese, Korean, Arabic and Hebrew captions render out of the box. CJK is the large part (60–190 MB by distribution); --no-cjk-fonts leaves it out.",
+    ],
+  },
+  {
+    key: "binary",
+    tab: "Binary",
+    note: "no containers",
+    label: "make, from a clone",
+    code: BUILD_FROM_CLONE,
+    does: "One static binary with the console embedded and pure-Go SQLite, no cgo. The UI is built and embedded by the same make target, so there is one artefact at the end of it. Static builds are also on GitHub Releases.",
+    suits: "No containers, or a macOS or Windows machine to try it on.",
+    needs: `FFmpeg ${FFMPEG_FLOOR} or later with srt (a build configured with --enable-libsrt), supplied by you. To build: Go ${GO_FLOOR}+ and Node ${NODE_BUILD_FLOOR}.`,
+    notes: [
+      "Homebrew's FFmpeg on macOS ships without SRT. polyemesis needs FFmpeg " +
+        `${FFMPEG_FLOOR} or later, which carries SRT and Enhanced RTMP multitrack alike; Ubuntu 26.04 packages it, the installer can fetch a pinned 8.1 build, and the container bundles one. (OBS does not send multitrack audio over RTMP at any version we have tested, so for OBS users SRT is the path.)`,
+      "Linux is the operated target, and the broadcast path is tested on Windows and macOS in CI too; that suite has caught Windows-only bugs before they shipped. What is not yet proven on Windows is long-running service operation: the service wrapper is unexercised and recording can truncate on service stop. Run it on Linux for production, and on Windows or macOS to build and evaluate.",
+      "Run this way it listens on this machine only. localhost works where the binary runs; to reach it from elsewhere pass -addr, or forward the port over SSH.",
+      "make check runs go vet, the Go test suite and the UI typecheck; make help lists every target. The contributing guide states the constraints that are not negotiable, so you find out before writing rather than after.",
+    ],
+  },
+] as const;
+
+const MORE = "/docs/install";
+
+const PROBLEMS = [
+  {
+    sign: "It will not start",
+    text: `FFmpeg older than ${FFMPEG_FLOOR} makes polyemesis refuse to start. Check ffmpeg -version, or use Docker, which bundles one.`,
+    label: "The FFmpeg requirement",
+    href: `${MORE}#the-ffmpeg-requirement`,
+  },
+  {
+    sign: "The ingest never goes live",
+    text: "The port has to be reachable and published. In Docker, -p 6000:6000/udp: SRT is UDP, and forgetting /udp is the usual cause. Check the ingest mode matches what OBS is sending.",
+    label: "Troubleshooting",
+    href: "/docs/troubleshooting",
+  },
+  {
+    sign: "Audio is quiet or missing on one destination",
+    text: "Check its track selection: selecting a track the source is not sending gives silence. The Meters page measures what is actually going out.",
+    label: "Audio routing",
+    href: "/docs/audio-routing",
+  },
+];
+
+const KEEP = [
+  {
+    title: "Upgrade",
+    text: "polyemesis migrates its own database on startup. The install script writes an update.sh that stops the service, takes a backup, refuses one it cannot verify, then pulls the new image or installs the new binary.",
+    label: "Upgrading",
+    href: "/docs/upgrading",
+  },
+  {
+    title: "Back up",
+    text: "Copy the data directory, or the polyemesis-data volume in Docker, and check the copy holds secret.key. It decrypts your stored stream keys: a backup without it is not a backup.",
+    label: "Back up first",
+    href: "/docs/upgrading",
+  },
+  {
+    title: "Run as a service",
+    text: "The compose file sets restart: unless-stopped. The install script's binary mode installs a hardened systemd unit; by hand, deploy/polyemesis.service ships in the repo. uninstall.sh keeps your data.",
+    label: "Run it as a service",
+    href: `${MORE}#run-it-as-a-service`,
+  },
+];
+
+const NEXT = [
+  ["/docs/audio-routing", "Audio routing guide", "Give each destination its own mix of the tracks."],
+  ["/docs/connecting-platforms", "Connecting platforms", "Sign in to Twitch, YouTube, Kick, Facebook and X for stream keys, go-live and chat."],
+  ["/docs/stream-deck", "Stream Deck plugin", "Control polyemesis from a Stream Deck +: install, pairing, each key."],
+  ["/docs/hardware", "Hardware guide", "GPU encoding for renditions: what each vendor needs."],
+  ["/docs/troubleshooting", "Troubleshooting", "Organised by what you see, not by what is wrong."],
+];
 ---
 
-<Base
+<InnerPage
   title="Install polyemesis — Docker, installer or static binary"
   description="Run polyemesis with Docker, a one-line installer, or a single static binary. No account, nothing phoning home, no hosted tier. MIT licensed."
   path="/download"
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: "install" }]}
+  heading="Run it on your own server."
+  accent="own"
+  lede="No account to create, nothing phoning home, no hosted tier to graduate to. The only runtime dependency is FFmpeg, and the container bundles it."
+  index={INDEX}
+  lightbox
+  band={{
+    heading: "One command, then stream.",
+    accent: "stream",
+    lede: "Run it on a server you control. Your keys and settings stay on it.",
+    command: true,
+    secondary: { label: "Read the quickstart", href: "/docs/quickstart" },
+  }}
 >
-  <section class="wrap py-16 sm:py-20">
-    <p class="eyebrow">Install</p>
-    <h1 class="mt-3 max-w-3xl text-balance text-4xl font-bold leading-tight sm:text-5xl">
-      One binary, or one container.
-    </h1>
-    <p class="mt-6 max-w-2xl text-pretty text-lg leading-relaxed text-muted">
-      No account to create, nothing phoning home, no hosted tier to graduate
-      to. It can publish its own state over MQTT, but that is off by default and
-      goes to a broker you name. The
-      only runtime dependency is FFmpeg, and the container bundles it.
-      Transcription is the one optional extra that wants a second binary,
-      whisper.cpp.
+  <div slot="actions" class="inst-acts">
+    <a class="btn btn-primary" href="#choose">Install polyemesis</a>
+    <a class="btn btn-ghost" href="/docs/quickstart">Quickstart: from install to a first stream</a>
+    <a class="btn btn-ghost" href="/docs/install">Install guide: per-platform, service files, GPU images</a>
+  </div>
+
+  {/* Ids this renders, one tab and one panel per method: tab-docker / id="panel-docker",
+      tab-compose / panel-compose, tab-script / panel-script, tab-binary / id="panel-binary".
+      Each tab names its panel with aria-controls; nothing depends on order. */}
+  <section id="choose" class="inst" data-install>
+    <h2>Choose a method.</h2>
+    <p class="sec-lede">
+      Docker is the shortest path and bundles a known-good FFmpeg. The install script sets up a Linux server for you,
+      service included.
     </p>
-    {/* THE TWO DOCUMENTS THE README SENDS PEOPLE TO, at the top of the page
-        rather than buried under four install cards. Choosing an install method
-        is the smallest decision on this page; whether you can operate the thing
-        afterwards is the real one, and these are what answer it. Both render
-        from docs/ at build time, so neither can drift from the software. */}
-    {/* NOT ACCENT-COLOURED AT REST, matching index.astro's hero. The accent
-        budget docs/DESIGN-SYSTEM.md sets is the home page's announcement bar
-        and the primary CTA; a standing arrow link in the same hue as
-        the one filled button on the page competes with it for the same
-        meaning. A neutral resting underline carries the affordance (no arrow:
-        these are a pair of sibling links, and arrows mark a primary link
-        only), and the accent arrives on approach.
-        Inline links inside prose are deliberately NOT changed — see
-        `.doc-prose a` in global.css. There, colour separates a link from the
-        sentence around it and removing it would cost a reader something real;
-        here it decorates a link that is already unmistakably a link. */}
-    <p class="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-      <a href="/docs/quickstart" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright"
-        >Quickstart: from install to a first stream</a
-      >
-      <a href="/docs/install" class="tap text-fg underline decoration-line underline-offset-4 transition-colors hover:text-primary-bright hover:decoration-primary-bright"
-        >Install guide: per-platform, service files, GPU images</a
-      >
+
+    <div role="tablist" aria-label="Install method" class="inst-tabs" data-install-tabs data-js-only hidden>
+      {
+        METHODS.map((m, i) => (
+          <button
+            type="button"
+            role="tab"
+            class="inst-tab"
+            id={`tab-${m.key}`}
+            data-key={m.key}
+            aria-controls={`panel-${m.key}`}
+            aria-selected={i === 0 ? "true" : "false"}
+            tabindex={i === 0 ? 0 : -1}
+          >
+            {m.tab}
+            {m.note && <>{" "}<i>{m.note}</i></>}
+          </button>
+        ))
+      }
+    </div>
+
+    {
+      METHODS.map((m) => (
+        <div role="tabpanel" class="inst-panel" id={`panel-${m.key}`} aria-labelledby={`tab-${m.key}`}>
+          <h3 class="inst-panel-h">{m.tab}</h3>
+          <CodeBlock label={m.label} code={m.code} />
+          <dl class="facts">
+            <div>
+              <dt>Does</dt>
+              <dd>{m.does}</dd>
+            </div>
+            <div>
+              <dt>Suits</dt>
+              <dd>{m.suits}</dd>
+            </div>
+            <div>
+              <dt>Needs</dt>
+              <dd>{m.needs}</dd>
+            </div>
+          </dl>
+          {m.notes.map((n) => <p class="inst-note">{n}</p>)}
+          {m.key === "binary" && (
+            <p class="inst-note">
+              <a class="more" href={`${REPO}/releases/latest`} rel="noopener">Releases on GitHub</a>
+            </p>
+          )}
+          {m.key === "script" && (
+            <p class="inst-note"><a class="more" href={MORE}>What the script does, step by step</a></p>
+          )}
+        </div>
+      ))
+    }
+  </section>
+
+  <section id="need" class="inst">
+    <h2>What you need.</h2>
+    <p class="sec-lede">
+      polyemesis copies video instead of re-encoding it, so a small server is enough. Upload bandwidth is the real limit.
+    </p>
+
+    <div class="rows inst-reqs">
+      {
+        REQUIREMENTS.map((r) => (
+          <div class="inst-req">
+            <h3>{r.name}</h3>
+            <p class="v">{floors(r.value)}</p>
+            <p class="n">{r.note}</p>
+          </div>
+        ))
+      }
+    </div>
+
+    <h3 class="inst-sub">Ports to open</h3>
+    <div class="scroll-hint cmp-wrap" role="region" aria-label="Ports" tabindex="0">
+      <table class="cmp inst-ports">
+        <thead>
+          <tr><th scope="col">Port</th><th scope="col">Protocol</th><th scope="col">What it is</th><th scope="col">When</th></tr>
+        </thead>
+        <tbody>
+          {
+            PORTS.map((p) => (
+              <tr>
+                <th scope="row">{p.port}</th>
+                <td>{p.proto}</td>
+                <td>{p.what}</td>
+                <td>{p.when}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="inst-note">
+      Set an SRT passphrase in Settings → Ingest: without one the stream crosses the network in the clear. RTMP encrypts
+      nothing, so it is the port to keep off the public internet if you can.
+    </p>
+    <p class="inst-links">
+      <a class="more" href={`${MORE}#ports`}>Ports and TLS in the install guide</a>
+      <a class="more" href={`${MORE}#the-ffmpeg-requirement`}>The FFmpeg requirement</a>
+      <a class="more" href="/calculator">Will my connection handle it?</a>
     </p>
   </section>
 
-  {/* md: as well as lg:, because the tablet band had nothing.
+  <section id="first" class="inst">
+    <h2>Your first stream.</h2>
+    <p class="sec-lede">From a running server to a stream going out, using the console's own words.</p>
 
-      `md:` appears four times in this whole site and all four are the Nav
-      showing and hiding -- not one is a grid. So every layout here went from
-      one column straight to lg:, and 768px got the PHONE layout at desktop
-      type. Measured: this page is 3122px at 768 against 2294px at 1440, 36%
-      taller for the same content, with half the width unused.
-
-      Two install cards side by side at 768 gives each ~360px, which the
-      commands fit now that they wrap. That 768px step now lives in
-      .card-grid--2 in global.css, which every two-up card row shares. */}
-  <section class="wrap pb-16">
-    <div class="card-grid card-grid--2">
-      <div class="card p-6">
-        <div class="flex items-baseline justify-between gap-3">
-          <h2 class="text-lg font-medium">Docker</h2>
-          <span class="chip">recommended</span>
-        </div>
-        <p class="mt-2 text-sm leading-relaxed text-muted">
-          FFmpeg is pinned and bundled, so the SRT support is known-good. This is
-          the build the container test suites run against.
-        </p>
-        <CodeBlock
-          label="docker"
-          code={`docker run -d --name polyemesis \\
-  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
-  -v polyemesis-data:/data \\
-  rainmanjam/polyemesis:latest`}
-        />
-        {/* A DEFINITION LIST, NOT A DOT-SEPARATED LINE (2026-11 design review).
-            Three ports are three facts a reader looks up one at a time, usually
-            while writing a firewall rule, so each gets its own row. */}
-        <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[12px]">
-          <dt class="text-subtle">UI</dt>
-          <dd class="font-mono text-fg">:8080</dd>
-          <dt class="text-subtle">SRT ingest</dt>
-          <dd class="font-mono text-fg">:6000/udp</dd>
-          <dt class="text-subtle">RTMP ingest</dt>
-          <dd class="font-mono text-fg">:1935</dd>
-        </dl>
-        <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-          Note the <span class="font-mono">/udp</span> on port 6000. SRT is UDP,
-          and omitting the suffix is the classic reason an ingest silently
-          receives nothing. 1935 is published up front because a container's port
-          mappings are fixed when it is created: an RTMP source added later has
-          nothing listening for it, and says so nowhere.
-        </p>
-      </div>
-
-      <div class="card p-6">
-        <h2 class="text-lg font-medium">Installer script</h2>
-        <p class="mt-2 text-sm leading-relaxed text-muted">
-          Asks what you want, then sets up Docker or a static binary with a
-          systemd unit, a data directory and TLS. Read it before you pipe it to a
-          root shell. It is long, but it is one file and declares every flag up
-          front.
-        </p>
-        <CodeBlock
-          label="install.sh"
-          code={`curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/\\
-rainmanjam/polyemesis/main/scripts/install.sh \\
-  | sudo bash -s -- --tls selfsigned`}
-        />
-        <p class="mt-3 text-[11px] leading-relaxed text-subtle">
-          It installs a self-signed certificate unless told otherwise. For Let's
-          Encrypt pass <span class="font-mono">--tls acme</span> with{" "}
-          <span class="font-mono">--hostname</span> and{" "}
-          <span class="font-mono">--email</span>; it refuses acme without both.
-          Behind a reverse proxy that already terminates TLS, pass{" "}
-          <span class="font-mono">--tls off</span>.
-        </p>
-        <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-          In binary mode it also installs the fonts burned-in captions are drawn
-          with (fontconfig, DejaVu and Noto CJK), so Chinese, Japanese, Korean,
-          Arabic and Hebrew captions render out of the box. CJK is the large
-          part (60–190 MB by distribution);{" "}
-          <span class="font-mono">--no-cjk-fonts</span> leaves it out.
-        </p>
-      </div>
-
-      <div class="card p-6">
-        <h2 class="text-lg font-medium">Static binary</h2>
-        <p class="mt-2 text-sm leading-relaxed text-muted">
-          The UI is embedded. Pure-Go SQLite, no cgo. You supply FFmpeg, and it
-          needs one built with <span class="font-mono">--enable-libsrt</span> if
-          you want multitrack ingest.
-        </p>
-        <p class="mt-4">
-          <a href={`${REPO}/releases/latest`} rel="noopener" class="btn btn-ghost text-sm">
-            Releases on GitHub →
-          </a>
-        </p>
-        <p class="mt-3 text-[11px] leading-relaxed text-subtle">
-          Homebrew's FFmpeg on macOS ships without SRT. polyemesis needs FFmpeg
-          8.0 or later, which carries SRT and Enhanced RTMP multitrack alike;
-          Ubuntu 26.04 packages it, the installer can fetch a pinned 8.1 build,
-          and the container bundles one. (OBS does not send multitrack audio over
-          RTMP at any version we have tested, so for OBS users SRT is the path.)
-        </p>
-        <p class="mt-2 text-[11px] leading-relaxed text-subtle">
-          Linux is the operated target, and the broadcast path is tested on
-          Windows and macOS in CI too; that suite has caught Windows-only bugs
-          before they shipped. What is not yet proven on Windows is long-running
-          service operation: the service wrapper is unexercised and recording can
-          truncate on service stop. Run it on Linux for production, and on Windows
-          or macOS to build and evaluate.
-        </p>
-      </div>
-
-      {/* BUILD FROM A CLONE, which the site did not offer at all — the static
-          binary card sent a reader to the releases page and stopped. This is a
-          single static Go binary with `make build` as its own README's second
-          install path, and the audience that self-hosts a broadcast server is the
-          audience most likely to want to read the source it is running first.
-
-          The block is README.md's "Try it" verbatim, comment included. A build
-          recipe that is nearly right is worse than none: `make build` is what
-          embeds the UI, and a reader who runs `go build` instead gets a binary
-          that starts and serves nothing. */}
-      <div class="card p-6">
-        <h2 class="text-lg font-medium">Build from a clone</h2>
-        <p class="mt-2 text-sm leading-relaxed text-muted">
-          Go {GO_FLOOR}+, Node {NODE_BUILD_FLOOR} and FFmpeg. The UI is built and embedded
-          by the same target, so there is one artefact at the end of it.
-        </p>
-        <CodeBlock
-          label="make"
-          code={`git clone https://github.com/rainmanjam/polyemesis
-cd polyemesis
-make build            # builds the UI, embeds it, produces ./polyemesis
-./polyemesis -data ./data`}
-        />
-        <p class="mt-3 text-[11px] leading-relaxed text-subtle">
-          <span class="font-mono">make check</span> runs go vet, the Go test suite
-          and the UI typecheck; <span class="font-mono">make help</span> lists
-          every target. The contributing guide states the constraints that are not
-          negotiable, so you find out before writing rather than after.
-        </p>
-      </div>
-
-      {/* SPANS BOTH COLUMNS, and not only to avoid the orphan a fifth card would
-          leave on the last row. The four above are alternatives — pick one — and
-          this one is what everybody does next whichever they picked, so the card
-          that reads differently is the one that IS different. */}
-      <div class="card card-span-full p-6">
-        <h2 class="text-lg font-medium">Then point OBS at it</h2>
-        <ol class="mt-3 space-y-2.5 text-sm leading-relaxed text-muted">
+    <ol class="inst-steps">
+      {
+        FIRST_RUN.map((s) => (
           <li>
-            <span class="font-mono text-subtle">1.</span> Open the UI and set an admin
-            password. If it is ever lost, <span class="font-mono">-reset-admin</span> on
-            the box sets a new one; there is no recovery from anywhere else.
+            <h3>{s.title}</h3>
+            <p>{s.text}</p>
+            {s.code && (
+              <>
+                <CodeBlock label="where the setup code is, in Docker" code={s.code} />
+                <p class="inst-note">
+                  Compose, the install script and a binary run from a clone print it in other places: see{" "}
+                  <a href={`${MORE}#the-first-run-setup-code`}>the first-run setup code</a> in the install guide.
+                </p>
+              </>
+            )}
+            {s.shot && <Shot shot={s.shot.file} alt={s.shot.alt} chrome={s.shot.chrome} />}
           </li>
-          <li>
-            <span class="font-mono text-subtle">2.</span> Choose an ingest mode. A fresh
-            install has none: SRT carries many tracks from many sources and is what the
-            routing needs; RTMP shares its port between sources the same way, told apart
-            by the stream key, and carries one audio track unless the publisher sends Enhanced RTMP. Then
-            copy the ingest URL: it carries the credential that addresses this source.
-          </li>
-          <li>
-            <span class="font-mono text-subtle">3.</span> In OBS, Settings → Output →
-            Advanced → Recording, set Type to “Custom Output (FFmpeg)”, FFmpeg Output
-            Type to “Output to URL”, container <span class="font-mono">mpegts</span>,
-            and tick the audio tracks to send. Paste the ingest URL, then press Start{" "}
-            <em>Recording</em>. With Output to URL, that is the SRT push.
-          </li>
-          <li>
-            <span class="font-mono text-subtle">4.</span> Add destinations, then tick
-            which tracks each one receives.
-          </li>
-        </ol>
-        <p class="mt-4">
-          <a
-            href="/how-to-multistream-from-obs"
-            class="inline-block py-1 text-sm text-fg transition-colors hover:text-primary-bright hover:underline"
-          >
-            The full OBS guide →
-          </a>
-        </p>
-      </div>
-    </div>
+        ))
+      }
+    </ol>
+    <p class="inst-links">
+      <a class="more" href="/docs/quickstart">The full quickstart</a>
+      <a class="more" href="/docs/obs">OBS, field by field</a>
+      <a class="more" href="/how-to-multistream-from-obs">The full OBS guide</a>
+    </p>
 
-    {/* HowTo, describing the four steps rendered immediately above and nothing
-        else. Every step text is a condensation of the visible <li> it names — if
-        the list changes and this does not, the markup describes a page that no
-        longer exists, which is worse than having no structured data at all.
-
-        The one Google-eligible schema this site actually earns: these are
-        sequential setup instructions with a real ordered list behind them, which
-        is the whole test. FAQPage was considered for the "Is this for you?"
-        block on the home page and rejected — that is two bullet lists, not
-        question-and-answer pairs, and marking it up as FAQ would be a claim
-        about content that is not there.
-
-        Outside the card grid, not in it: a <script> child still counts in the
-        grid's :nth-child() positions, which .card-grid--5 places cards by. */}
+    {/* HowTo, describing the four steps of sending OBS to polyemesis and nothing
+        else. Every step text condenses the visible step it names (admin, source
+        and ingest mode, OBS, destinations): if the list changes and this does
+        not, the markup describes a page that no longer exists. FAQPage was
+        rejected for the homepage: it is not question-and-answer content. */}
     <script type="application/ld+json" is:inline set:html={JSON.stringify({
       "@context": "https://schema.org",
       "@type": "HowTo",
@@ -293,24 +375,77 @@ make build            # builds the UI, embeds it, produces ./polyemesis
     })} />
   </section>
 
-  <section class="border-t border-line bg-surface/30 py-16">
-    <div class="wrap max-w-3xl">
-      <h2 class="text-2xl font-medium">What it needs from the machine</h2>
-      <dl class="mt-6 divide-y divide-line border-y border-line">
-        {
-          [
-            ["FFmpeg", `The only dependency the server itself needs. Needs libsrt for SRT ingest. Without it you fall back to RTMP, which carries one audio track on classic RTMP. FFmpeg ${FFMPEG_FLOOR} or later is required; 8.x is what the container ships, and CI tests the latest 8.x and 9.x.`],
-            ["CPU", "Video is copied, not re-encoded, so cost is nearly independent of resolution. Only audio is decoded, mixed and re-encoded to AAC. Renditions are the exception: those are a real encode, and the UI estimates what one will cost before you save it."],
-            ["Ports", "One TCP port for the UI and API. One UDP port for SRT, shared by every source. RTMP is optional and works the same way: one TCP port, shared by every source that uses it."],
-            ["Disk", "Only if you record. Retention is bounded by age, total size, and a free-space floor that accounts for files polyemesis did not write."],
-          ].map(([t, d]) => (
-            <div class="py-4">
-              <dt class="text-[15px] font-medium text-fg">{t}</dt>
-              <dd class="mt-1.5 text-sm leading-relaxed text-muted">{d}</dd>
-            </div>
-          ))
-        }
-      </dl>
+  <section id="check" class="inst">
+    <h2>Check it worked.</h2>
+    <p class="sec-lede">Two checks, one on the box and one in the console.</p>
+
+    <h3 class="inst-sub">On the box</h3>
+    <CodeBlock label="health, no sign-in needed" code={HEALTH_CHECK} />
+    <p class="inst-note">
+      Set <code>POLYEMESIS_URL</code> to the address for your install, from the table in the{" "}
+      <a href={`${MORE}#verifying-the-install`}>install guide</a>; for <code>docker compose</code> from a clone it is{" "}
+      <code>http://localhost:8080</code>. The <code>-f</code> matters: without it a refused connection prints nothing and looks
+      fine. <code>-k</code> accepts the self-signed certificate.
+    </p>
+
+    <h3 class="inst-sub">In the console</h3>
+    <ul class="inst-seen">
+      <li>Open the console and sign in. The Dashboard loads.</li>
+      <li>
+        Settings → Ingest shows three badges: the FFmpeg version, <code>srt yes</code> and <code>x264 yes</code>. If{" "}
+        <code>srt</code> reads <code>no</code>, no amount of OBS configuration will fix it: go back to the FFmpeg requirement.
+      </li>
+      <li>With OBS recording, the dashboard shows the ingest live, with a meter per incoming track.</li>
+      <li>The Meters page shows loudness measured after routing, which is what each platform receives.</li>
+    </ul>
+    <Shot
+      shot="04-meters.png"
+      alt="The Meters page showing loudness measured after routing, per destination"
+      chrome="Meters: measured after routing"
+    />
+
+    <h3 class="inst-sub">The three most common first problems</h3>
+    <div class="rows">
+      {
+        PROBLEMS.map((p) => (
+          <div class="inst-prob">
+            <h4>{p.sign}</h4>
+            <p>{p.text}</p>
+            <a class="more" href={p.href}>{p.label}</a>
+          </div>
+        ))
+      }
     </div>
   </section>
-</Base>
+
+  <section id="keep" class="inst">
+    <h2>Keep it running.</h2>
+    <p class="sec-lede">Upgrades migrate their own database. Take a backup first and the rest is routine.</p>
+    <div class="rows">
+      {
+        KEEP.map((k) => (
+          <div class="inst-prob">
+            <h3>{k.title}</h3>
+            <p>{k.text}</p>
+            <a class="more" href={k.href}>{k.label}</a>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section id="next" class="inst">
+    <h2>Where to go next.</h2>
+    <p class="sec-lede">The server is up. These make it yours.</p>
+    <div class="rows inst-next">
+      {
+        NEXT.map(([href, title, text]) => (
+          <a href={href}>
+            <b>{title}</b>
+            <span>{text}</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+</InnerPage>

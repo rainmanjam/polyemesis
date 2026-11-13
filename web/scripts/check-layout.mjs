@@ -59,7 +59,7 @@ const REQUIRED = {
   "/": 0,
   "/features": 1,
   "/comparison": 3,
-  "/download": 1,
+  "/download": 0,
   "/multistream": 1,
   "/how-to-multistream-from-obs": 1,
   "/free-restream-service": 1,
