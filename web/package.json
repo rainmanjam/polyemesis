@@ -10,7 +10,7 @@
     "build": "astro check && astro build && node scripts/check-build.mjs",
     "preview": "astro preview",
     "check": "astro check",
-    "test": "vitest run",
+    "test": "vitest run && node --test ../scripts/check-shots.test.mjs",
     "coverage": "vitest run --coverage",
     "check:layout": "node scripts/check-layout.mjs",
     "check:home": "node scripts/check-home.mjs",

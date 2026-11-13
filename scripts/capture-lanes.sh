@@ -75,6 +75,15 @@ export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
 echo "==> fresh data directory"
 rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
 
+# The credentials this server holds, one `kind<TAB>value` per line, for the
+# capture to refuse any frame on which one is legible (ui/e2e/captureKit.ts).
+# Mode 600, in the work directory, and never printed. Tokens are appended as
+# each programme is seeded; the file exists before the first shot.
+SHOT_SECRETS_FILE="$WORK/secrets.tsv"
+export SHOT_SECRETS_FILE
+( umask 077
+  printf 'password\t%s\nsetupCode\t%s\n' "$E2E_PASSWORD" "$POLYEMESIS_SETUP_CODE" > "$SHOT_SECRETS_FILE" )
+
 # Refuse to run against a server this script did not start; otherwise the
 # seeder talks to a leftover instance with a different admin password and
 # reports "incorrect username or password", which reads like a bug in the
@@ -169,6 +178,7 @@ echo "==> seeding one programme"
 SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" solo)"
 TOKEN1="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
 [ -n "$TOKEN1" ] || { echo "no publish token for the first programme"; exit 1; }
+printf 'token\t%s\n' "$TOKEN1" >> "$SHOT_SECRETS_FILE"
 
 echo "==> publishing programme 1"
 publish 1 "$TOKEN1" "testsrc2=size=1280x720:rate=30" 300 900 2000
@@ -179,6 +189,7 @@ shoot 1 "dashboard-1-programme.png"
 echo "==> adding the second programme"
 TOKEN2="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" add b | sed -n 1p)"
 [ -n "$TOKEN2" ] || { echo "no publish token for the second programme"; exit 1; }
+printf 'token\t%s\n' "$TOKEN2" >> "$SHOT_SECRETS_FILE"
 echo "==> publishing programme 2, same port, different streamid"
 publish 2 "$TOKEN2" "smptebars=size=1280x720:rate=30" 440 1200
 sleep 15
@@ -188,6 +199,7 @@ shoot 2 "dashboard-2-programmes.png"
 echo "==> adding the third programme"
 TOKEN3="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" add c | sed -n 1p)"
 [ -n "$TOKEN3" ] || { echo "no publish token for the third programme"; exit 1; }
+printf 'token\t%s\n' "$TOKEN3" >> "$SHOT_SECRETS_FILE"
 echo "==> publishing programme 3, same port, different streamid"
 publish 3 "$TOKEN3" "testsrc=size=1280x720:rate=30" 660 1800
 sleep 15

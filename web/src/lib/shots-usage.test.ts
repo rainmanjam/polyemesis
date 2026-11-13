@@ -2,6 +2,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { KEPT_WITHOUT_USER, sourceFiles, withoutComments } from "../../../scripts/check-shots.mjs";
+
 /* Every screenshot kept in the site folder is used by something under web/src.
  * A capture nothing references is dead weight in the repository and in every
  * clone; docs/media/ keeps the originals, so deleting one here loses nothing. */
@@ -9,32 +11,14 @@ import { describe, expect, it } from "vitest";
 const SRC = new URL("../", import.meta.url).pathname;
 const SHOTS = join(SRC, "assets", "shots");
 
-/** Kept without a user on purpose. Plan 4 removes an entry when it uses the file. */
-const WHITELIST = ["06-renditions.png"];
-const WHITELIST_LENGTH = 1; // it can only grow here, in plain sight: a new entry must change this number too
-
-/** A source with its comments removed: a file name in a comment is not a use. */
-function withoutComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, "") // block comments (CSS, JS)
-    .replace(/<!--[\s\S]*?-->/g, "") // HTML and markdown comments
-    .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1"); // line comments, not the // of a URL
-}
-
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (p === SHOTS) continue;
-    if (e.isDirectory()) out.push(...sourceFiles(p));
-    else if (!/\.test\.[a-z]+$/.test(e.name) && !/\.(png|jpe?g|webp|avif|woff2?|glb)$/.test(e.name)) out.push(p);
-  }
-  return out;
-}
+/** Kept without a user on purpose; the list and withoutComments live in scripts/check-shots.mjs,
+ *  which also derives the manifest's usedBy, so the two cannot disagree. */
+const WHITELIST = KEPT_WITHOUT_USER;
+const WHITELIST_LENGTH = 1; // it can only grow in plain sight: a new entry must change this number too
 
 describe("screenshots in src/assets/shots", () => {
   const shots = readdirSync(SHOTS).filter((f) => f.endsWith(".png"));
-  const sources = sourceFiles(SRC).map((f) => withoutComments(readFileSync(f, "utf8")));
+  const sources = sourceFiles(SRC, SHOTS).map((f) => withoutComments(readFileSync(f, "utf8")));
 
   it("finds the folder and the sources it searches", () => {
     expect(shots.length).toBeGreaterThanOrEqual(8);

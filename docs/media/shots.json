@@ -1,0 +1,303 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "scale": 2,
+  "theme": "dark",
+  "shots": [
+    {
+      "file": "01-dashboard.png",
+      "scene": "sports",
+      "test": "dashboard — the hero shot",
+      "screen": "/",
+      "site": true,
+      "usedBy": [
+        "web/src/data/install-page.mjs"
+      ],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "02-routing-hero.png",
+      "scene": "full",
+      "test": "routing — the clip for narrow columns",
+      "screen": "/routing",
+      "site": false,
+      "usedBy": [],
+      "exception": "clip",
+      "allowFailedWords": []
+    },
+    {
+      "file": "02-routing.png",
+      "scene": "sports",
+      "test": "routing — the thing nothing else does",
+      "screen": "/routing",
+      "site": true,
+      "usedBy": [
+        "web/src/data/features.mjs"
+      ],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "03-routing-filtergraph.png",
+      "scene": "sports",
+      "test": "routing — the thing nothing else does",
+      "screen": "/routing",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "04-meters.png",
+      "scene": "sports",
+      "test": "meters — loudness measured after routing",
+      "screen": "/meters",
+      "site": true,
+      "usedBy": [
+        "web/src/components/home/FeatureTour.astro",
+        "web/src/pages/download.astro"
+      ],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "05-sources.png",
+      "scene": "sports",
+      "test": "sources — one port, many programmes",
+      "screen": "/sources",
+      "site": true,
+      "usedBy": [
+        "web/src/data/features.mjs",
+        "web/src/data/install-page.mjs"
+      ],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "06-renditions.png",
+      "scene": "full",
+      "test": "renditions — the ladder, shared across destinations",
+      "screen": "/renditions",
+      "site": true,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "07-monitoring.png",
+      "scene": "full",
+      "test": "monitoring — every process, with its own FFmpeg output",
+      "screen": "/monitoring",
+      "site": true,
+      "usedBy": [
+        "web/src/components/home/Why.astro"
+      ],
+      "exception": "framed",
+      "allowFailedWords": [
+        "errors",
+        "failed"
+      ],
+      "caption": "The process table's Errors column header, the log's Errors filter and the verdict line (\"No errors\", \"none failed\") are static labels; every count beside them is zero."
+    },
+    {
+      "file": "08-mix-matrix.png",
+      "scene": "sports",
+      "test": "routing mix matrix — channel-level control",
+      "screen": "/routing",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "09-chat.png",
+      "scene": "full",
+      "test": "chat — four platforms in one hub",
+      "screen": "/chat",
+      "site": true,
+      "usedBy": [
+        "web/src/data/features.mjs"
+      ],
+      "exception": "fixture-messages",
+      "allowFailedWords": []
+    },
+    {
+      "file": "10-playout.png",
+      "scene": "full",
+      "test": "playout — serving a player from polyemesis itself",
+      "screen": "/playout",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": [
+        "errors",
+        "offline"
+      ],
+      "caption": "The \"Player errors\" figure is a static label over a zero count, and \"Offline card\" is the name of the playout page's offline-slate card, not a state."
+    },
+    {
+      "file": "11-library.png",
+      "scene": "full",
+      "test": "library — the recorded catalogue",
+      "screen": "/library",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "12-jobs.png",
+      "scene": "full",
+      "test": "jobs — the post-production queue and its governor",
+      "screen": "/jobs",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "13-automation.png",
+      "scene": "full",
+      "test": "automation — schedules and alert rules",
+      "screen": "/automation",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "14-clips.png",
+      "scene": "full",
+      "test": "clips — the editor",
+      "screen": "/clips",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "15-recordings.png",
+      "scene": "full",
+      "test": "recordings — segments and retention",
+      "screen": "/recordings",
+      "site": true,
+      "usedBy": [
+        "web/src/data/features.mjs"
+      ],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "16-settings.png",
+      "scene": "full",
+      "test": "settings — listeners, and the one-port design in the UI",
+      "screen": "/settings",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "17-settings-full.png",
+      "scene": "full",
+      "test": "settings — listeners, and the one-port design in the UI",
+      "screen": "/settings",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": [
+        "degraded"
+      ],
+      "caption": "The ingest tab's note \"Degraded-link thresholds are set for each programme on Sources\" is static help text."
+    },
+    {
+      "file": "18-destinations.png",
+      "scene": "sports",
+      "test": "dashboard — the hero shot",
+      "screen": "/",
+      "site": true,
+      "usedBy": [
+        "web/src/components/home/Why.astro",
+        "web/src/data/install-page.mjs"
+      ],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "19-lanes.png",
+      "scene": "full",
+      "test": "dashboard — two programmes, and the lanes that divide them",
+      "screen": "/",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "20-automod.png",
+      "scene": "full",
+      "test": "automod — the rules, and the matrix that grants them",
+      "screen": "/chat",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "21-platforms.png",
+      "scene": "full",
+      "test": "platforms — sign-in and credentials, honestly not connected",
+      "screen": "/settings",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "22-platforms-connected.png",
+      "scene": "full",
+      "test": "platforms — connected, the end state of the one-time setup",
+      "screen": "/settings",
+      "site": false,
+      "usedBy": [],
+      "exception": "fixture-responses",
+      "allowFailedWords": [
+        "offline"
+      ],
+      "caption": "The viewer readout reads Offline because the demo accounts are fixtures and are not streaming."
+    },
+    {
+      "file": "dashboard-1-programme.png",
+      "scene": "lanes",
+      "test": "scripts/capture-lanes.sh",
+      "screen": "/",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "dashboard-2-programmes.png",
+      "scene": "lanes",
+      "test": "scripts/capture-lanes.sh",
+      "screen": "/",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    },
+    {
+      "file": "dashboard-3-programmes.png",
+      "scene": "lanes",
+      "test": "scripts/capture-lanes.sh",
+      "screen": "/",
+      "site": false,
+      "usedBy": [],
+      "exception": null,
+      "allowFailedWords": []
+    }
+  ]
+}
