@@ -31,5 +31,14 @@ export function bootInner(doc: Document): MotionGate | undefined {
       .then((m) => m.initChooser(chooser))
       .catch((err) => console.error("inner: the product chooser failed to start", err));
   }
+
+  const failovers = [...doc.querySelectorAll<HTMLElement>("[data-failover]")];
+  if (failovers.length && gate) {
+    import("./home/failover")
+      .then((m) => {
+        for (const el of failovers) m.initFailover(el, gate);
+      })
+      .catch((err) => console.error("inner: the failover demo failed to start", err));
+  }
   return gate;
 }

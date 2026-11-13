@@ -57,7 +57,7 @@ const TOLERANCE = 1;
 const REQUIRED = {
   // 0 is enforced (`!== undefined`): "/" has no .card-grid, and a page that gains one must say so here.
   "/": 0,
-  "/features": 1,
+  "/features": 0,
   "/comparison": 3,
   "/download": 1,
   "/multistream": 1,

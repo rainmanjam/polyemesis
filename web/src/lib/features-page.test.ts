@@ -87,3 +87,54 @@ describe("the features page does not repeat a title as its eyebrow", () => {
     expect(features).not.toMatch(/<p class="eyebrow">\{s\.eyebrow\}<\/p>/);
   });
 });
+
+describe("the rebuilt features page's sections", () => {
+  const layouts = ["audio", "inputs", "failover", "chat", "recordings"].map((id) => {
+    const m = new RegExp(`<section id="${id}"[^>]*data-layout="([^"]+)"`).exec(features);
+    return m?.[1];
+  });
+
+  it("gives the five in-depth sections five distinct data-layout values", () => {
+    expect(layouts.every(Boolean)).toBe(true);
+    expect(new Set(layouts).size).toBe(5);
+  });
+
+  it("has no duplicate literal section id", () => {
+    const ids = [...features.matchAll(/<section id="([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("uses Shot and never Picture directly", () => {
+    expect(features).toMatch(/import Shot from/);
+    expect(features).not.toMatch(/\bPicture\b/);
+  });
+
+  const deck = /<section id="deck"[\s\S]*?<\/section>/.exec(features)?.[0] ?? "";
+
+  it("carries the credit line and the not-affiliated sentence in the deck block", () => {
+    expect(deck).toContain("Stream Deck + model: Elgato");
+    expect(deck).toContain("is not affiliated with or endorsed by");
+  });
+
+  it("copies the footer's not-affiliated sentence verbatim", () => {
+    const footer = readFileSync(join(here, "..", "components", "Footer.astro"), "utf8");
+    const sentence = /polyemesis is not affiliated with or endorsed by[^<]*?owners\./.exec(footer)?.[0];
+    expect(sentence).toBeTruthy();
+    expect(deck.replace(/\s+/g, " ")).toContain(sentence);
+  });
+
+  it("uses an Image for the deck, not a Shot, and never writes Stream Deck+", () => {
+    expect(deck).not.toContain("<Shot");
+    expect(deck).toContain("<Image");
+    expect(features).toMatch(/import deckStill from "\.\.\/assets\/home\/deck-still\.jpg"/);
+    expect(features).not.toContain("Stream Deck+");
+  });
+});
+
+describe("FailoverLadder", () => {
+  const ladder = readFileSync(join(here, "..", "components", "features", "FailoverLadder.astro"), "utf8");
+  it.each(["data-failover", "data-fo-controls", "data-stage", "data-play", "data-frame", "data-enc", "data-dest", "data-log", "data-pause"])(
+    "renders %s",
+    (attr) => expect(ladder).toContain(attr),
+  );
+});
