@@ -19,7 +19,10 @@ import {
   populated,
   settle,
   shoot,
+  snap,
+  SCENE,
   topOfFrame,
+  waitSettled,
 } from "./captureKit";
 
 test.beforeEach(async ({ page }) => {
@@ -29,6 +32,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("dashboard — the hero shot", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/");
   // The ingest has to read live before this is worth photographing: a
   // dashboard whose source says "waiting" is a picture of nothing happening.
@@ -129,6 +134,8 @@ test("dashboard — two programmes, and the lanes that divide them", async ({ pa
 });
 
 test("routing — the thing nothing else does", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/routing");
   await populated(page, EMPTY.routing);
   // Track rows are drawn from the PROBED layout, so a routing shot taken
@@ -136,7 +143,7 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // renders perfectly and demonstrates nothing.
   await expect(page.getByText("no signal")).toHaveCount(0, { timeout: 60_000 });
   await settle(page);
-  await page.screenshot({ path: `${OUT}/02-routing.png`, fullPage: false });
+  await snap(page, "02-routing.png", { fullPage: false });
 
   // The compiled filtergraph, which is the claim this product makes about
   // being inspectable. Worth its own frame rather than being cropped out.
@@ -148,8 +155,17 @@ test("routing — the thing nothing else does", async ({ page }) => {
   if (await graph.isVisible().catch(() => false)) {
     await graph.scrollIntoViewIfNeeded();
     await settle(page, 400);
-    await page.screenshot({ path: `${OUT}/03-routing-filtergraph.png` });
+    await snap(page, "03-routing-filtergraph.png");
   }
+});
+
+/* The clip for the narrow column. Its own test so the sports scene, which has
+ * no music track, does not take it: docs/media/shots.json gives it the full
+ * scene. It opens the same way the routing test does. */
+test("routing — the clip for narrow columns", async ({ page }) => {
+  await page.goto("/routing");
+  await populated(page, EMPTY.routing);
+  await expect(page.getByText("no signal")).toHaveCount(0, { timeout: 60_000 });
 
   // THE HOME PAGE HERO, AS ITS OWN FRAME (UX Council S1).
   //
@@ -224,14 +240,15 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // (found while re-aiming this, reported, not fixed here). A presence check
   // around the shutter cannot hold it -- it toggles faster than a screenshot
   // -- so the committed frame is one checked by eye to show all four meters.
-  await page.screenshot({
-    path: `${OUT}/02-routing-hero.png`,
+  await snap(page, "02-routing-hero.png", {
     clip: { x, y, width: vw - 12 - x, height: tail.y + tail.height + 18 - y },
   });
   await page.setViewportSize(fullViewport);
 });
 
 test("meters — loudness measured after routing", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/meters");
   // A meter reads per RUNNING destination, so this page is empty until one is
   // actually publishing -- and an empty meters page is the single most
@@ -276,10 +293,12 @@ test("meters — loudness measured after routing", async ({ page }) => {
   ).toHaveCount(0, { timeout: 60_000 });
 
   await settle(page, 800);
-  await page.screenshot({ path: `${OUT}/04-meters.png` });
+  await snap(page, "04-meters.png");
 });
 
 test("sources — one port, many programmes", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/sources");
   await populated(page, EMPTY.sources);
   // MORE THAN ONE, which is the entire claim of the page. One source renders
@@ -313,7 +332,7 @@ test("sources — one port, many programmes", async ({ page }) => {
   // Masked last, right before the shutter: the resize and the scroll above
   // re-render the cards, and a re-render can put a token back.
   await maskPublishTokens(page);
-  await page.screenshot({ path: `${OUT}/05-sources.png` });
+  await snap(page, "05-sources.png");
   await assertNoTokenSurvived(page);
   await page.setViewportSize(fullViewport);
 });
@@ -455,7 +474,7 @@ test("renditions — the ladder, shared across destinations", async ({ page }) =
   // feature that does not exist.
   await populated(page, EMPTY.renditions);
   await settle(page);
-  await page.screenshot({ path: `${OUT}/06-renditions.png` });
+  await snap(page, "06-renditions.png");
 });
 
 test("monitoring — every process, with its own FFmpeg output", async ({ page }) => {
@@ -537,36 +556,6 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   await expect(falseErrors).toHaveCount(0);
 });
 
-/* The video. One take, no cuts, following the same argument as the stills:
- * this is a live stream; here is where each destination's mix is chosen; here
- * is the graph that produces it; here is the measurement proving it.
- *
- * Deliberately slow. A tour that moves at the speed the operator can click is
- * readable; one that moves at the speed a script can navigate is a blur. */
-test("tour — dashboard to routing to meters", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.locator("nav")).toBeVisible();
-  await page.waitForTimeout(3000);
-
-  await page.goto("/routing");
-  await settle(page, 2000);
-
-  // Walk the destination list so the video shows the selections differing,
-  // which is the entire point and is invisible in a single frame.
-  const rows = page.locator("[role='tab'], button").filter({ hasText: /YouTube|Twitch|Podcast/ });
-  const n = Math.min(await rows.count(), 3);
-  for (let i = 0; i < n; i++) {
-    await rows.nth(i).click().catch(() => {});
-    await page.waitForTimeout(2200);
-  }
-
-  await page.goto("/meters");
-  await page.waitForTimeout(6000);
-
-  await page.goto("/monitoring");
-  await page.waitForTimeout(3000);
-});
-
 /* ---------------------------------------------------------------- part two
  *
  * The seven shots above cover ingest and routing. These cover the rest of the
@@ -576,6 +565,8 @@ test("tour — dashboard to routing to meters", async ({ page }) => {
  */
 
 test("routing mix matrix — channel-level control", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/routing");
   await populated(page, EMPTY.routing);
   await settle(page);
@@ -610,7 +601,7 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
   await expect(tab).toBeVisible({ timeout: 15_000 });
   await tab.click();
   await settle(page, 800);
-  await page.screenshot({ path: `${OUT}/08-mix-matrix.png` });
+  await snap(page, "08-mix-matrix.png");
 });
 
 /* THE FIRST STUBBED SHOT, AND IT IS DECLARED RATHER THAN QUIET.
@@ -734,13 +725,13 @@ test("chat — four platforms in one hub", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 720 });
   await page.goto("/chat");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/09-chat.png`, clip: { x: 180, y: 150, width: 950, height: 560 } });
+  await snap(page, "09-chat.png", { clip: { x: 180, y: 150, width: 950, height: 560 } });
 });
 
 test("playout — serving a player from polyemesis itself", async ({ page }) => {
   await page.goto("/playout");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/10-playout.png` });
+  await snap(page, "10-playout.png");
 });
 
 test("library — the recorded catalogue", async ({ page }) => {
@@ -763,32 +754,32 @@ test("library — the recorded catalogue", async ({ page }) => {
   // page rather than a missing letter.
   await topOfFrame(page, page.getByText(/\d+ sessions?\b/).first());
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/11-library.png` });
+  await snap(page, "11-library.png");
 });
 
 test("jobs — the post-production queue and its governor", async ({ page }) => {
   await page.goto("/jobs");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/12-jobs.png` });
+  await snap(page, "12-jobs.png");
 });
 
 test("automation — schedules and alert rules", async ({ page }) => {
   await page.goto("/automation");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/13-automation.png` });
+  await snap(page, "13-automation.png");
 });
 
 test("clips — the editor", async ({ page }) => {
   await page.goto("/clips");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/14-clips.png` });
+  await snap(page, "14-clips.png");
 });
 
 test("recordings — segments and retention", async ({ page }) => {
   await page.goto("/recordings");
   await populated(page, EMPTY.recordings);
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/15-recordings.png` });
+  await snap(page, "15-recordings.png");
 });
 
 test("automod — the rules, and the matrix that grants them", async ({ page }) => {
@@ -825,16 +816,16 @@ test("automod — the rules, and the matrix that grants them", async ({ page }) 
   await page.locator("main").evaluate((m) => m.scrollBy(0, -88));
   await settle(page);
   await expect(page.getByText("Pattern rules", { exact: true }).first()).toBeInViewport();
-  await page.screenshot({ path: `${OUT}/20-automod.png` });
+  await snap(page, "20-automod.png");
 });
 
 test("settings — listeners, and the one-port design in the UI", async ({ page }) => {
   await page.goto("/settings");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/16-settings.png` });
+  await snap(page, "16-settings.png");
   // Full page as well: settings is long, and the single-viewport crop cuts off
   // most of what the page is for.
-  await page.screenshot({ path: `${OUT}/17-settings-full.png`, fullPage: true });
+  await snap(page, "17-settings-full.png", { fullPage: true });
 });
 
 test("platforms — sign-in and credentials, honestly not connected", async ({ page }) => {
@@ -863,7 +854,7 @@ test("platforms — sign-in and credentials, honestly not connected", async ({ p
   // <main> is the scroller, not the window: clear the banner of the header.
   await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/21-platforms.png` });
+  await snap(page, "21-platforms.png");
 });
 
 /* THE SECOND STUBBED SHOT, DECLARED FOR THE SAME REASON AS CHAT.
@@ -943,5 +934,5 @@ test("platforms — connected, the end state of the one-time setup", async ({ pa
   await topOfFrame(page, page.getByText("Optional.", { exact: true }));
   await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/22-platforms-connected.png` });
+  await snap(page, "22-platforms-connected.png");
 });

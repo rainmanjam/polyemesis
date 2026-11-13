@@ -467,3 +467,37 @@ func TestDemoSeedNeverPrintsThePassword(t *testing.T) {
 		t.Errorf("nothing checked (lines %d, printing statements %d)", checked, printers)
 	}
 }
+
+// Every picture the capture takes goes through the refusals in captureKit.ts
+// (snap, or shoot, which uses them), the hero clip is its own test, and the old
+// light-theme tour recording and its two files are gone: the published tour is
+// web/public/media/tour.mp4.
+func TestEveryCaptureShotGoesThroughSnap(t *testing.T) {
+	root := repoRootFromTest(t)
+	read := func(parts ...string) string {
+		raw, err := os.ReadFile(filepath.Join(append([]string{root}, parts...)...))
+		if err != nil {
+			t.Fatalf("read %s: %v", filepath.Join(parts...), err)
+		}
+		return string(raw)
+	}
+	spec := read("ui", "e2e", "capture.spec.ts")
+	if strings.Contains(spec, "page.screenshot(") {
+		t.Error("ui/e2e/capture.spec.ts calls page.screenshot( directly; use snap or shoot, which refuse a bad page")
+	}
+	if strings.Contains(spec, "tour — dashboard") {
+		t.Error("ui/e2e/capture.spec.ts still has the old tour test")
+	}
+	if !strings.Contains(spec, "routing — the clip for narrow columns") {
+		t.Error("ui/e2e/capture.spec.ts has no test titled \"routing — the clip for narrow columns\"")
+	}
+	script := read("scripts", "capture-media.sh")
+	for _, name := range []string{"tour.mp4", "tour.webm"} {
+		if strings.Contains(script, name) {
+			t.Errorf("scripts/capture-media.sh still mentions %s", name)
+		}
+		if _, err := os.Stat(filepath.Join(root, "docs", "media", name)); err == nil {
+			t.Errorf("docs/media/%s should be removed", name)
+		}
+	}
+}

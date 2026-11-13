@@ -103,9 +103,6 @@ as info until the process's first output frame, so the shot shows it with
 errors and warnings at zero. The capture asserts no per-process error chip and
 no `--:--:--` uptime before it fires.
 
-`tour.webm` is the tour test's own recording, re-encoded to VP9 at CRF 42 to
-keep it small; `tour.mp4` is the H.264 copy GitHub can inline.
-
 Server and publisher run as two containers on one Docker network, dialling each
 other by name. That sidesteps [#28](https://github.com/rainmanjam/polyemesis/issues/28),
 where an SRT publisher on the host could not reach a listener bound IPv6-only.

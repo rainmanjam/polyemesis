@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Capture screenshots and video of a LIVE polyemesis, for the README and the
-# website.
+# Capture screenshots of a LIVE polyemesis, for the README and the website.
 #
 #   ./scripts/capture-media.sh
 #
@@ -258,18 +257,6 @@ echo "==> capturing"
 ( cd "$ROOT/ui" && BASE_URL="http://127.0.0.1:$PORT" \
     npx --no-install playwright test --config=e2e/capture.config.ts )
 
-# Playwright names video files by a hash, which is useless in a README.
-echo "==> collecting video"
-VID="$(find "$OUT/.playwright" -name '*.webm' -print0 2>/dev/null | xargs -0 ls -S 2>/dev/null | head -1 || true)"
-if [ -n "$VID" ]; then
-  cp "$VID" "$OUT/tour.webm"
-  # An MP4 alongside it, because GitHub will not inline a .webm in a README.
-  if ffmpeg -hide_banner -loglevel error -y -i "$VID" \
-       -c:v libx264 -pix_fmt yuv420p -movflags +faststart -an "$OUT/tour.mp4" 2>/dev/null; then
-    echo "    docs/media/tour.mp4"
-  fi
-  echo "    docs/media/tour.webm"
-fi
 rm -rf "$OUT/.playwright"
 
 # Quantise to a 256-colour palette. HERE rather than as a hand-run afterthought,
