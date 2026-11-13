@@ -11,8 +11,17 @@ export function initPageIndex(root: HTMLElement): () => void {
   const win = root.ownerDocument.defaultView;
   if (!win) return () => {};
 
-  const links = [...root.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')];
-  const ids = [...new Set(links.map((a) => decodeURIComponent(a.getAttribute("href")!.slice(1))))];
+  /* A link whose fragment is not valid percent-encoding (`#%`) points at nothing: ignored. */
+  const targets = new Map<HTMLAnchorElement, string>();
+  for (const a of root.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) {
+    try {
+      targets.set(a, decodeURIComponent(a.getAttribute("href")!.slice(1)));
+    } catch {
+      /* ignored */
+    }
+  }
+  // The links must be in document order: the index is built from the page's own headings, so they are.
+  const ids = [...new Set(targets.values())];
   const sections = ids
     .map((id) => root.ownerDocument.getElementById(id))
     .filter((el): el is HTMLElement => el !== null);
@@ -21,8 +30,8 @@ export function initPageIndex(root: HTMLElement): () => void {
     if (!sections.length) return;
     const tops = sections.map((el) => el.getBoundingClientRect().top + win.scrollY);
     const here = sections[stageFor(tops, win.scrollY, OFFSET)].id;
-    for (const a of links) {
-      if (decodeURIComponent(a.getAttribute("href")!.slice(1)) === here) a.setAttribute("aria-current", "true");
+    for (const [a, id] of targets) {
+      if (id === here) a.setAttribute("aria-current", "true");
       else a.removeAttribute("aria-current");
     }
   };

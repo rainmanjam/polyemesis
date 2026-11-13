@@ -3,7 +3,7 @@
  * sits in the body on purpose (valid anywhere, and Base has no slot for it).
  * The last crumb is the current page: plain text with aria-current, even if
  * it carries an href, which the structured data still keeps. */
-import { breadcrumbLd, type Crumb } from "../../lib/breadcrumbs";
+import { breadcrumbLdJson, type Crumb } from "../../lib/breadcrumbs";
 
 interface Props {
   crumbs: Crumb[];
@@ -29,4 +29,4 @@ const last = crumbs.length - 1;
   </ol>
 </nav>
 
-<script type="application/ld+json" is:inline set:html={JSON.stringify(breadcrumbLd(crumbs))} />
+<script type="application/ld+json" is:inline set:html={breadcrumbLdJson(crumbs)} />

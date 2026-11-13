@@ -9,6 +9,7 @@ import { boot } from "./home/boot";
 import { bootInner } from "./inner";
 
 afterEach(() => {
+  vi.mocked(boot).mockClear();
   vi.restoreAllMocks();
   vi.doUnmock("./page-index");
   vi.resetModules();
@@ -19,6 +20,18 @@ describe("bootInner", () => {
   it("runs the shared boot and returns its gate", () => {
     expect(bootInner(document)).toBe(gate);
     expect(boot).toHaveBeenCalledWith(document);
+  });
+
+  it("waits for DOMContentLoaded while the document is still loading", () => {
+    const state = vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
+    document.body.innerHTML = `<fieldset data-js-only hidden></fieldset>`;
+    expect(bootInner(document)).toBeUndefined();
+    expect(boot).not.toHaveBeenCalled();
+    expect(document.querySelector<HTMLElement>("[data-js-only]")!.hidden).toBe(true);
+    state.mockReturnValue("interactive");
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+    expect(boot).toHaveBeenCalledTimes(1);
+    expect(document.querySelector<HTMLElement>("[data-js-only]")!.hidden).toBe(false);
   });
 
   it("un-hides data-js-only elements and leaves the others hidden", () => {

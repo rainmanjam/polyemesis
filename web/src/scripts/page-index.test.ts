@@ -111,6 +111,14 @@ describe("initPageIndex", () => {
     expect(() => initPageIndex(empty)()).not.toThrow();
   });
 
+  it("ignores a link whose fragment cannot be decoded", () => {
+    runNow();
+    const root = page();
+    root.querySelector(".rail")!.insertAdjacentHTML("beforeend", '<li><a href="#%">bad</a></li>');
+    expect(() => initPageIndex(root)).not.toThrow();
+    expect(current(root, "rail")).toEqual([true, false, false, false]);
+  });
+
   it("returns a no-op when the document has no window", () => {
     const doc = document.implementation.createHTMLDocument("x");
     const root = doc.createElement("div");

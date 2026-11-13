@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { breadcrumbLd } from "./breadcrumbs";
+import { breadcrumbLd, breadcrumbLdJson } from "./breadcrumbs";
 import { splitAccent } from "./accent";
 import { fillRelease, releaseLine } from "./release";
 
@@ -40,8 +40,21 @@ describe("breadcrumbLd", () => {
     expect(ld.itemListElement[0].item).toBe("https://example.test/a");
   });
 
+  it("does not double the slash when the site ends in one", () => {
+    const ld = breadcrumbLd([{ label: "a", href: "/a" }], "https://example.test/");
+    expect(ld.itemListElement[0].item).toBe("https://example.test/a");
+  });
+
   it("returns an empty list for no crumbs", () => {
     expect(breadcrumbLd([]).itemListElement).toEqual([]);
+  });
+});
+
+describe("breadcrumbLdJson", () => {
+  it("never lets a label close the script element", () => {
+    const json = breadcrumbLdJson([{ label: "</script><b>x", href: "/a" }]);
+    expect(json).not.toContain("<");
+    expect(JSON.parse(json).itemListElement[0].name).toBe("</script><b>x");
   });
 });
 
@@ -97,8 +110,14 @@ describe("shell components", () => {
     expect(band).toContain('"Install polyemesis"');
     expect(band).toContain('"/download"');
   });
-  it("Crumbs marks the last item as the current page", () => {
-    expect(src("components/inner/Crumbs.astro")).toMatch(/aria-current=\{i === last \? "page"/);
+  /* Source assertions, not a render: vitest here has no Astro plugin, so a .astro file cannot be
+     imported. The guard on the <a> is what decides it, so assert the guard and the attribute. */
+  it("Crumbs renders the last item as plain text with aria-current, even when it has an href", () => {
+    const crumbs = src("components/inner/Crumbs.astro");
+    expect(crumbs).toMatch(/const last = crumbs\.length - 1/);
+    expect(crumbs).toMatch(/i < last && c\.href \? \(\s*<a href=\{c\.href\}>/);
+    expect(crumbs).toMatch(/<span aria-current=\{i === last \? "page" : undefined\}>/);
+    expect(crumbs).toContain("breadcrumbLdJson(crumbs)");
   });
 });
 
@@ -117,6 +136,9 @@ describe("inner.css", () => {
     expect([...at].sort((x, y) => x - y)).toEqual(at);
     // Four lines or more between banners, so parallel edits to neighbouring areas do not conflict.
     for (let i = 1; i < at.length; i++) expect(at[i] - at[i - 1]).toBeGreaterThanOrEqual(4);
+  });
+  it("scopes the index rail to nav.rail, because the homepage uses .rail on SVG paths", () => {
+    expect(css).not.toMatch(/(^|[\s,>])\.rail\b/m);
   });
   it("uses none of the banned things", () => {
     expect(css).not.toContain(".reveal");

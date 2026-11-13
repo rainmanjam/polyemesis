@@ -205,7 +205,7 @@
     outline-offset: 2px;
   }
 
-  .rail { display: none; }
+  nav.rail { display: none; }
   .idx-hd {
     padding-bottom: 10px;
     border-bottom: 1px solid var(--color-line);
@@ -213,20 +213,26 @@
     font-size: 0.75rem;
     color: var(--color-muted);
   }
-  .rail ol { font-family: var(--font-mono); font-size: 0.8125rem; }
-  .rail a {
+  nav.rail ol { font-family: var(--font-mono); font-size: 0.8125rem; }
+  nav.rail a {
     display: block;
     padding: 9px 0 9px 14px;
     border-left: 1px solid var(--color-line);
     color: var(--color-muted);
   }
-  .rail .d3 a { padding-left: 28px; }
-  .rail a:hover,
-  .rail a[aria-current="true"] { color: var(--color-fg); }
-  .rail a[aria-current="true"] { border-left-color: var(--color-fg); }
+  nav.rail .d3 a { padding-left: 28px; }
+  nav.rail a:hover,
+  nav.rail a[aria-current="true"] { color: var(--color-fg); }
+  nav.rail a[aria-current="true"] { border-left-color: var(--color-fg); }
+  /* An index that has nothing to show at this width makes no box at all, so it
+     leaves no empty grid item (and no gap) behind. */
+  @media (max-width: 1023.98px) {
+    [data-index][data-variant="rail"] { display: none; }
+  }
   @media (min-width: 1024px) {
     [data-index] { display: block; }
-    .rail {
+    [data-index][data-variant="phone"] { display: none; }
+    nav.rail {
       display: block;
       position: sticky;
       top: calc(var(--nav-h) + 24px);

@@ -1,11 +1,16 @@
 /* Client entry for every inner page: the homepage's boot (motion gate, Pause
  * button), then what the inner pages add. Modules are imported only when their
- * root is on the page. The page's own script calls this once the DOM is ready;
+ * root is on the page. Called from the page's own script; it waits for DOMContentLoaded if the DOM is still loading;
  * a failing module is logged and never stops the rest. */
 import { boot } from "./home/boot";
 import type { MotionGate } from "./home/motion";
 
 export function bootInner(doc: Document): MotionGate | undefined {
+  // Called from a script that may run before the DOM is parsed: wait for it.
+  if (doc.readyState === "loading") {
+    doc.addEventListener("DOMContentLoaded", () => bootInner(doc), { once: true });
+    return undefined;
+  }
   const gate = boot(doc);
 
   // Controls that do nothing without script render hidden; this shows them.
