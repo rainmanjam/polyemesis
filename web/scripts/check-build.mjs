@@ -1363,7 +1363,17 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * reason: route -> [{ contains, why }]; any legacy sentence containing the
  * `contains` text is exempt. */
 const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
-const DROPPED = {};
+const CHROME_RUN =
+  "Not copy: breadcrumb trail, eyebrow, button and index labels the old markup ran together with the next heading or sentence. The shell draws the trail separator in CSS and puts the index between header and body, so the run cannot recur; the real sentence it ends with is still on the page.";
+const DROPPED = {
+  "/multistream": [{ contains: "polyemesis / multistream multistreaming multistreaming is one upload reaching several platforms.", why: CHROME_RUN }],
+  "/free-restream-service": [{ contains: "install it what it costs you the word what a restream service actually is you send one stream out of your encoder.", why: CHROME_RUN }],
+  "/how-to-multistream-from-obs": [
+    { contains: "guide how to multistream from obs to multistream is to broadcast one programme to several platforms at once:", why: CHROME_RUN },
+    { contains: "the three routes walkthrough what goes wrong pick one three routes, and the cost each one moves somewhere else", why: CHROME_RUN },
+  ],
+  "/twitch-vod-track": [{ contains: "polyemesis / multistream / twitch vod track twitch the broadcast carries the music.", why: CHROME_RUN }],
+};
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
