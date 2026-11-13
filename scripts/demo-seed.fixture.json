@@ -40,7 +40,22 @@
       "minFreeGb": 1
     },
     "preview": { "enabled": true },
-    "playout": { "enabled": true }
+    "playout": { "enabled": true },
+    "automod": {
+      "enabled": true,
+      "platformEnabled": { "twitch": true, "youtube": true },
+      "rules": [
+        { "id": 1, "name": "Link spam", "enabled": true, "pattern": "\\b(?:bit\\.ly|discord\\.gg)/\\S+", "action": "delete" },
+        { "id": 2, "name": "Shouting", "enabled": true, "pattern": "^[^a-z]{12,}$", "action": "timeout", "timeoutSeconds": 60 },
+        { "id": 3, "name": "Giveaway scam", "enabled": true, "pattern": "free\\s+(?:gift\\s*cards?|robux|v-?bucks)", "action": "delete" }
+      ],
+      "on": {
+        "twitch/delete/rules": true,
+        "twitch/timeout/rules": true,
+        "twitch/timeout/history": true,
+        "youtube/delete/rules": true
+      }
+    }
   },
 
   "sources": [
@@ -415,5 +430,72 @@
     { "startedAgoMinutes": 1270, "minutes": 6 },
     { "startedAgoMinutes": 4020, "minutes": 10 },
     { "startedAgoMinutes": 4010, "minutes": 4 }
-  ]
+  ],
+
+  "_automation": [
+    "Ported from scripts/seed_demo.go (the lanes rig). NO HOOKS: a hook carries a",
+    "URL, and the rig holds only URLs that internal/demorig has checked. The alert",
+    "rules need one (the server refuses a rule without), so each is https on a",
+    ".invalid host, checked by demorig.CheckWebhookURLs before it is sent.",
+    "Schedules are evening UTC, and the only enabled stop names ONE destination, so",
+    "a capture that straddles a firing time cannot take the dashboard down."
+  ],
+  "automation": {
+    "alertRules": [
+      {
+        "name": "Ops — #broadcast-alerts", "url": "https://alerts.demo.invalid/webhooks/slack/broadcast-alerts",
+        "format": "slack", "minSeverity": "warning",
+        "events": ["destination.down", "destination.recovered", "destination.falling_behind", "ingest.lost", "ingest.recovered"],
+        "debounceSeconds": 30, "minIntervalSeconds": 60, "enabled": true
+      },
+      {
+        "name": "On-call pager — critical only", "url": "https://alerts.demo.invalid/webhooks/discord/oncall",
+        "format": "discord", "minSeverity": "critical", "events": [],
+        "debounceSeconds": 15, "minIntervalSeconds": 30, "enabled": true
+      },
+      {
+        "name": "Audio desk — clipping and loudness", "url": "https://alerts.demo.invalid/hooks/audio-desk",
+        "format": "json", "minSeverity": "info",
+        "events": ["audio.clipping", "loudness.out_of_compliance", "loudness.recovered"],
+        "debounceSeconds": 120, "minIntervalSeconds": 300, "enabled": true
+      },
+      {
+        "name": "Security log — sign-ins and tokens", "url": "https://alerts.demo.invalid/collector/polyemesis/security",
+        "format": "json", "minSeverity": "info",
+        "events": ["auth.login.failed", "auth.login.succeeded", "auth.password.changed", "auth.token.created", "auth.token.revoked", "settings.changed"],
+        "debounceSeconds": 5, "minIntervalSeconds": 15, "enabled": true
+      },
+      {
+        "name": "Recording volume — disk watch", "url": "https://alerts.demo.invalid/webhooks/slack/facilities",
+        "format": "slack", "minSeverity": "warning", "events": ["disk.low", "disk.recovered"],
+        "debounceSeconds": 60, "minIntervalSeconds": 600, "enabled": false
+      }
+    ],
+    "schedules": [
+      {
+        "name": "Weeknight show — on air 19:00", "action": "start", "kind": "weekly", "tz": "UTC",
+        "atMinutes": 1140, "days": [1, 2, 3, 4, 5], "graceSeconds": 300, "enabled": true,
+        "destinations": ["Archive — as-transmitted master", "Podcast mix — mics only"]
+      },
+      {
+        "name": "Archive — stop recording 21:30", "action": "stop", "kind": "weekly", "tz": "UTC",
+        "atMinutes": 1290, "days": [1, 2, 3, 4, 5], "graceSeconds": 300, "enabled": true,
+        "destinations": ["Archive — commentary booth"]
+      },
+      {
+        "name": "Overnight filler — playlist from 02:00", "action": "playlist.start", "kind": "daily", "tz": "UTC",
+        "atMinutes": 120, "days": [], "graceSeconds": 900, "enabled": true, "destinations": []
+      },
+      {
+        "name": "Saturday rehearsal — on air 11:00", "action": "start", "kind": "weekly", "tz": "UTC",
+        "atMinutes": 660, "days": [6], "graceSeconds": 1800, "enabled": false, "destinations": []
+      }
+    ]
+  },
+
+  "_clips": [
+    "The rolling buffer on the first programme, armed with a window, and one clip",
+    "captured from it once it holds `afterSeconds` of the live feed."
+  ],
+  "clips": { "source": "Main Programme — Studio A", "windowSeconds": 120, "afterSeconds": 45, "captureSeconds": 15 }
 }

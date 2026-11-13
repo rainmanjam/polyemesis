@@ -281,3 +281,31 @@ got="$( . "$LIB"; sports_plan_field "$TMP/plan.tsv" 4 )"
 grep -q 'sports_plan_field "\$1" 4' "$LIB" || fail "sports_publish does not read the bitrate from field 4"
 ! grep -q '9000k' "$LIB" || fail "the bitrate is hard-coded in the library"
 pass
+
+# 15
+begin full-fixture-alert-urls-pass
+go run "$ROOT/scripts/demo_seed_driver.go" - guardcontent "$ROOT/scripts/demo-seed.fixture.json" > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 0
+python3 - "$ROOT/scripts/demo-seed.fixture.json" <<'PY' || fail "the fixture is missing a section the full scene seeds"
+import json, sys
+f = json.load(open(sys.argv[1]))
+assert len(f["automation"]["alertRules"]) >= 3 and len(f["automation"]["schedules"]) >= 3
+assert len(f["settings"]["automod"]["rules"]) >= 2
+assert f["clips"]["windowSeconds"] > 0 and "hooks" not in f["automation"]
+PY
+pass
+
+# 16
+begin real-alert-url-refused-before-anything-starts
+python3 - "$ROOT/scripts/demo-seed.fixture.json" "$TMP/bad.fixture.json" <<'PY'
+import json, sys
+f = json.load(open(sys.argv[1]))
+f["automation"]["alertRules"][0]["url"] = "https://hooks.slack.com/services/T0/B0/x"
+json.dump(f, open(sys.argv[2], "w"))
+PY
+DEMO_FIXTURE="$TMP/bad.fixture.json" run_script --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "network create"
+expect_no_call "run"
+pass

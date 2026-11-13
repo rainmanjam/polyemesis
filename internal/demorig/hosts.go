@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -157,6 +158,63 @@ func hostProblem(raw string, allow []string) string {
 		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
 			return "URL port is not 1 to 65535"
 		}
+	}
+	return ""
+}
+
+// CheckWebhookURLs is the question the driver asks of every alert-rule URL in
+// the fixture before it is sent to the server: can it ever reach anybody? It
+// returns nil only if each one is https, names a host under .invalid (which
+// RFC 2606 reserves so it can never be delegated) and has no userinfo, port,
+// query or fragment. A rule that fires then fails to resolve, on every install.
+//
+// Fails closed on an empty list's elements, a long URL or a character outside
+// printable ASCII. The error names the rule, never the URL.
+func CheckWebhookURLs(rules map[string]string) error {
+	var bad []string
+	for name, raw := range rules {
+		if msg := webhookProblem(raw); msg != "" {
+			bad = append(bad, fmt.Sprintf("%s: %s", name, msg))
+		}
+	}
+	if len(bad) == 0 {
+		return nil
+	}
+	sort.Strings(bad)
+	return fmt.Errorf("demo rig: alert URLs that could be reached: %s", strings.Join(bad, "; "))
+}
+
+func webhookProblem(raw string) string {
+	if raw == "" {
+		return "empty URL"
+	}
+	if len(raw) > maxURLBytes {
+		return "URL is too long"
+	}
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; c < 0x21 || c > 0x7e || c == '\\' {
+			return "URL has forbidden characters"
+		}
+	}
+	if strings.Contains(raw, "@") {
+		return "URL has userinfo"
+	}
+	if strings.ContainsAny(raw, "?#") {
+		return "URL has a query or fragment"
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "URL does not parse"
+	}
+	if !strings.EqualFold(u.Scheme, "https") {
+		return "URL scheme is not https"
+	}
+	if u.Port() != "" || strings.HasSuffix(u.Host, ":") {
+		return "URL has a port"
+	}
+	host := strings.ToLower(u.Hostname())
+	if !strings.HasSuffix(host, ".invalid") || len(host) == len(".invalid") {
+		return "host is not under .invalid"
 	}
 	return ""
 }

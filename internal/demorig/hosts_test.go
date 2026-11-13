@@ -304,3 +304,44 @@ func TestCheckStoredRefusesWhatReachesAPlatformWithoutTheURL(t *testing.T) {
 		t.Error("empty allow-list accepted")
 	}
 }
+
+func TestCheckWebhookURLsAcceptsInvalidHostsOnly(t *testing.T) {
+	ok := map[string]string{
+		"a": "https://alerts.demo.invalid/hooks/ops",
+		"b": "HTTPS://Pager.Demo.INVALID/x/y",
+	}
+	if err := CheckWebhookURLs(ok); err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if err := CheckWebhookURLs(nil); err != nil {
+		t.Fatalf("no rules is fine: %v", err)
+	}
+}
+
+func TestCheckWebhookURLsRefuses(t *testing.T) {
+	for name, u := range map[string]string{
+		"empty":      "",
+		"real":       "https://example.com/hooks",
+		"http":       "http://alerts.demo.invalid/x",
+		"bare":       "https://invalid/x",
+		"look-alike": "https://alerts.demo.invalid.evil.com/x",
+		"userinfo":   "https://a@alerts.demo.invalid/x",
+		"port":       "https://alerts.demo.invalid:8443/x",
+		"emptyport":  "https://alerts.demo.invalid:/x",
+		"query":      "https://alerts.demo.invalid/x?h=a.com",
+		"space":      "https://alerts.demo.invalid/x y",
+		"backslash":  `https://alerts.demo.invalid\@evil.com/`,
+		"long":       "https://alerts.demo.invalid/" + strings.Repeat("a", 2100),
+		"parse":      "https://alerts.demo.invalid/%zz",
+		"ip":         "https://127.0.0.1/x",
+	} {
+		err := CheckWebhookURLs(map[string]string{name: u})
+		if err == nil {
+			t.Errorf("%s: %q accepted", name, u)
+			continue
+		}
+		if u != "" && len(u) < 100 && strings.Contains(err.Error(), u) {
+			t.Errorf("%s: the error quotes the URL: %v", name, err)
+		}
+	}
+}

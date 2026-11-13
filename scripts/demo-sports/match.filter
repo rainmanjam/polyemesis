@@ -21,7 +21,7 @@
   drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:text='1 – 0':fontsize=44:fontcolor=0xffd84a:x=250:y=59,
   drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:text='AWAY':fontsize=40:fontcolor=white:x=410:y=62,
   drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:fontsize=40:fontcolor=white:x=600:y=62:text='%{eif\:floor((3792+t)/60)\:d}\:%{eif\:mod(floor(3792+t)\,60)\:d\:2}',
-  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='MATCH CAM 1 · MANCHESTER':fontsize=28:fontcolor=white@0.8:x=w-text_w-56:y=h-70,
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='MATCH CAM 1 · MANCHESTER':fontsize=28:fontcolor=white@0.8:x=56:y=h-70,
   format=yuv420p,realtime[v];
 aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/3.1+0.0)+0.5,0,1)*(0.55+0.45*abs(sin(2*PI*3.4*t)))*(sin(2*PI*118*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*118*t)+0.25*sin(6.2*PI*118*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a0];
 aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/2.3+0.9)+0.3,0,1)*(0.55+0.45*abs(sin(2*PI*4.1*t)))*(sin(2*PI*152*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*152*t)+0.25*sin(6.2*PI*152*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a1];

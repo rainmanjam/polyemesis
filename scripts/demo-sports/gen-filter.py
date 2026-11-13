@@ -52,7 +52,7 @@ v.append(f"drawtext=fontfile={BOLD}:text='1 – 0':fontsize=44:fontcolor=0xffd84
 v.append(f"drawtext=fontfile={BOLD}:text='AWAY':fontsize=40:fontcolor=white:x=410:y=62")
 v.append(f"drawtext=fontfile={BOLD}:fontsize=40:fontcolor=white:x=600:y=62:"
          "text='%{eif\\:floor((3792+t)/60)\\:d}\\:%{eif\\:mod(floor(3792+t)\\,60)\\:d\\:2}'")
-v.append(f"drawtext=fontfile={FONT}:text='MATCH CAM 1 · MANCHESTER':fontsize=28:fontcolor=white@0.8:x=w-text_w-56:y=h-70")
+v.append(f"drawtext=fontfile={FONT}:text='MATCH CAM 1 · MANCHESTER':fontsize=28:fontcolor=white@0.8:x=56:y=h-70")
 v.append("format=yuv420p,realtime[v]")
 out = [",\n  ".join(v)]
 for i, (f, p, off, syl) in enumerate(VOICES):

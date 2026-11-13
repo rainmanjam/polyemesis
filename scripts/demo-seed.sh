@@ -224,6 +224,15 @@ if [ "$SCENE" = sports ]; then
   echo "==> every fixture destination is the local receiver"
 fi
 
+# THE FIRST SAFETY LAYER (full): the alert-rule URLs in the fixture must all be
+# https on a .invalid host (internal/demorig), before any container exists. The
+# fixture has no hooks, and no other URL the server would ever call.
+if [ "$SCENE" = full ]; then
+  go run "$DRIVER" - guardcontent "$FIXTURE" >&2 \
+    || { echo "REFUSING: the fixture has an alert URL that is not on a .invalid host; nothing was started." >&2; exit 1; }
+  echo "==> every fixture alert URL is on a .invalid host"
+fi
+
 # One password for the seeder and for Playwright's auth setup, generated per
 # run. They each used to carry their own literal, and when the two disagreed the
 # seeder created the account and the browser then failed on a missing <nav> --
@@ -451,6 +460,14 @@ go run "$DRIVER" "$BASE_URL" wait "$FIXTURE"
 echo "==> creating the rendition ladder and the destinations"
 go run "$DRIVER" "$BASE_URL" finish "$FIXTURE"
 
+# THE FULL SCENE'S AUTOMATION PAGE AND ROLLING BUFFER: alert rules and
+# schedules (no hooks, see the fixture), and the first programme's buffer armed
+# so it fills while the encoders settle below. The sports scene has none.
+if [ "$SCENE" = full ]; then
+  echo "==> seeding alert rules, schedules and the rolling buffer"
+  go run "$DRIVER" "$BASE_URL" content "$FIXTURE"
+fi
+
 # THE SECOND SAFETY LAYER (sports): the same allow-list, against what the server
 # stored. The driver's start re-checks before every start.
 if [ "$SCENE" = sports ]; then
@@ -475,6 +492,8 @@ else
 # view is the one page where those two numbers are the whole point.
 echo "==> letting the encoders and file destinations settle"
 sleep 25
+echo "==> capturing a clip from the rolling buffer"
+go run "$DRIVER" "$BASE_URL" clip "$FIXTURE"
 fi
 
 # REFUSE TO PHOTOGRAPH AN UNDER-SEEDED INSTALL.

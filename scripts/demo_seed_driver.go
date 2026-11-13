@@ -22,11 +22,14 @@
 //	go run scripts/demo_seed_driver.go <base> wait       <fixture>
 //	go run scripts/demo_seed_driver.go <base> finish     <fixture>
 //	go run scripts/demo_seed_driver.go <base> recordings <fixture>
+//	go run scripts/demo_seed_driver.go <base> content    <fixture>
+//	go run scripts/demo_seed_driver.go <base> clip       <fixture>
 //	go run scripts/demo_seed_driver.go <base> census     <fixture>
 //
 // The sports scene adds (see scripts/lib-demo-sports.sh); <base> is "-" for the
 // one that needs no server:
 //
+//	go run scripts/demo_seed_driver.go -      guardcontent <fixture>     (the full scene's alert URLs)
 //	go run scripts/demo_seed_driver.go -      guardfixture <fixture> <host>
 //	go run scripts/demo_seed_driver.go <base> guard        <fixture> <host>
 //	go run scripts/demo_seed_driver.go <base> routing      <fixture> <initial|final>
@@ -85,6 +88,22 @@ type fixture struct {
 	// scanner indexes them, which is the only way the durations, sizes and
 	// track counts on the library page are measurements rather than assertions.
 	Recordings []fixRecording `json:"recordings"`
+	// Automation and Clips are the full scene's alert rules, schedules and
+	// rolling buffer; both are absent from the sports fixture.
+	Automation fixAutomation `json:"automation"`
+	Clips      *fixClips     `json:"clips"`
+}
+
+type fixAutomation struct {
+	AlertRules []map[string]any `json:"alertRules"`
+	Schedules  []map[string]any `json:"schedules"`
+}
+
+type fixClips struct {
+	Source         string `json:"source"`
+	WindowSeconds  int    `json:"windowSeconds"`
+	AfterSeconds   int    `json:"afterSeconds"`
+	CaptureSeconds int    `json:"captureSeconds"`
 }
 
 type fixSource struct {
@@ -161,6 +180,13 @@ func main() {
 		return
 	}
 
+	// Same for the alert-rule URLs: the full scene's first safety layer, run
+	// before any container exists.
+	if cmd == "guardcontent" {
+		guardContent(fx)
+		return
+	}
+
 	jar, _ := cookiejar.New(nil)
 	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
 	waitUp()
@@ -173,6 +199,10 @@ func main() {
 		waitPublishing(fx)
 	case "finish":
 		finish(fx)
+	case "content":
+		content(fx)
+	case "clip":
+		captureClip(fx)
 	case "census":
 		census(fx)
 	case "guard":
@@ -575,6 +605,158 @@ func printRecordingPlan(fx *fixture) {
 // would still pass — it would just photograph an emptier product than the one
 // this script exists to build, which is the exact failure mode
 // docs/media/README.md says the capture harness must not produce.
+// content seeds what the full scene's automation, clips and buffer pages show:
+// the alert rules and schedules, and the first programme's armed rolling buffer.
+// Idempotent by name, like everything here. The automod rules are ordinary
+// settings and travel with `setup`.
+//
+// NO HOOKS, and every alert URL goes through demorig first: the rule is refused
+// by the server without one, so it is https on a .invalid host or it is not sent.
+func content(fx *fixture) {
+	guardContent(fx)
+	for _, r := range fx.Automation.AlertRules {
+		name, _ := r["name"].(string)
+		if hasNamed("/alerts/rules", name) {
+			continue
+		}
+		mustSend("POST", "/alerts/rules", r)
+		fmt.Fprintf(os.Stderr, "  alert rule %q\n", name)
+	}
+	ids := destinationIDsByName()
+	for _, sc := range fx.Automation.Schedules {
+		name, _ := sc["name"].(string)
+		if hasNamed("/schedules", name) {
+			continue
+		}
+		body := cloneMap(sc)
+		targets, _ := body["destinations"].([]any)
+		delete(body, "destinations")
+		want := []int64{}
+		for _, t := range targets {
+			tn, _ := t.(string)
+			id, ok := ids[tn]
+			if !ok {
+				die("schedule %q targets %q, which does not exist (an empty list would mean every destination)", name, tn)
+			}
+			want = append(want, id)
+		}
+		body["destinationIds"] = want
+		mustSend("POST", "/schedules", body)
+		fmt.Fprintf(os.Stderr, "  schedule %q\n", name)
+	}
+	if c := fx.Clips; c != nil {
+		sid := clipSource(c)
+		mustSend("PUT", fmt.Sprintf("/clips/buffer?source=%d", sid), map[string]any{"enabled": true, "windowSeconds": c.WindowSeconds})
+		fmt.Fprintf(os.Stderr, "  rolling buffer armed on source %d (%d s)\n", sid, c.WindowSeconds)
+	}
+}
+
+// guardContent refuses a fixture whose alert rules could reach anybody: every
+// URL must pass demorig.CheckWebhookURLs. Run before any container exists, and
+// again before the rules are sent.
+func guardContent(fx *fixture) {
+	urls := map[string]string{}
+	for _, r := range fx.Automation.AlertRules {
+		name, _ := r["name"].(string)
+		u, _ := r["url"].(string)
+		urls[name] = u
+	}
+	if err := demorig.CheckWebhookURLs(urls); err != nil {
+		die("%v", err)
+	}
+}
+
+func clipSource(c *fixClips) int64 {
+	id, ok := sourcesByName()[c.Source]
+	if !ok {
+		die("clips: source %q does not exist", c.Source)
+	}
+	return id
+}
+
+// captureClip waits until the buffer holds AfterSeconds of the live feed, then
+// captures one clip, unless the programme already has one. A 409 means the
+// buffer is still empty, so it retries for a minute rather than failing.
+func captureClip(fx *fixture) {
+	c := fx.Clips
+	if c == nil {
+		return
+	}
+	sid := clipSource(c)
+	listPath := fmt.Sprintf("/clips?source=%d", sid)
+	var have struct {
+		Clips []map[string]any `json:"clips"`
+	}
+	decode(getRaw(listPath), &have)
+	if len(have.Clips) > 0 {
+		fmt.Fprintf(os.Stderr, "  programme %d already has %d clip(s)\n", sid, len(have.Clips))
+		return
+	}
+	time.Sleep(time.Duration(c.AfterSeconds) * time.Second)
+	for i := 0; ; i++ {
+		code, out := send("POST", fmt.Sprintf("/clips?source=%d", sid), map[string]any{"seconds": c.CaptureSeconds})
+		if code < 300 {
+			var made struct {
+				Clip struct {
+					Name            string  `json:"name"`
+					Seconds         float64 `json:"seconds"`
+					KeyframeAligned bool    `json:"keyframeAligned"`
+				} `json:"clip"`
+			}
+			decode(out, &made)
+			// A clip taken before the buffer holds a keyframe is rough and
+			// reads as 0 s long. It is real, but it is not what the page is
+			// photographed for: delete it and take another a little later.
+			if made.Clip.KeyframeAligned && made.Clip.Seconds > 0 {
+				fmt.Fprintf(os.Stderr, "  captured a %.0f s clip\n", made.Clip.Seconds)
+				return
+			}
+			if i >= 12 {
+				die("capture clip: the buffer never produced a keyframe-aligned clip")
+			}
+			mustSend("DELETE", fmt.Sprintf("/clips/%s?source=%d", made.Clip.Name, sid), nil)
+		} else if code != http.StatusConflict || i >= 12 {
+			die("capture clip: HTTP %d (%d-byte body not shown)", code, len(out))
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// mustSend is send that dies on a refusal: the content above is what a page is
+// photographed for, so a refused row must stop the run, not scroll past.
+func mustSend(method, path string, body any) {
+	if code, out := send(method, path, body); code >= 300 {
+		die("%s %s: HTTP %d (%d-byte body not shown)", method, path, code, len(out))
+	}
+}
+
+// hasNamed reports whether the list at path already holds a row with this name.
+func hasNamed(path, name string) bool {
+	var rows []map[string]any
+	decode(getRaw(path), &rows)
+	for _, r := range rows {
+		if n, _ := r["name"].(string); n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func destinationIDsByName() map[string]int64 {
+	var rows []struct {
+		Destination struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"destination"`
+	}
+	decode(getRaw("/destinations"), &rows)
+	out := map[string]int64{}
+	for _, r := range rows {
+		out[r.Destination.Name] = r.Destination.ID
+	}
+	return out
+}
+
 func census(fx *fixture) {
 	var srcs []map[string]any
 	decode(getRaw("/sources"), &srcs)
@@ -596,6 +778,21 @@ func census(fx *fixture) {
 	fmt.Printf("renditions\t%d\t%d\n", len(rends), wantRend)
 	fmt.Printf("destinations\t%d\t%d\n", len(dsts), wantDest)
 	fmt.Printf("recordings\t%d\t%d\n", len(recs), len(fx.Recordings))
+	if len(fx.Automation.AlertRules) > 0 {
+		var rules []map[string]any
+		decode(getRaw("/alerts/rules"), &rules)
+		fmt.Printf("alert rules\t%d\t%d\n", len(rules), len(fx.Automation.AlertRules))
+		var scheds []map[string]any
+		decode(getRaw("/schedules"), &scheds)
+		fmt.Printf("schedules\t%d\t%d\n", len(scheds), len(fx.Automation.Schedules))
+	}
+	if c := fx.Clips; c != nil {
+		var have struct {
+			Clips []map[string]any `json:"clips"`
+		}
+		decode(getRaw(fmt.Sprintf("/clips?source=%d", clipSource(c))), &have)
+		fmt.Printf("clips\t%d\t%d\n", len(have.Clips), 1)
+	}
 }
 
 // --------------------------------------------------------- 6. the sports rig
