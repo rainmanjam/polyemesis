@@ -1,0 +1,45 @@
+---
+/* The closing band: one decision at the foot of a page. The primary action
+ * defaults to the install page; `command` adds the docker run line. */
+import CodeBlock from "../CodeBlock.astro";
+import { splitAccent } from "../../lib/accent";
+import { DOCKER_RUN } from "../../data/install.mjs";
+
+interface Link {
+  label: string;
+  href: string;
+}
+
+interface Props {
+  heading: string;
+  accent?: string;
+  lede?: string;
+  primary?: Link;
+  secondary?: Link;
+  command?: boolean;
+}
+
+const {
+  heading,
+  accent,
+  lede,
+  primary = { label: "Install polyemesis", href: "/download" },
+  secondary,
+  command = false,
+} = Astro.props;
+const [before, word, after] = splitAccent(heading, accent);
+---
+
+<section class="band" aria-labelledby="band-h">
+  <div class="wrap band-in">
+    <div>
+      <h2 id="band-h">{before}{word && <em class="it">{word}</em>}{after}</h2>
+      {lede && <p class="lede">{lede}</p>}
+      <div class="band-btns">
+        <a class="btn btn-primary" href={primary.href}>{primary.label}</a>
+        {secondary && <a class="btn btn-ghost" href={secondary.href}>{secondary.label}</a>}
+      </div>
+    </div>
+    {command && <CodeBlock label="docker run" code={DOCKER_RUN} />}
+  </div>
+</section>

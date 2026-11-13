@@ -1,0 +1,37 @@
+---
+/* The top of every inner page: trail, one h1 with at most one accent word, a
+ * lede, then optional actions (buttons) and a mono meta line. */
+import Crumbs from "./Crumbs.astro";
+import { splitAccent } from "../../lib/accent";
+import type { Crumb } from "../../lib/breadcrumbs";
+
+interface Props {
+  crumbs: Crumb[];
+  heading: string;
+  accent?: string;
+  lede: string;
+}
+
+const { crumbs, heading, accent, lede } = Astro.props;
+const [before, word, after] = splitAccent(heading, accent);
+---
+
+<header class="ph wrap">
+  <Crumbs crumbs={crumbs} />
+  <h1>{before}{word && <em class="it">{word}</em>}{after}</h1>
+  <p class="lede">{lede}</p>
+  {
+    Astro.slots.has("actions") && (
+      <div class="acts">
+        <slot name="actions" />
+      </div>
+    )
+  }
+  {
+    Astro.slots.has("meta") && (
+      <p class="meta">
+        <slot name="meta" />
+      </p>
+    )
+  }
+</header>

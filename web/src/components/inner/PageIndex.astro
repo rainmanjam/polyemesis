@@ -1,0 +1,30 @@
+---
+/* The in-page index, server-rendered so it works with scripts off. Final
+ * props; the phone strip, the disclosure form and the current-section marking
+ * are completed in the index task. */
+import type { IndexItem } from "../../lib/page-index";
+
+interface Props {
+  items: IndexItem[];
+  label?: string;
+  variant?: "both" | "rail" | "phone";
+  phone?: "strip" | "disclosure";
+}
+
+const { items, label = "On this page" } = Astro.props;
+---
+
+<div data-index class="rail">
+  <nav aria-label={label}>
+    <p class="idx-hd">{label}</p>
+    <ol class="idx-list">
+      {
+        items.map((it) => (
+          <li data-depth={it.depth ?? 2}>
+            <a href={`#${it.id}`}>{it.label}</a>
+          </li>
+        ))
+      }
+    </ol>
+  </nav>
+</div>
