@@ -176,8 +176,20 @@ function measure() {
   const grids = [...document.querySelectorAll(".card-grid, .scroll-hint")].filter(
     (g) => g.getClientRects().length > 0 && !(g.classList.contains("scroll-hint") && g.closest("li")),
   );
+  /* A page with no rail (data-lay="single") has one column, and it IS the content box: if it shrinks (a max-width), every
+     grid lines up with the shrunken column and passes. So the column itself is measured against the .wrap's content box. */
+  const lay = document.querySelector('.wrap[data-lay="single"]');
+  const col = lay?.querySelector("[data-column]");
+  let single = null;
+  if (lay && col && !lay.querySelector(".rail")) {
+    const w = lay.getBoundingClientRect();
+    const wcs = getComputedStyle(lay);
+    const c = col.getBoundingClientRect();
+    single = { left: c.left - (w.left + px(wcs.borderLeftWidth) + px(wcs.paddingLeft)), right: w.right - px(wcs.borderRightWidth) - px(wcs.paddingRight) - c.right };
+  }
   return {
     overflow: document.documentElement.scrollWidth - window.innerWidth,
+    single,
     grids: grids.map((g) => {
       const b = g.getBoundingClientRect();
       const cs = getComputedStyle(g);
@@ -247,6 +259,9 @@ try {
       const at = `${route} @${width}`;
 
       if (m.overflow > 0) fail.push(`${at}: the page scrolls sideways by ${m.overflow}px`);
+      if (m.single && (Math.abs(m.single.left) > TOLERANCE || Math.abs(m.single.right) > TOLERANCE)) {
+        fail.push(`${at}: the single column is ${m.single.left.toFixed(1)}px / ${m.single.right.toFixed(1)}px off the .wrap content box (left / right), so grids that line up with it prove nothing`);
+      }
       const cardGrids = m.grids.filter((g) => g.isCardGrid).length;
       if (REQUIRED[route] !== undefined && cardGrids !== REQUIRED[route]) {
         fail.push(`${at}: ${cardGrids} .card-grid found, expected ${REQUIRED[route]} -- update REQUIRED with the markup change`);

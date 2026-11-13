@@ -11,6 +11,15 @@ const SHOTS = join(SRC, "assets", "shots");
 
 /** Kept without a user on purpose. Plan 4 removes an entry when it uses the file. */
 const WHITELIST = ["06-renditions.png"];
+const WHITELIST_LENGTH = 1; // it can only grow here, in plain sight: a new entry must change this number too
+
+/** A source with its comments removed: a file name in a comment is not a use. */
+function withoutComments(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, "") // block comments (CSS, JS)
+    .replace(/<!--[\s\S]*?-->/g, "") // HTML and markdown comments
+    .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1"); // line comments, not the // of a URL
+}
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -25,7 +34,7 @@ function sourceFiles(dir: string): string[] {
 
 describe("screenshots in src/assets/shots", () => {
   const shots = readdirSync(SHOTS).filter((f) => f.endsWith(".png"));
-  const sources = sourceFiles(SRC).map((f) => readFileSync(f, "utf8"));
+  const sources = sourceFiles(SRC).map((f) => withoutComments(readFileSync(f, "utf8")));
 
   it("finds the folder and the sources it searches", () => {
     expect(shots.length).toBeGreaterThanOrEqual(8);
@@ -35,6 +44,14 @@ describe("screenshots in src/assets/shots", () => {
   it("every capture is referenced by file name, or whitelisted", () => {
     const unused = shots.filter((s) => !WHITELIST.includes(s) && !sources.some((t) => t.includes(s)));
     expect(unused).toEqual([]);
+  });
+
+  it("the whitelist has not grown silently", () => {
+    expect(WHITELIST).toHaveLength(WHITELIST_LENGTH);
+  });
+
+  it("a file name in a comment is not a use", () => {
+    expect(withoutComments("/* a.png */ x // b.png\n<!-- c.png -->\nlet u = 'https://x/d.png'")).toBe(" x \n\nlet u = 'https://x/d.png'");
   });
 
   it("every whitelist entry is a file that exists", () => {
