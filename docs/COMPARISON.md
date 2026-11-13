@@ -175,7 +175,7 @@ counts surveyed 2026-07-27.
 | **MQTT** | Core tracker | ✅ **Have.** Retained telemetry with Home Assistant discovery, so the stream appears as entities in a dashboard the operator already runs. Alert webhooks exist alongside it — see [MQTT.md](MQTT.md) |
 | **HDR 10-bit HEVC** | 3 reactions, closed | **Partial.** `libx265` and `hevc_nvenc` exist; no HDR tone-map path |
 | **LL-HLS** | 2 reactions, closed | **Addressed by tuning, not by building LL-HLS.** FFmpeg cannot emit LL-HLS partial segments at all — verified against the pinned binary — so the protocol would need a Go-side packager, which [roadmap/LL-HLS.md](roadmap/LL-HLS.md) declines. Tuning instead took preview latency from **4.2–6.2 s to 2.2–3.2 s**, measured. Two of the wins were bug fixes rather than knobs: a wrong GOP calculation, and a player flag that was inert because of an unrelated default |
-| Maturity | — | Restreamer is established; polyemesis is pre-release with one maintainer |
+| Maturity | — | Restreamer is established; polyemesis is pre-release |
 
 **One caveat on Restreamer's side.** Two of its four most-reacted open issues are
 not feature requests — "State of Restreamer" (31 reactions) and "Future release
@@ -194,7 +194,7 @@ this project does not approach.
 |---|---|
 | **Protocol breadth** — an `src/output/` directory of muxers, including WebRTC and its own SRT output | SRT, SRTLA and RTMP in, RTMP/SRT out, HLS for preview |
 | **Per-push track selection**, on any target, by index or codec or `all` | Selection is per destination too, but the point here is the mix |
-| **Years of production deployment**, and a commercial vendor behind it | Pre-release, one maintainer |
+| **Years of production deployment**, and a commercial vendor behind it | Pre-release |
 | **Selection without decoding.** A push target that only selects tracks is a pure copy end to end; transcoding is a separate opt-in process | Every destination decodes and re-encodes its audio, always, because that is what mixing is |
 
 **A caveat on reading their source.** The track-selection block in
@@ -279,7 +279,7 @@ you, which is why the request exists.
 above rather than replacing it. Restreamer's latest release is v2.12.0,
 2024-09-13. MistServer's repository was last pushed 2026-08-06. polyemesis
 tagged v0.1.0 on 2026-07-31 and v0.6.0 on 2026-08-09 — which is the velocity of
-something pre-release with one maintainer, and is worth exactly that much. All
+something pre-release, and is worth exactly that much. All
 three checked 2026-08-09.
 
 <sup>4</sup> **This row said "No" against Restreamer and that was wrong.**

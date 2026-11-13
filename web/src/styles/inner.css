@@ -596,6 +596,73 @@
 
   /* ===== comparison ===== */
 
+  /* /comparison. Plain sections down a single column, one rhythm; the tables
+     are the shared .cmp-wrap and the lists are the shared .rows. */
+  .cp-sec { margin-top: 72px; scroll-margin-top: 88px; }
+  .cp-sec h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  .cp-intro,
+  .cp-after { max-width: 42rem; margin: 12px 0 24px; color: var(--color-muted); line-height: 1.6; }
+  .cp-after { margin-bottom: 0; margin-top: 24px; }
+  .cp-note {
+    max-width: 44rem;
+    margin-top: 16px;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--color-muted);
+  }
+  .cp-note .chip { margin-right: 8px; vertical-align: middle; }
+  .cp-note a,
+  .cp-loss a { text-decoration: underline; text-underline-offset: 3px; }
+  .cp-note a:hover,
+  .cp-loss a:hover { color: var(--color-fg); }
+  .cp-more { margin-top: 20px; }
+
+  .cp-lead { max-width: 44rem; color: var(--color-muted); line-height: 1.6; }
+  .cp-short { margin-top: 20px; padding: 20px 24px; }
+  .cp-short p + p { margin-top: 10px; }
+  .cp-short .cp-short-main { color: var(--color-fg); font-size: 1.0625rem; }
+
+  .cp-vs {
+    display: grid;
+    gap: 4px 24px;
+    grid-template-columns: minmax(0, 1fr);
+    padding-block: 20px;
+  }
+  .cp-vs-name { font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; color: var(--color-fg); }
+  .cp-vs-kind { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-muted); }
+  .cp-vs-line { max-width: 40rem; color: var(--color-muted); line-height: 1.55; }
+  .cp-vs:hover .cp-vs-name { text-decoration: underline; text-underline-offset: 4px; }
+  .cp-vs:focus-visible { outline: 2px solid var(--color-primary-bright); outline-offset: 2px; }
+  @media (min-width: 768px) {
+    .cp-vs { grid-template-columns: 14rem minmax(0, 1fr) auto; align-items: baseline; }
+    .cp-vs-kind { grid-column: 1; grid-row: 2; }
+    .cp-vs-name { grid-column: 1; grid-row: 1; }
+    .cp-vs-line { grid-column: 2; grid-row: 1 / span 2; }
+    .cp-vs .more { grid-column: 3; grid-row: 1; }
+  }
+
+  .cp-sel { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 1100px) { .cp-sel { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .cp-card { padding: 20px; color: var(--color-muted); line-height: 1.55; min-width: 0; }
+  .cp-card > * + * { margin-top: 12px; }
+  .cp-card-name { font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; color: var(--color-fg); }
+  .cp-src { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-muted); }
+
+  .cp-loss h3 { font-family: var(--font-display); font-size: 1.375rem; font-weight: 600; letter-spacing: -0.02em; }
+  .cp-loss-what { max-width: 42rem; margin-top: 8px; color: var(--color-muted); line-height: 1.55; }
+  .cp-loss dl { margin-top: 12px; max-width: 46rem; }
+  .cp-loss dl > div { padding-block: 10px; border-top: 1px solid var(--color-line); }
+  .cp-loss dt { color: var(--color-fg); font-weight: 500; }
+  .cp-loss dd { margin-top: 2px; color: var(--color-muted); line-height: 1.55; }
+  .cp-loss-tail { max-width: 42rem; margin-top: 12px; color: var(--color-muted); line-height: 1.55; }
+
 
 
 

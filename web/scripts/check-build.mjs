@@ -1363,7 +1363,18 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * reason: route -> [{ contains, why }]; any legacy sentence containing the
  * `contains` text is exempt. */
 const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
-const DROPPED = {};
+const DROPPED = {
+  "/comparison": [
+    {
+      contains: "per-destination loudness target you set - i, lra and tp, measured after routing yes multitrack archive",
+      why: "The capability table is now the shared CompareTable: the row labels and cells are all still on the page (the build's capability parity and recording rules read them), but its glyph legend sits between the table and the experimental note, and the two blank loudness cells carry the document's words (Filter only, No).",
+    },
+    {
+      contains: "read the quickstart this page, with its sources try the routing matrix",
+      why: "The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action.",
+    },
+  ],
+};
 const legacyMain = (route) => {
   const html = readFileSync(join(DIST, `${route.slice(1)}.html`), "utf8");
   return /<main[\s\S]*?<\/main>/.exec(html)?.[0] ?? html;
@@ -1410,6 +1421,16 @@ const legacyMain = (route) => {
     for (const wanted of [legacy.h1, ...legacy.h2]) {
       if (!have.has(norm(wanted))) fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
     }
+  }
+}
+
+/* NO "ONE MAINTAINER" ANYWHERE. The owner's instruction was to remove the phrase
+ * everywhere; maturity is stated as the release instead (`v0.18.0, released
+ * ...`). Every built page is checked, so a docs page rendered from a markdown
+ * file cannot bring it back either. */
+for (const f of pages) {
+  if (/one[- ]maintainer/i.test(readFileSync(join(DIST, f), "utf8"))) {
+    fail.push(`${f}: contains the phrase "one maintainer", which is removed from the whole site (docs, README and source too).`);
   }
 }
 
