@@ -1,6 +1,7 @@
 ---
 import InnerPage from "../layouts/InnerPage.astro";
 import CodeBlock from "../components/CodeBlock.astro";
+import { DOCKER_RUN } from "../data/install.mjs";
 
 /* THE PAGE FOR SOMEONE COMPARING AGAINST A HOSTED FREE TIER.
  *
@@ -71,7 +72,7 @@ const costs = [
   },
   {
     title: "An FFmpeg with the right things in it",
-    body: "FFmpeg 8.0 or later, and it needs libsrt for the multitrack SRT ingest that makes per-destination audio possible at all. Homebrew’s macOS build ships without SRT; Ubuntu 26.04’s carries it. The installer can fetch a pinned FFmpeg 8 build for you, and the container bundles one and sidesteps the question entirely.",
+    body: "FFmpeg 8.0 or later, and it needs libsrt for the multitrack SRT ingest that makes per-destination audio possible at all. Homebrew’s macOS build ships without SRT; Ubuntu 26.04’s carries it. The installer can fetch a pinned static build for you, and the container bundles one and sidesteps the question entirely.",
   },
   {
     title: "Your own time, and your own pager",
@@ -229,10 +230,7 @@ const freeHere = [
     </p>
     <CodeBlock
       label="docker"
-      code={`docker run -d --name polyemesis \\
-  -p 8080:8080 -p 6000:6000/udp -p 1935:1935 \\
-  -v polyemesis-data:/data \\
-  rainmanjam/polyemesis:latest`}
+      code={DOCKER_RUN}
     />
     <p class="lf-note">
       Note the <code>/udp</code> on port 6000. SRT is UDP,

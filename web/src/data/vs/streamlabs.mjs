@@ -51,16 +51,15 @@ export const DATA = {
   ],
   fits: {
     poly: [
-      "where the archive needs a different mix from the broadcast",
-      "where the stream must not pass through a third party",
+      "the archive needs a different mix from the broadcast",
+      "the stream must not pass through a third party",
       "a subscription per month for a fan-out you could run yourself is the wrong shape",
     ],
     other: {
       heading: "Streamlabs fits when",
       items: [
-        "If you want multistreaming without running a server, Streamlabs is the easier answer",
-        "Their relay costs you one upload and no hardware",
-        "If one mix suits every platform you send to, you are already done",
+        "you want multistreaming without running a server",
+        "one mix suits every platform you send to",
       ],
     },
   },

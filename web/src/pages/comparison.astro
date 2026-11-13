@@ -6,19 +6,9 @@ import { VS_INDEX } from "../data/vs-index.mjs";
 import { latestRelease, releaseLine, fillRelease } from "../lib/release";
 
 /* Sourced from docs/COMPARISON.md, which is itself sourced from a survey of
- * Restreamer's issue trackers.
- *
- * Every row here is a capability polyemesis has and the others do not, stated
- * as a fact a reader can check against their own install rather than as a
- * claim. docs/COMPARISON.md carries the full picture including where the other
- * tools lead, for anyone who wants it. */
+ * Restreamer's issue trackers. docs/COMPARISON.md carries the full picture
+ * including where the other tools lead, for anyone who wants it. */
 
-/* [capability, polyemesis, Restreamer, restream.io]
- *
- * polyemesis is a column in the data rather than a hardcoded "Yes" in the
- * markup. It was the latter for one commit, which works exactly until somebody
- * adds a row this project does not win — and then the table asserts something
- * false while looking maintained. */
 /* [row, polyemesis, Restreamer, restream.io]
  *
  * The shared ground, from docs/COMPARISON.md's "Where the three overlap".
@@ -70,10 +60,18 @@ const shared = [
   // but upload bandwidth and CPU are real: measured at roughly 4% of one core
   // per destination, a 4-core box runs out somewhere near 96. Claiming
   // "unlimited" invites the one support thread nobody can answer.
-  ["Simultaneous destinations", "No configured cap", "not assessed", "2–5 by plan (checked 15 Aug 2026)"],
+  ["Simultaneous destinations", "No configured cap", "not assessed", "2–5 by plan tier (checked 15 Aug 2026)"],
   ["Cost", "Your hardware", "Your hardware", "Subscription"],
 ];
 
+/* [capability, polyemesis, Restreamer, restream.io]
+ *
+ * The capabilities the table at the top shows: where polyemesis is ahead, stated
+ * as a fact a reader can check against their own install rather than as a claim.
+ * polyemesis is a column in the data rather than a hardcoded "Yes" in the
+ * markup. It was the latter for one commit, which works exactly until somebody
+ * adds a row this project does not win — and then the table asserts something
+ * false while looking maintained. */
 const wins = [
   ["Per-destination audio mix from one multitrack ingest", "Yes", "No", "No"],
   ["Channel-level mix matrix with per-cell gain", "Yes", "No", "No"],
@@ -143,7 +141,7 @@ const release = latestRelease();
 const losses = [
   {
     who: "the OBS plugins",
-    what: "obs-multi-rtmp and Aitum Multistream: free, GPL-2.0, installed in two minutes and already on the machine.",
+    what: "obs-multi-rtmp and Aitum Multistream: free, GPL-2.0 and already on the machine.",
     rows: [
       ["No server at all", "A plugin in OBS: no host to provision, no port to open. Here you run a server, or there is nothing to run."],
       ["Nothing new to learn", "The destinations sit in OBS beside the ones already there. Here it is a second UI and a second set of concepts."],
@@ -185,13 +183,9 @@ const losses = [
   },
 ];
 
-/* The tools a reader is most likely to already have installed, and the one
- * distinction that holds against all of them.
- *
- * These get a section rather than three more table columns. Seven columns does
- * not survive a phone even inside overflow-x-auto, and the argument against a
- * plugin is not row-shaped anyway: it is a single sentence about select versus
- * mix, and it is worth more with the line of source that proves it attached.
+/* The three tools, each with the line that shows it selects a track rather
+ * than mixing. The section's own comment, in the markup below, says why they
+ * are cards and not table columns.
  *
  * Every `src` below was read in that project's own repository on 2026-08-09.
  * Sourced from docs/COMPARISON.md, "They select a track. polyemesis mixes." */
@@ -258,7 +252,7 @@ const index = [
 
     The headline is untouched on purpose. An earlier audit proposed replacing
     "The audio is the difference." with a keyword string; it was rejected then
-    and would be worse now that this page has four children carrying the
+    and would be worse now that this page has five children carrying the
     long-tail terms. */}
 <InnerPage
   title="Multistream tools compared: polyemesis vs the alternatives"
@@ -272,7 +266,7 @@ const index = [
   band={{
     heading: "Still the right problem?",
     lede: "Then the next thing to read is the one that tells you what running it is actually like, and that is the quickstart rather than the download page.",
-    secondary: { label: "This page, with its sources", href: "/docs/comparison" },
+    secondary: { label: "Read the quickstart", href: "/docs/quickstart" },
   }}
 >
   <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
@@ -538,7 +532,6 @@ const index = [
         were corrected, in both directions: some had gone stale understating this
         product, and twice a cell asserted a competitor lacked something they ship.
       </p>
-      <p class="cp-more"><a class="more" href="/docs/quickstart">Read the quickstart</a></p>
     </section>
   </div>
 </InnerPage>

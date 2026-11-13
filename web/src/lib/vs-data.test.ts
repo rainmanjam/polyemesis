@@ -89,7 +89,6 @@ describe("the five /vs data files", () => {
       "free, gpl-2.0": "obs-multi-rtmp cost: the old merit heading \"Free, GPL-2.0, and inside OBS already\".",
       "free, mit, self-hosted": "polyemesis's own price: the old restreamer pricing row for polyemesis (another page's text, allowed for column 1).",
       "free, apache-2.0, self-hosted": "Restreamer's price: the old restreamer pricing row \"Restreamer (datarhei)\".",
-      "no per-destination charge": "Restreamer's destinations: the old restreamer pricing row's note.",
       "one per destination": "obs-multi-rtmp outbound streams / audio encodes: the old outbound table cell.",
       "the server": "aitum: the old \"The mixing desk is the server\" sentence.",
       "multitrack srt": "polyemesis's transport: old streamelements sentence \"receiving your separated audio tracks over multitrack SRT\".",

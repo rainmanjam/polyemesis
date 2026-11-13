@@ -67,9 +67,9 @@ export const DATA = {
     other: {
       heading: "SE.Live fits when",
       items: [
-        "You broadcast from Windows and one of the six OBS tracks already carries the right sound for each platform",
-        "You are already inside the StreamElements ecosystem for overlays, tips and chat",
-        "You are on Windows and do not want to run a server",
+        "you broadcast from Windows and one of the six OBS tracks already carries the right sound for each platform",
+        "you are already inside the StreamElements ecosystem for overlays, tips and chat",
+        "you are on Windows and do not want to run a server",
       ],
     },
   },

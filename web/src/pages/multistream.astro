@@ -48,7 +48,7 @@ const approaches = [
   {
     name: "A cloud relay",
     how: "You send one stream to somebody else's server. They fan it out to the platforms for you.",
-    cost: "One upload. A subscription once you pass a free tier's limits, and your stream passes through a third party.",
+    cost: "One upload. A subscription, in some cases after a free tier, and your stream passes through a third party.",
     audio: "restream.io duplicates the one stream it ingests to every endpoint, and Castr sends identical audio to all destinations (both checked 2026-08-15). Streamlabs does not describe per-destination audio either way, so nothing is claimed here.",
     who: "restream.io, Castr, Streamlabs Multistream.",
     href: "/vs/streamlabs",
@@ -92,7 +92,7 @@ const platforms = [
     body:
       "Kick is an RTMP destination and behaves like one. polyemesis signs in to it for chat and metadata as well, so a Kick fan-out is not only video: the moderation timeline reads it alongside the others.",
     caveat:
-      "Chat moderation covers five platforms: YouTube, Twitch, Kick, Facebook and Rumble. Facebook is read-and-moderate only; it is not in the send fan-out.",
+      "Chat moderation covers YouTube, Twitch, Kick and Facebook; Rumble chat is read only. Facebook is read-and-moderate only; it is not in the send fan-out.",
     href: "/docs/platforms",
     hrefLabel: "What each platform can automate",
   },
@@ -119,6 +119,9 @@ const index = [
   index={index}
   band={{ heading: "A relay on hardware you control.", secondary: { label: "How the mix matrix works", href: "/docs/audio-routing" } }}
 >
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="#the-three-architectures">See the three architectures</a>
+
   <section id="the-three-architectures">
     <h2>The three architectures</h2>
     <p>

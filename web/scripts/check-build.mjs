@@ -1361,6 +1361,14 @@ const DROPPED = {
       cut: "read the quickstart this page, with its sources try the routing matrix · install options",
       why: "Only button labels, no sentence. The closing buttons were split across the closing band (Install polyemesis, This page, with its sources), the table section (Try the routing matrix) and the last section (Read the quickstart), as the task specifies; the separate Install options link is the band's primary action, so 'Install options' is now 'Install polyemesis'.",
     },
+    {
+      cut: "2–5 by plan (checked 15 Aug 2026)",
+      why: "Worded as docs/COMPARISON.md and /vs/restreamer word the same cell ('2–5 by plan tier (checked 15 Aug 2026)'), so the three agree. The rest of the sentence is checked.",
+    },
+    {
+      cut: ", installed in two minutes",
+      why: "A promised time the page cannot keep (the global copy rule bars one). The OBS plugins' card now reads 'free, GPL-2.0 and already on the machine', which docs/COMPARISON.md supports; the rest of the sentence is checked.",
+    },
   ],
   "/vs/aitum-multistream": [
     { cut: "polyemesis / comparison / aitum multistream compared", why: CRUMB_EYEBROW },
@@ -1414,11 +1422,23 @@ const DROPPED = {
       cut: "yourself install it",
       why: "The old link list ended with 'Install it', which is now 'Install polyemesis' (the primary action). Every other label, the eyebrow, the h2 and the sentence after them are checked.",
     },
+    {
+      cut: "five platforms: youtube, twitch, kick, facebook and rumble",
+      why: "Wrong: Rumble chat is read only. docs/CONNECTING-PLATFORMS.md, 'Chat actions by platform': Delete, Time out and Ban are all 🚫 in the Rumble column. The page now reads 'Chat moderation covers YouTube, Twitch, Kick and Facebook; Rumble chat is read only.'",
+    },
+    {
+      cut: "once you pass a free tier's limits",
+      why: "Castr, which this card names, has no free tier: docs/evidence/competitor-facts-2026-08-15.md section 7 B ('THERE IS NO FREE TIER'; implying a shared free tier is not fine). The card now reads 'A subscription, in some cases after a free tier'; the rest of the sentence is checked.",
+    },
   ],
   "/free-restream-service": [
     {
       cut: "install it what it costs you",
       why: "Link labels the old markup left without punctuation: 'Install it' is now 'Install polyemesis' (the primary action) and 'What it costs you' moved to the in-page index, away from the section after it. The eyebrow, the h2 and the sentence are checked.",
+    },
+    {
+      cut: "ffmpeg 8 build",
+      why: "One wording for the installer's FFmpeg across /download and this page, the one docs/INSTALL.md uses ('the installer's pinned static build'). The rest of the sentence is checked.",
     },
   ],
   "/how-to-multistream-from-obs": [
@@ -1429,6 +1449,14 @@ const DROPPED = {
     {
       cut: "the three routes walkthrough",
       why: "The old page ran two index labels (The three routes, Walkthrough) into the next index entries. The index now sits between the header and the body, so the run cannot recur; the real sentence after it is checked.",
+    },
+    {
+      cut: "a run with obs itself as the publisher is still unconfirmed here",
+      why: "Contradicted by docs/OBS.md ('OBS cannot either, and that is now measured rather than open': OBS 30.2.3 sent no multitrack tag, and no service in OBS's services.json declares it, 0 of 91). The page now says that measured result, as /download does.",
+    },
+    {
+      cut: ", about ten minutes",
+      why: "A promised time (the global copy rule bars one). The page now reads 'Six steps.'; the HowTo structured data's totalTime is unchanged.",
     },
   ],
   "/twitch-vod-track": [

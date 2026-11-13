@@ -69,9 +69,9 @@ export const DATA = {
     other: {
       heading: "Aitum Multistream fits when",
       items: [
-        "One mix suits every platform",
-        "Your track layout is settled and you are not editing it under load",
-        "You do not want to run, patch or pay for a server",
+        "one mix suits every platform",
+        "your track layout is settled and you are not editing it under load",
+        "you do not want to run, patch or pay for a server",
       ],
     },
   },
@@ -138,7 +138,7 @@ export const DATA = {
    * as marketing, and this audience checks. Every line traces to section 4. */
   merits: {
     heading: "What Aitum Multistream does well",
-    note: "Checked against Aitum's own repository and site on <strong>15 August 2026</strong>.",
+    note: "Checked against Aitum's own repository and site on <strong>15 August 2026</strong>. The $5.49 Nexus figure below was re-checked on 16 September 2026.",
     items: [
       {
         h: "Free, and GPL-2.0",

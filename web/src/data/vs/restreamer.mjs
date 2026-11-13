@@ -55,23 +55,17 @@ export const DATA = {
     ["Per-destination audio mix", "Yes", "No", "No"],
     ["Self-hosted", "Yes", "Yes", "No"],
     ["Price", "Free, MIT, self-hosted", "Free, Apache-2.0, self-hosted", "Free tier, then $19/mo"],
-    [
-      "Simultaneous destinations",
-      "No configured cap",
-      "No per-destination charge",
-      "2–5 by plan tier (checked 15 Aug 2026)",
-    ],
+    ["Simultaneous destinations", "No configured cap", "not assessed", "2–5 by plan tier (checked 15 Aug 2026)"],
   ],
   fits: {
     poly: [
-      "polyemesis takes a multitrack ingest and sums a mix per destination",
-      "The clean feed goes to one platform, the full mix to the next, from one upload",
+      "the clean feed goes to one platform, the full mix to the next, from one upload",
       "the picture is copied through rather than re-encoded to do it",
     ],
     other: {
       heading: "Restreamer or restream.io fits when",
       items: [
-        "If one mix to every platform is what you need, it does that job for nothing and has done for years",
+        "one mix to every platform is what you need",
         "restream.io needs no server from you",
         "Restreamer is free, Apache-2.0 and complete",
       ],

@@ -65,15 +65,14 @@ export const DATA = {
   fits: {
     poly: [
       "the fan-out happens somewhere with a better connection than a house",
-      "a single 6 Mbps send",
-      "The server stream-copies the picture through untouched",
+      "a 6 Mbps broadcast to four platforms is 24 Mbps sustained out of a connection that is also carrying the game",
     ],
     other: {
       heading: "obs-multi-rtmp fits when",
       items: [
-        "Your upload comfortably carries every destination at once",
-        "You want no infrastructure",
-        "You are already running it and it works",
+        "your upload comfortably carries every destination at once",
+        "you want no infrastructure",
+        "you are already running it and it works",
       ],
     },
   },
