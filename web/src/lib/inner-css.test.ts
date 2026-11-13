@@ -1,13 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(new URL("../styles/inner.css", import.meta.url), "utf8");
+// Comments stripped, so a selector named only in a comment does not count.
+const css = readFileSync(new URL("../styles/inner.css", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
 /** The declaration block of the first rule whose selector list contains `selector`. */
 function ruleFor(selector: string): string {
   const re = /([^{}]+)\{([^{}]*)\}/g;
-  const bare = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  for (const m of bare.matchAll(re)) {
+  for (const m of css.matchAll(re)) {
     if (m[1].split(",").some((s) => s.trim() === selector)) return m[2];
   }
   return "";
@@ -34,7 +34,9 @@ describe("inner.css docs article rules", () => {
     expect(css).toContain(sel);
   });
   it("keeps table corners within 4px", () => {
-    expect(ruleFor(".doc-table")).not.toContain("--radius-token");
+    const radius = /border-radius:\s*([\d.]+)px/.exec(ruleFor(".doc-table"));
+    expect(radius).not.toBeNull();
+    expect(Number(radius?.[1])).toBeLessThanOrEqual(4);
   });
   it("never lets inline code fall under 12px", () => {
     expect(ruleFor(".doc-prose code:not(pre code)")).toMatch(/font-size: max\(/);

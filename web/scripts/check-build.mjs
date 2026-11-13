@@ -1461,7 +1461,13 @@ const legacyMain = (route) => {
   for (const page of pages.filter((p) => p.startsWith("docs/"))) {
     const html = readFileSync(join(DIST, page), "utf8");
     const article = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(html)?.[0] ?? "";
-    const ids = [...article.matchAll(/<h[23]\b[^>]*\bid="([^"]*)"/g)].map((m) => m[1]);
+    const heads = [...article.matchAll(/<h([23])\b([^>]*)>([\s\S]*?)<\/h\1>/g)].map((m) => ({
+      id: /\bid="([^"]*)"/.exec(m[2])?.[1],
+      text: m[3].replace(/<[^>]*>/g, "").trim(),
+    }));
+    // A heading with no id would be dropped from both sides and go unnoticed.
+    for (const h of heads) if (!h.id) fail.push(`${page}: the article heading "${h.text}" has no id, so it cannot be linked or listed.`);
+    const ids = heads.filter((h) => h.id).map((h) => h.id);
     const rail = /<nav\b[^>]*aria-label="On this page"[^>]*>[\s\S]*?<\/nav>/.exec(
       html.replace(/<details[\s\S]*?<\/details>/g, ""),
     )?.[0];
@@ -1482,9 +1488,10 @@ const legacyMain = (route) => {
  * document that has one. The checkbox must be styled by a .doc-prose rule, or
  * it renders as a browser default. */
 {
-  const html = readFileSync(join(DIST, "docs/meta-app-review.html"), "utf8");
+  const page = readFileSync(join(DIST, "docs/meta-app-review.html"), "utf8");
+  const html = /<article[^>]*doc-prose[\s\S]*?<\/article>/.exec(page)?.[0] ?? "";
   if (!/<li class="task-list-item"><input type="checkbox"/.test(html)) {
-    fail.push("docs/meta-app-review.html has no task-list checkbox: the task list is gone or the pipeline changed its markup.");
+    fail.push("docs/meta-app-review.html has no task-list checkbox in its article: the task list is gone or the pipeline changed its markup.");
   }
   if (!/\.doc-prose[^{}]*checkbox[^{}]*\{/.test(css)) fail.push("the built CSS has no .doc-prose rule for the task-list checkbox.");
 }
