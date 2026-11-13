@@ -1363,6 +1363,10 @@ for (const { rel, page, factsDate } of sourcedPages) {
  * reason: route -> [{ contains, why }]; any legacy sentence containing the
  * `contains` text is exempt. */
 const LEGACY = JSON.parse(readFileSync(new URL("../src/lib/legacy-inner.fixture.json", import.meta.url), "utf8"));
+const CHROME_RUN =
+  "Not copy: breadcrumb trail, eyebrow, button and index labels the old markup ran together with the next heading or sentence. The shell draws the trail separator in CSS and puts the index between header and body, so the run cannot recur; the real sentence it ends with is still on the page.";
+const LINK_RUN =
+  "Not copy: a run of link labels the old markup left without punctuation. Its last label, \"Install it\", is now \"Install polyemesis\" (the primary action); every other label and the sentence that follows are still on the page.";
 const DROPPED = {
   "/calculator": [
     {
@@ -1384,6 +1388,19 @@ const DROPPED = {
     { contains: "documentation the docs live with the code", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page now has a breadcrumb instead, and the h1 itself is kept." },
     { contains: "getting it running the routing operating it automating it understanding it", why: "The old sidebar list ran straight into the first section's blurb; the list is now the in-page index and every blurb is kept beside its own heading." },
     { contains: "the docs are in the same repository as the code, under docs/", why: "The closing band lede is plain text, so the docs/ link wrapper (and its stray space before the full stop) goes; the link moved to a 'Browse docs/ on GitHub' line after the last group and the sentence is otherwise kept." },
+  ],
+  "/multistream": [
+    { contains: "polyemesis / multistream multistreaming multistreaming is one upload reaching several platforms.", why: CHROME_RUN },
+    { contains: "multistream from obs, three ways how the mix matrix works the full comparison a free restream service you run yourself install it per platform", why: LINK_RUN },
+  ],
+  "/free-restream-service": [{ contains: "install it what it costs you the word what a restream service actually is you send one stream out of your encoder.", why: CHROME_RUN }],
+  "/how-to-multistream-from-obs": [
+    { contains: "guide how to multistream from obs to multistream is to broadcast one programme to several platforms at once:", why: CHROME_RUN },
+    { contains: "the three routes walkthrough what goes wrong pick one three routes, and the cost each one moves somewhere else", why: CHROME_RUN },
+  ],
+  "/twitch-vod-track": [
+    { contains: "polyemesis / multistream / twitch vod track twitch the broadcast carries the music.", why: CHROME_RUN },
+    { contains: "how the mix matrix works multistreaming, three ways install it", why: LINK_RUN },
   ],
 };
 const legacyMain = (route) => {
