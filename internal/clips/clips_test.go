@@ -418,3 +418,47 @@ func TestDeleteAndRetentionTakeTheClipsRecordWithIt(t *testing.T) {
 		t.Fatalf("directory not empty after delete: %v", entries)
 	}
 }
+
+// A clip with no record -- captured before records existed, or whose record
+// failed to write -- must say so rather than claim a start nobody checked.
+func TestListSaysSoWhenAClipWasNeverMeasured(t *testing.T) {
+	dir := t.TempDir()
+	name := "clip-20260101-000000.ts"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list, err := List(dir)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	if list[0].Measured {
+		t.Error("a clip with no record was reported as measured")
+	}
+	if list[0].KeyframeAligned {
+		t.Error("a clip with no record was reported as keyframe aligned: nobody checked")
+	}
+	if list[0].Seconds != 0 {
+		t.Errorf("Seconds = %v for a clip with no record", list[0].Seconds)
+	}
+
+	// A record that cannot be read is the same: unmeasured, not aligned.
+	if err := os.WriteFile(filepath.Join(dir, name+metaExt), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = List(dir); list[0].Measured || list[0].KeyframeAligned {
+		t.Errorf("an unreadable record was trusted: %+v", list[0])
+	}
+}
+
+func TestMeasuredIsTrueForACaptureAndItsListing(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60})
+	feed(send, 20, 5)
+	got, err := c.Capture(10 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	list, _ := c.List()
+	if !got.Measured || len(list) != 1 || !list[0].Measured {
+		t.Fatalf("captured %+v, listed %+v", got, list)
+	}
+}

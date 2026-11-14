@@ -136,6 +136,11 @@ type Clip struct {
 	CreatedAt       time.Time `json:"createdAt"`
 	KeyframeAligned bool      `json:"keyframeAligned"`
 	Note            string    `json:"note,omitempty"`
+	// Measured is false for a clip with no record of what Capture measured: one
+	// captured before records were kept, or whose record failed to write. For
+	// such a clip Seconds is 0 and KeyframeAligned false, and neither is a
+	// finding -- the start was never checked. Read them only when Measured.
+	Measured bool `json:"measured"`
 }
 
 // metaExt is the record kept beside each clip: clip-….ts.meta.json. A clip is
@@ -175,17 +180,18 @@ func writeMeta(clipPath string, m clipMeta) error {
 	return nil
 }
 
-// readMeta returns a clip's record. A clip written before records existed has
-// none: its duration is unknown (Seconds 0) and it is not claimed to start
-// roughly, because nothing says it does. ok is false for that case.
+// readMeta returns a clip's record. A clip with none (written before records
+// existed, or whose record failed to write) or an unreadable one has not been
+// measured: ok is false and the zero clipMeta comes back, which asserts nothing
+// that anyone checked. Neither "aligned" nor "rough" is invented for it.
 func readMeta(clipPath string) (clipMeta, bool) {
 	data, err := os.ReadFile(metaPath(clipPath))
 	if err != nil {
-		return clipMeta{KeyframeAligned: true}, false
+		return clipMeta{}, false
 	}
 	var m clipMeta
 	if json.Unmarshal(data, &m) != nil {
-		return clipMeta{KeyframeAligned: true}, false
+		return clipMeta{}, false
 	}
 	return m, true
 }
@@ -392,6 +398,7 @@ func (c *Capturer) Capture(d time.Duration) (Clip, error) {
 		CreatedAt:       c.now(),
 		KeyframeAligned: cut.KeyframeAligned,
 		Note:            cut.Note,
+		Measured:        true,
 	}
 	c.log.Info("clip captured", "name", name, "seconds", fmt.Sprintf("%.1f", clip.Seconds),
 		"bytes", clip.Bytes, "keyframeAligned", clip.KeyframeAligned)
@@ -480,7 +487,7 @@ func List(dir string) ([]Clip, error) {
 		if err != nil {
 			continue
 		}
-		m, _ := readMeta(filepath.Join(dir, e.Name()))
+		m, measured := readMeta(filepath.Join(dir, e.Name()))
 		out = append(out, Clip{
 			Name:            e.Name(),
 			Bytes:           info.Size(),
@@ -489,6 +496,7 @@ func List(dir string) ([]Clip, error) {
 			CreatedAt:       info.ModTime(),
 			KeyframeAligned: m.KeyframeAligned,
 			Note:            m.Note,
+			Measured:        measured,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

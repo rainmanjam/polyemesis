@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "Op dit moment begrenst het geheugenplafond het, niet het venster.",
   "clips.noKeyframeYet": "Er is nog geen keyframe gezien, dus een clip kan met een storing beginnen.",
   "clips.roughStart": "rommelig begin",
+  "clips.startNotChecked": "Begin niet gecontroleerd",
+  "clips.startNotCheckedBody": "Deze clip is vastgelegd voordat de server bijhield hoe hij begint en hoe lang hij duurt, dus beide zijn onbekend.",
   "media.uploadAria": "Een mediabestand uploaden",
   "media.dropOrChoose": "Sleep hier een bestand heen, of {choose}",
   "media.chooseOne": "kies er een",

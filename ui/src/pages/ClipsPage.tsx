@@ -47,6 +47,10 @@ interface Clip {
   createdAt: string;
   keyframeAligned: boolean;
   note?: string;
+  /** False for a clip the server holds no record for (captured before it kept
+   *  one): its length and start were never measured, which is not the same as
+   *  zero seconds or a rough start. */
+  measured: boolean;
 }
 
 interface ClipUsage {
@@ -370,7 +374,16 @@ export function ClipsPage() {
                       <TableRow key={c.name}>
                         <TableCell className="font-mono text-tiny">
                           {c.name}
-                          {!c.keyframeAligned && (
+                          {!c.measured && (
+                            <Badge
+                              variant="outline"
+                              className="ml-1.5"
+                              title={t("clips.startNotCheckedBody")}
+                            >
+                              {t("clips.startNotChecked")}
+                            </Badge>
+                          )}
+                          {c.measured && !c.keyframeAligned && (
                             <Badge
                               variant="warn"
                               className="ml-1.5"
@@ -387,7 +400,7 @@ export function ClipsPage() {
                           {timestamp(c.startedAt)}
                         </TableCell>
                         <TableCell className="tnum text-right font-mono text-tiny">
-                          {c.seconds > 0 ? `${c.seconds.toFixed(1)}s` : "—"}
+                          {c.measured ? `${c.seconds.toFixed(1)}s` : "—"}
                         </TableCell>
                         <TableCell className="tnum text-right font-mono text-tiny">
                           {bytes(c.bytes)}
