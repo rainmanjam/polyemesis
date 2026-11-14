@@ -41,10 +41,10 @@ the summary is wrong.
 ## Who it is for
 
 - [Sports clubs](https://polyemesis.com/for/sports-clubs): one match feed to five YouTube channels, each with its own commentary language over the same crowd sound
-- [Churches and events](https://polyemesis.com/for/churches-and-events): the room, the online congregation and a second-language channel each get the version made for them
+- [Churches and events](https://polyemesis.com/for/churches-and-events): one service to several destinations, each with the mix made for it: the room mix, the broadcast mix, a second language or music only
 - [Streamers](https://polyemesis.com/for/streamers): your 16:9 stream as it is, a 9:16 version as one shared encode, and a mix for each output
 
-## Guides and tour
+## Recipes and tour
 
 - [Two languages, one broadcast](https://polyemesis.com/recipes/two-languages-one-broadcast): give each voice its own OBS track, send them as one SRT stream, and give each destination the language it needs
 - [OBS to five platforms](https://polyemesis.com/recipes/obs-to-five-platforms): send OBS to your own server once, connect each platform's account, and add a destination for each

@@ -77,8 +77,11 @@ describe("audience data", () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
-  it("carries the case's own fine print", () => {
+  it("carries the case's own fine print, and the page renders it from the case", () => {
     for (const k of keys) expect(CASES[k].fine).toMatch(/doesn't license/);
+    const layout = readFileSync(fileURLToPath(new URL("../layouts/AudiencePage.astro", import.meta.url)), "utf8");
+    expect(layout).toMatch(/<p class="fine" data-fine>\{c\.fine\}<\/p>/);
+    expect(layout).toContain("const c = CASES[a.key]");
   });
 
   it("avoids the banned words", () => {
@@ -102,6 +105,18 @@ describe("audience data", () => {
       const caseText = [...c.tracks.map((t: { label: string }) => t.label), ...c.dests.map((d: { name: string }) => d.name)].join(" ");
       const own = [a.title, a.description, a.heading, a.lede, a.band.heading, a.band.lede].join(" ");
       for (const k of KINDS) if (k.test(own)) expect(caseText, `${a.key}: "${k}" is not in its case`).toMatch(k);
+    }
+  });
+
+  it("says no destination the case does not have in llms.txt either", () => {
+    const KINDS = [/podcast/i, /speech-only/i, /congregation/i];
+    const llms = readFileSync(fileURLToPath(new URL("../../public/llms.txt", import.meta.url)), "utf8").split("\n");
+    for (const a of audiences) {
+      const line = llms.find((l) => l.includes(`https://polyemesis.com${a.route})`));
+      expect(line, `${a.key}: its llms.txt line`).toBeDefined();
+      const c = CASES[a.key];
+      const caseText = [...c.tracks.map((t: { label: string }) => t.label), ...c.dests.map((d: { name: string }) => d.name)].join(" ");
+      for (const k of KINDS) if (k.test(line!)) expect(caseText, `${a.key}: llms.txt says "${k}", which its case does not have`).toMatch(k);
     }
   });
 

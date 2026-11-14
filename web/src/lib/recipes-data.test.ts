@@ -183,6 +183,19 @@ describe("recipe data", () => {
       expect(by("streaming-from-a-backpack").needs.map((f: Fact) => f.text).join(" ")).toMatch(/SRT as its protocol/);
     });
 
+    it("checks the languages recipe by its own tracks, not by a music track and a clean track", () => {
+      const check = by("two-languages-one-broadcast").check.map((f: Fact) => f.text).join(" ");
+      expect(check).not.toMatch(/music|clean track/i);
+      expect(check).toMatch(/Audio meters/);
+      expect(check).toMatch(/track count/);
+    });
+
+    it("says on the backpack page that failover, recording and destinations work the same (the homepage says so)", () => {
+      const t = by("streaming-from-a-backpack").check.map((f: Fact) => f.text).join(" ");
+      expect(t).toMatch(/ordinary SRT publish/);
+      expect(t).toMatch(/failover, recording, destinations and degraded-link failover work the same/i);
+    });
+
     it("keeps to the docs' words about the publish URL", () => {
       expect(JSON.stringify(RECIPES)).not.toMatch(/keep it private/i);
     });

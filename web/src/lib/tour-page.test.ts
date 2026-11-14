@@ -60,9 +60,11 @@ describe("the film sentences (P4-R15)", () => {
     for (const n of notes) for (const f of n.film) expect(f).not.toMatch(/\/docs|https?:|\.md\b/);
   });
 
-  it("say that chapter 3's rows reach Live one after another, not only that a Go live sheet appears", () => {
+  it("say that chapter 3's rows reach Live, not only that a Go live sheet appears, and not that they do so one by one", () => {
+    // The film starts two rows at once (English and Español are Starting together), so no order is claimed.
     const sentence = notes[2].film.find((f) => /\bLive\b/.test(f) && !/Go live sheet/.test(f));
-    expect(sentence).toMatch(/one after another/);
+    expect(sentence).toMatch(/the rows then move from Not started to Starting to Live/);
+    expect(sentence).not.toMatch(/one after another|in turn|one by one|in sequence/i);
   });
 
   it("claim no more of chapter 3 than two Routing pages (the film opens two destinations)", () => {
@@ -70,6 +72,9 @@ describe("the film sentences (P4-R15)", () => {
       expect(f, f).not.toMatch(/each destination/i);
       expect(f, f).not.toMatch(/together/i);
     }
+    const readout = notes[2].film.find((f) => /after routing/.test(f));
+    expect(readout, "the loudness readout sentence").toMatch(/two of the five/);
+    expect(readout).not.toMatch(/\b(all|every|each of the) (five|destination)/i);
   });
 
   it("quote a caption exactly as the film shows it", () => {

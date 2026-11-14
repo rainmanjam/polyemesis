@@ -36,6 +36,16 @@ describe("RecipePage.astro", () => {
     expect(layout.match(/how-to-multistream-from-obs/g)).toHaveLength(1);
   });
 
+  it("shows a breadcrumb label of its own: the brand in its own case, and no trailing period", () => {
+    expect(layout).toContain("recipe.crumbLabel");
+    expect(layout).not.toMatch(/recipe\.heading\.toLowerCase\(\)/);
+    for (const r of RECIPES as { slug: string; heading: string; crumbLabel: string }[]) {
+      expect(r.crumbLabel, r.slug).not.toMatch(/\.$/);
+      expect(r.crumbLabel.toLowerCase(), r.slug).toBe(r.heading.replace(/\.$/, "").toLowerCase());
+    }
+    expect((RECIPES as { crumbLabel: string }[])[1].crumbLabel).toBe("OBS to five platforms");
+  });
+
   it("uses the same step ids as the HowTo urls (#step-n)", () => {
     expect(read("../components/inner/Steps.astro")).toContain('idPrefix = "step"');
     expect(read("./howto.ts".replace("./", "../lib/"))).toContain("#step-${i + 1}");

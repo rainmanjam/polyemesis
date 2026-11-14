@@ -6,7 +6,7 @@
  * note says only what the frames of its chapter show AND what the docs say the
  * console does, and no note describes a real account being connected or a real
  * channel going live. Every sentence is a Fact (lib/facts.ts): the doc it
- * comes from and the phrases that prove it, checked by tour-page.test.ts.
+ * comes from and the phrases that tie it to that doc, checked by tour-page.test.ts.
  *
  * What each chapter shows (the frames of the 98 s film, v0.18.0):
  *  1 One stream in (0:00): the Ingest panel live with an srt:// address,
@@ -97,7 +97,7 @@ export const TOUR_PAGE = {
     {
       film: [
         "On screen, a Go live sheet lists the five destinations as Ready, each with the audio tracks it carries, and starts all five.",
-        "On screen, the rows then move one after another from Not started to Starting to Live, and the dashboard then reads On air with 5 live and all 5 running destinations healthy.",
+        "On screen, the rows then move from Not started to Starting to Live, and the dashboard then reads On air with 5 live and all 5 running destinations healthy.",
         'The caption reads "One click starts all five."',
         "On screen, the Routing page of two of the five destinations then shows an \"Output, after routing\" loudness readout for each, with the caption \"Each channel's own mix, measured on the way out.\"",
       ],

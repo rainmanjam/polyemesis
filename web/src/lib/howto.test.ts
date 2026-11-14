@@ -17,7 +17,9 @@ describe("howToLd", () => {
     expect(ld["@context"]).toBe("https://schema.org");
     expect(ld["@type"]).toBe("HowTo");
     expect(ld.name).toBe(first.heading);
-    expect(ld.description).toBe(first.description);
+    // The page body shows the lede under the h1; the meta description is not on the page (ruling P4-R14).
+    expect(ld.description).toBe(first.lede);
+    for (const r of RECIPES) expect((howToLd(r) as { description: string }).description, r.slug).not.toBe(r.description);
   });
 
   it("holds only what the page shows: no tool, no supply", () => {

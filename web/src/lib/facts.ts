@@ -1,6 +1,9 @@
 /* Facts for the new pages: every product statement carries the doc it comes
- * from and the phrases that prove it. factProblems() is what a test (and the
- * build) runs to keep a sentence from outliving the doc that supported it.
+ * from and the phrases that tie it to that doc. factProblems() is what a test
+ * (and the build) runs to keep a sentence from outliving the doc that supported
+ * it. It proves a phrase is in the doc's section, not that the sentence is
+ * true: a negated sentence in the doc, or a heading's own words, would pass, so
+ * a person reads each sentence against that paragraph.
  *
  * Names in a diagram come from cases.mjs only; a page writes {tracks},
  * {dests} and {trackCount} and fillCase() fills them. */

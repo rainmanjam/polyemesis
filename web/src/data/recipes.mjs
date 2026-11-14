@@ -1,7 +1,7 @@
 /* The three recipe pages (/recipes/...): their metadata, what each needs, the
  * four steps, how to check it worked and the docs worth reading next. Every
  * product sentence is a Fact (lib/facts.ts): the doc it comes from and the
- * phrases that prove it, checked against docs/ by recipes-data.test.ts.
+ * phrases that tie it to that doc, checked against docs/ by recipes-data.test.ts.
  * Step titles are the homepage's (components/home/Use.astro) without the final
  * period; the homepage test keeps the two in step.
  *
@@ -26,6 +26,7 @@ export const RECIPES = [
     description:
       "Give each voice its own OBS track, send them as one SRT stream, and give each destination the language it needs. Four steps from a working install.",
     heading: "Two languages, one broadcast.",
+    crumbLabel: "two languages, one broadcast",
     accent: "one",
     lede: "Each voice gets its own track, and each destination gets the language it needs, from one upload.",
     tag: "audio routing · OBS",
@@ -68,19 +69,19 @@ export const RECIPES = [
     ],
     check: [
       {
-        text: "Play music in OBS and open Audio meters: the music track moves while the clean track stays flat.",
+        text: "The dashboard should show your track count and video format.",
         doc: "obs",
-        evidence: ["play music", "track 1 moves while track 2 stays flat"],
+        evidence: ["The polyemesis dashboard should show your track count and video format"],
         anchor: "5-verify",
+      },
+      {
+        text: "Open Audio meters and confirm each track carries what you think it carries.",
+        doc: "audio-routing",
+        evidence: ["Open Audio meters and confirm each track carries what you think it carries"],
+        anchor: "verifying-it-before-you-go-live",
       },
       SETUP.METERS_AFTER_ROUTING,
       SETUP.SILENCE_FACT,
-      {
-        text: "The audio routing guide has a section on verifying a mix before you go live.",
-        doc: "audio-routing",
-        evidence: ["Verifying it before you go live"],
-        anchor: "verifying-it-before-you-go-live",
-      },
     ],
     docs: ["audio-routing", "obs", "quickstart"],
   },
@@ -91,6 +92,7 @@ export const RECIPES = [
     description:
       "Send OBS to your own polyemesis server once, connect each platform's account, and add a destination for each. Four steps from a working install.",
     heading: "OBS to five platforms.",
+    crumbLabel: "OBS to five platforms",
     accent: "platforms",
     lede: "One connection from OBS to your server, and a destination for each platform.",
     tag: "OBS · connecting platforms",
@@ -151,6 +153,7 @@ export const RECIPES = [
     description:
       "Receive a bonded encoder's links as one SRT publish. Tested with BELABOX's srtla_send, not yet with BELABOX hardware, Moblin or IRL Pro. Four steps.",
     heading: "Streaming from a backpack.",
+    crumbLabel: "streaming from a backpack",
     accent: "backpack",
     lede: "A bonded encoder's several links arrive as one ordinary SRT publish.",
     tag: "SRTLA · bonded encoders",
@@ -230,6 +233,14 @@ export const RECIPES = [
       },
     ],
     check: [
+      {
+        text: "The stream arrives at your programme as an ordinary SRT publish, so failover, recording, destinations and degraded-link failover work the same.",
+        doc: "srtla",
+        evidence: [
+          "the stream arrives at your programme as an ordinary SRT publish",
+          "Failover, recording, destinations and degraded-link failover all work the same",
+        ],
+      },
       {
         text: "The SRTLA guide has a section on what to do if the backpack goes quiet.",
         doc: "srtla",
