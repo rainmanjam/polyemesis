@@ -113,3 +113,74 @@
   stroke: var(--color-line-strong);
   stroke-width: 1;
 }
+
+/* ---- Steps, facts, doc links, fine print, chapters ------------------------
+ * Everything below sits under .inner-main: this file loads on every page. */
+.inner-main .steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+}
+.inner-main .step {
+  margin: 0;
+  padding: 0 0 36px 28px;
+  border-left: 1px solid var(--color-line);
+  counter-increment: step;
+}
+.inner-main .step:last-child {
+  padding-bottom: 0;
+}
+.inner-main .step::before {
+  content: counter(step);
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--color-muted);
+}
+.inner-main .step h3 {
+  margin: 0 0 10px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.inner-main .fact {
+  margin: 0 0 8px;
+  max-width: 62ch;
+  color: var(--color-fg);
+}
+.inner-main .docrow {
+  margin: 0 0 14px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+.inner-main p.docrow a + a {
+  margin-left: 14px;
+}
+.inner-main .step .shot,
+.inner-main .step figure {
+  margin-top: 14px;
+}
+.inner-main .fine {
+  max-width: 60ch;
+  margin: 12px 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+.inner-main .chapter {
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line);
+}
+.inner-main .chapter > .when {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}

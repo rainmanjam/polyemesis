@@ -1,0 +1,26 @@
+---
+/* "Read more": one row per doc, its title and description. An unknown slug
+ * fails the build rather than shipping a row with no link. */
+import { BY_SLUG, hrefOf } from "../../data/docs.mjs";
+
+interface Props {
+  slugs: string[];
+}
+
+const rows = Astro.props.slugs.map((slug) => {
+  const doc = BY_SLUG.get(slug);
+  if (!doc) throw new Error(`DocLinks.astro: "${slug}" is not a published doc slug (data/docs.mjs).`);
+  return { href: hrefOf(doc), title: doc.title, description: doc.description };
+});
+---
+
+<ul class="rows">
+  {
+    rows.map((r) => (
+      <li>
+        <a href={r.href}>{r.title}</a>
+        <p>{r.description}</p>
+      </li>
+    ))
+  }
+</ul>

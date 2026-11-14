@@ -1,0 +1,38 @@
+---
+/* A numbered sequence of steps. Each step is its title, one line per fact (the
+ * fact's evidence is tested against the doc it names, lib/facts.ts), a row of
+ * links to those docs and, when it has one, a screenshot. The numbering is the
+ * list's own: this is a real sequence. Rules are in styles/new-pages.css. */
+import Shot from "./Shot.astro";
+import { BY_SLUG } from "../../data/docs.mjs";
+import { docHref, type Step } from "../../lib/facts";
+
+interface Props {
+  steps: Step[];
+  idPrefix?: string;
+}
+
+const { steps, idPrefix = "step" } = Astro.props;
+
+/** One link per distinct doc a step's facts come from, to the first fact's anchor. */
+const docLinks = (step: Step) =>
+  [...new Map(step.facts.map((f) => [f.doc, f])).values()].map((f) => ({
+    href: docHref(f),
+    text: BY_SLUG.get(f.doc)?.title ?? f.doc,
+  }));
+---
+
+<ol class="steps">
+  {
+    steps.map((step, i) => (
+      <li class="step" id={`${idPrefix}-${i + 1}`}>
+        <h3>{step.title}</h3>
+        {step.facts.map((f) => <p class="fact">{f.text}</p>)}
+        <p class="docrow">
+          {docLinks(step).map((l) => <a href={l.href}>{l.text}</a>)}
+        </p>
+        {step.shot && <Shot shot={step.shot.file} alt={step.shot.alt} chrome={step.shot.chrome} caption={step.shot.caption} />}
+      </li>
+    ))
+  }
+</ol>
