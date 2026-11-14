@@ -968,7 +968,8 @@ test("automation — alert rules, with the schedules asserted on their tab", asy
   // install is a rule subscribed to an event the run itself produces (the
   // fixture's note says which are avoided). Read from the card, then asserted
   // again after the shutter's settle by the guard's own failed-word check.
-  const delivery = page.locator("[data-slot=card]").filter({ has: page.locator("[data-slot=card-title]", { hasText: "Delivery" }) }).first();
+  // CardTitle -> CardHeader -> Card.
+  const delivery = page.locator("[data-slot=card-title]", { hasText: "Delivery" }).first().locator("xpath=../..");
   await expect(delivery, "no Delivery card").toBeVisible();
   const counters = await delivery.innerText();
   for (const label of ["Failed", "Retried"]) {
