@@ -45,11 +45,11 @@ describe("audiences section", () => {
     expect(src).not.toMatch(/<script/);
   });
 
-  it("gets the 640px container rule and the 12px floor from the diagram's own files", () => {
+  it("gets the 640px container rule from the diagram's files, and keeps every font size in them and here at 12px or more", () => {
     const css = read("styles", "new-pages.css");
     expect(css).toMatch(/container-type:\s*inline-size/);
     expect(css).toMatch(/@container[^{]*\(min-width:\s*640px\)/);
-    const sizes = [...css.matchAll(/font-size:\s*([\d.]+)(px|rem)/g)].map((m) => (m[2] === "rem" ? +m[1] * 16 : +m[1]));
+    const sizes = [...(css + src).matchAll(/font-size:\s*([\d.]+)(px|rem)/g)].map((m) => (m[2] === "rem" ? +m[1] * 16 : +m[1]));
     expect(sizes.length).toBeGreaterThan(0);
     for (const s of sizes) expect(s).toBeGreaterThanOrEqual(12);
   });

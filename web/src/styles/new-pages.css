@@ -74,9 +74,21 @@
   }
 }
 
+/* Separators for assistive technology only (the grid already separates the
+   parts on screen). */
+.diag-vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The text size is the font-size attribute on the svg (DIAGRAM_FONT), not a rule here. */
 .diag-svg text {
   font-family: var(--font-sans);
-  font-size: 0.8125rem;
 }
 .diag-svg .t-name {
   font-weight: 600;

@@ -23,14 +23,13 @@ for (const key of CASE_ORDER) {
 
 describe("Steps.astro", () => {
   it("renders a real numbered sequence with one id per step", () => {
-    expect(steps).toContain('<ol class="steps"');
+    expect(steps).toContain('<ol class="steps" role="list"');
     expect(steps).toContain("id={`${idPrefix}-${");
   });
   it("shows each step's shot with Shot, and links its docs from the facts", () => {
     expect(steps).toMatch(/import Shot from "\.\/Shot\.astro"/);
-    expect(steps).toContain("docHref");
-    expect(steps).toContain("BY_SLUG");
-    expect(steps).toContain("BY_SLUG.get(");
+    expect(steps).toContain("docLinksOf(step.facts)"); // the one-link-per-doc logic is lib/facts.ts, unit-tested
+    expect(steps).not.toContain("BY_SLUG");
     expect(steps).toContain("p class=\"fact\"");
     expect(steps).toContain("docrow");
   });

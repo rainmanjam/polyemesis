@@ -7,7 +7,7 @@
  * and stays in the page for assistive technology when the drawing shows. The
  * rules are in styles/new-pages.css. No script; nothing moves. */
 import { CASES } from "../data/cases.mjs";
-import { DIAGRAM_WIDTH, diagramModel, diagramShapes } from "../lib/routing-diagram";
+import { DIAGRAM_FONT, DIAGRAM_WIDTH, diagramModel, diagramShapes } from "../lib/routing-diagram";
 
 interface Props {
   caseKey: "sports" | "worship" | "streamer";
@@ -18,7 +18,13 @@ const g = diagramShapes(model);
 ---
 
 <figure class="diag">
-  <svg class="diag-svg" aria-hidden="true" focusable="false" viewBox={`0 0 ${DIAGRAM_WIDTH} ${g.height}`}>
+  <svg
+    class="diag-svg"
+    aria-hidden="true"
+    focusable="false"
+    font-size={DIAGRAM_FONT}
+    viewBox={`0 0 ${DIAGRAM_WIDTH} ${g.height}`}
+  >
     {g.videoPaths.map((d) => <path class="l-vid" d={d} />)}
     <text class="t-vid" x={g.videoLabel.x} y={g.videoLabel.y}>video</text>
     {g.sourcePaths.map((d) => <path class="l-src" d={d} />)}
@@ -45,12 +51,14 @@ const g = diagramShapes(model);
     }
   </svg>
 
-  <ol class="diag-list" aria-label={`Routing, ${model.source}`}>
+  <ol class="diag-list" role="list" aria-label={`Routing, ${model.source}`}>
     {
       model.dests.map((d) => (
         <li>
           <b>{d.name}</b>
+          <span class="diag-vh">, </span>
           <span class="diag-city">{d.city}</span>
+          <span class="diag-vh">: </span>
           <span class="diag-mix">{d.mix}</span>
         </li>
       ))

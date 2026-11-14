@@ -64,12 +64,17 @@ function plainText(raw: string): string {
  *  cover them. A build check that the list equals the article's headings is
  *  what catches a document that starts using one. */
 export function extractHeadings(markdown: string): DocHeading[] {
+  return extractHeadingsAt(markdown).map(({ depth, text, slug }) => ({ depth, text, slug }));
+}
+
+/** The same headings with the 0-based index of the line each one is on. */
+export function extractHeadingsAt(markdown: string): (DocHeading & { line: number })[] {
   const slug = uniqueSlugger();
-  const headings: DocHeading[] = [];
+  const headings: (DocHeading & { line: number })[] = [];
   let fence: string | null = null;
   let inHtmlBlock = false;
 
-  for (const line of markdown.split(/\r?\n/)) {
+  for (const [lineNo, line] of markdown.split(/\r?\n/).entries()) {
     if (inHtmlBlock) {
       // An HTML block runs to the next blank line; markdown inside it is text.
       inHtmlBlock = line.trim() !== "";
@@ -94,7 +99,7 @@ export function extractHeadings(markdown: string): DocHeading[] {
     const match = HEADING.exec(line);
     if (!match) continue;
     const text = plainText(match[2]);
-    headings.push({ depth: match[1].length === 2 ? 2 : 3, text, slug: slug(text) });
+    headings.push({ depth: match[1].length === 2 ? 2 : 3, text, slug: slug(text), line: lineNo });
   }
   return headings;
 }

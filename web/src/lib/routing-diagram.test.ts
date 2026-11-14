@@ -62,6 +62,20 @@ describe("drawing numbers", () => {
     expect(DIAGRAM_FONT * (DIAGRAM_MIN_PX / DIAGRAM_WIDTH)).toBeGreaterThanOrEqual(12);
   });
 
+  it("reads the container query out of new-pages.css and it equals DIAGRAM_MIN_PX", () => {
+    const m = read("styles", "new-pages.css").match(/@container\s*\(min-width:\s*(\d+)px\)/);
+    expect(m, "a container rule").not.toBeNull();
+    expect(+m![1]).toBe(DIAGRAM_MIN_PX);
+  });
+
+  it("holds the floor with the svg's own side padding taken off the container", () => {
+    const css = read("styles", "new-pages.css");
+    const pad = css.match(/\.diag-svg\s*\{[^}]*padding:\s*\d+px\s+(\d+)px\s+\d+px/);
+    expect(pad, "svg padding").not.toBeNull();
+    const svgPx = DIAGRAM_MIN_PX - 2 * +pad![1];
+    expect((DIAGRAM_FONT * svgPx) / DIAGRAM_WIDTH).toBeGreaterThanOrEqual(12);
+  });
+
   it("keeps the numbers Audiences.astro drew with (600 wide, 13px)", () => {
     expect(DIAGRAM_WIDTH).toBe(600);
     expect(DIAGRAM_FONT).toBe(13);
@@ -101,6 +115,14 @@ describe("RoutingDiagram.astro, new-pages.css and Audiences.astro", () => {
     expect(comp).toContain('aria-hidden="true"');
     expect(comp).toContain("diag-list");
     expect(comp).not.toMatch(/<title|\bid=/);
+  });
+
+  it("takes the viewBox width and the text size from the exported constants, with no second copy", () => {
+    expect(comp).toContain("DIAGRAM_WIDTH");
+    expect(comp).toContain("font-size={DIAGRAM_FONT}");
+    expect(comp).not.toMatch(/\b600\b|viewBox="/);
+    // The CSS must not size the drawing's text again: a rule there would override the attribute.
+    expect(css).not.toMatch(/\.diag-svg[^{]*text[^{]*\{[^}]*font-size/);
   });
 
   it("moves the container rule into new-pages.css, with no entrance motion and no faint text colour", () => {
