@@ -138,3 +138,27 @@ describe("inner.css does not reach the homepage", () => {
     expect(probe.get("band")).toEqual([".band"]);
   });
 });
+
+/* new-pages.css loads on every page too. Its `.diag*` rules are used on the
+ * homepage on purpose (the shared routing diagram); every other selector must
+ * sit under `.inner-main` so a class the homepage also uses is never restyled. */
+describe("new-pages.css does not reach the homepage", () => {
+  const css = read("styles/new-pages.css");
+  const isDiag = (sel: string) => classesIn(withoutConditions(sel)).every((c) => c === "diag" || c.startsWith("diag-") || ["bx", "bx-aud", "l-vid", "l-aud", "l-src", "t-name", "t-sub", "t-vid", "t-trk"].includes(c)) && /\.diag/.test(sel);
+
+  it("scopes every selector that is not a .diag selector under .inner-main", () => {
+    const loose = selectorsOf(css).filter((sel) => !isDiag(sel) && !/(^|[\s>+~])\.inner-main\b/.test(sel) && !/^:where\(\.inner-main\)/.test(sel));
+    expect(loose).toEqual([]);
+  });
+
+  it("only lets the svg's inner classes be styled under .diag-svg", () => {
+    const bad = selectorsOf(css).filter((sel) => /\.(bx|bx-aud|l-vid|l-aud|l-src|t-name|t-sub|t-vid|t-trk)\b/.test(sel) && !sel.startsWith(".diag-svg"));
+    expect(bad).toEqual([]);
+  });
+
+  it("finds a loose selector when one is added", () => {
+    const probe = selectorsOf(".steps { a: b; } .inner-main .steps { a: b; } .diag-list li { a: b; }");
+    const loose = probe.filter((sel) => !isDiag(sel) && !/(^|[\s>+~])\.inner-main\b/.test(sel));
+    expect(loose).toEqual([".steps"]);
+  });
+});
