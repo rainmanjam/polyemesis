@@ -168,10 +168,7 @@
       "site": false,
       "usedBy": [],
       "exception": null,
-      "allowFailedWords": [
-        "failed"
-      ],
-      "caption": "\"Failed\" is the Delivery card's static label; the test asserts the count beside it is 0."
+      "allowFailedWords": []
     },
     {
       "file": "14-clips.png",
