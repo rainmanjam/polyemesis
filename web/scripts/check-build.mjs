@@ -1535,8 +1535,8 @@ const DROPPED = {
       why: "Castr, which this card names, has no free tier: docs/evidence/competitor-facts-2026-08-15.md section 7 B ('THERE IS NO FREE TIER'; implying a shared free tier is not fine). The card now reads 'A subscription, in some cases after a free tier'; the rest of the sentence is checked.",
     },
     {
-      cut: "sending them different audio",
-      why: "Owner's decision of 2026-11-14: the opening leads with commentary languages. The sentence about music moved down to 'Where polyemesis sits' and kept word for word from the parenthesis on; 'them' became 'each destination' because it no longer follows the sentence that names Twitch and YouTube.",
+      cut: "sending them different audio (the full mix to one, a music-free mix to another, your mic alone to a third) is where the three answers stop agreeing.",
+      why: "Owner's decision of 2026-11-14: the opening leads with commentary languages, not music. The sentence is gone from the lede; the music case now reads 'Music is the other common case: the full mix to one destination, a music-free mix to another, your mic alone to a third.' in 'Where polyemesis sits'.",
     },
   ],
   "/free-restream-service": [
@@ -1549,8 +1549,12 @@ const DROPPED = {
       why: "One wording for the installer's FFmpeg across /download and this page, the one docs/INSTALL.md uses ('the installer's pinned static build'). The rest of the sentence is checked.",
     },
     {
-      cut: "if that is the answer you came for, it is at the top of the page on purpose.",
-      why: "Owner's decision of 2026-11-14: the opening now leads with commentary languages, so the free-tier answer is no longer at the top of the page. The pointer is rewritten as 'the section called Is Restream free? is just below'; the sentence before it (the free tier and its two channels) is kept word for word.",
+      cut: "polyemesis takes the split audio tracks your encoder already sends (music on one, game on another, microphone on a third) and builds a different mix per destination from them, on the server, from one upload.",
+      why: "Owner's decision of 2026-11-14: the audio section's second paragraph leads with commentary languages, not music. The sentence is rewritten as the paragraph's first two sentences, and the music sentence is its last.",
+    },
+    {
+      cut: "the platform that mutes music gets the clean feed while the one that does not gets the full one, and neither costs you a second video encode.",
+      why: "Owner's decision of 2026-11-14: the audio section's second paragraph leads with commentary languages, not music. The sentence is rewritten as the paragraph's first two sentences, and the music sentence is its last.",
     },
   ],
   "/how-to-multistream-from-obs": [

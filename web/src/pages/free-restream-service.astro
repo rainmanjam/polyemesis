@@ -122,7 +122,7 @@ const freeHere = [
     { label: "Free restream service" },
   ]}
   heading="A free restream service, if you are willing to run the server."
-  lede="What polyemesis adds to a restream is the audio: one match feed goes out to five YouTube channels, and each channel carries its own commentary language. Restream does have a free tier, and it allows two simultaneous channels. If that is the answer you came for, the section called Is Restream free? is just below. The rest of this is the other answer: polyemesis is a restreaming server that is free in the plain sense (MIT licensed, no account, no hosted tier, nothing phoning home) because it runs on a machine you already pay for. That machine is the price, and this page is mostly about what it costs."
+  lede="Restream does have a free tier, and it allows two simultaneous channels. If that is the answer you came for, it is at the top of the page on purpose. The rest of this is the other answer: polyemesis is a restreaming server that is free in the plain sense (MIT licensed, no account, no hosted tier, nothing phoning home) because it runs on a machine you already pay for. That machine is the price, and this page is mostly about what it costs."
   index={index}
   band={{
     heading: "One install to a running server.",
@@ -283,11 +283,13 @@ const freeHere = [
       goes to Twitch is the mix that goes to YouTube.
     </p>
     <p>
-      polyemesis takes the split audio tracks your encoder already sends
-      (music on one, game on another, microphone on a third) and builds a
-      different mix per destination from them, on the server, from one upload.
-      The platform that mutes music gets the clean feed while the one that does
-      not gets the full one, and neither costs you a second video encode.
+      polyemesis takes the separate audio tracks your encoder already sends (a
+      commentary language on each, the crowd on another) and builds a different
+      mix per destination from them, on the server, from one upload. One match
+      feed goes out to five YouTube channels, each carrying its own commentary
+      language, and none of them costs you a second video encode. The same
+      routing sends music to the destinations that should carry it and leaves it
+      off the ones that should not.
     </p>
     <p>
       That is the whole reason to run a server rather than rent one. If you do
