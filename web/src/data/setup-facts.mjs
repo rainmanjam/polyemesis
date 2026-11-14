@@ -79,9 +79,9 @@ export const PASTE_URL = {
 };
 /** @type {Fact} */
 export const AUDIO_TRACKS = {
-  text: "Tick the tracks you want under Audio Track in that same panel.",
+  text: "Tick the tracks you want under Audio Track in that same panel: the ones your sources are assigned to in Advanced Audio Properties, tracks 1 to 6.",
   doc: "quickstart",
-  evidence: ["Tick the tracks you want under Audio Track"],
+  evidence: ["Tick the tracks you want under Audio Track", "the sources are assigned to tracks 1–6 in the Audio Mixer's Advanced Audio Properties"],
   anchor: "4-point-obs-at-it",
 };
 /** @type {Fact} */

@@ -21,7 +21,7 @@ function allFacts(): { page: string; fact: Fact }[] {
  *  that mentions the action must be that object: a second wording is how two pages drift apart. */
 const SHARED_ACTIONS: [string, RegExp, Fact][] = [
   ["bitrate for each track", /bitrate for each track/i, SETUP.OBS_BITRATES],
-  ["Advanced Audio Properties", /Advanced Audio Properties/, SETUP.OBS_TRACK_TICKS],
+  ["the Audio Mixer gear icon", /open Advanced Audio Properties/, SETUP.OBS_TRACK_TICKS],
   ["add a source", /\badd a source\b|source, added on the Sources page/i, SETUP.ADD_SOURCE],
   ["publish URL", /publish URL/, SETUP.COPY_URL],
   ["Custom Output (FFmpeg)", /Custom Output \(FFmpeg\)/, SETUP.OBS_CUSTOM_OUTPUT],

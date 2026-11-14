@@ -788,9 +788,12 @@ const MIN_DIAGRAM_PX = 12;
 const TOUR_MIN_WIDTH = { 390: 320, 1024: 600, 1440: 600 };
 const frames2 = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
-async function resize(page, width, height = 900) {
-  await page.setViewportSize({ width, height });
-  await frames2(page);
+/** Resize and wait until the page has laid out at the new size. A page with scripts off has no animation frames to
+ *  wait on (the wait would never end), so it reads a layout size instead, which forces the layout synchronously. */
+async function resize(page, c, width) {
+  await page.setViewportSize({ width, height: c.height });
+  if (c.js) await frames2(page);
+  else await page.evaluate(() => document.documentElement.getBoundingClientRect().width);
 }
 
 /** Every <text> of the routing drawing, at its on-screen size; null when the drawing is not displayed. */
@@ -806,7 +809,7 @@ function diagramTextSizes() {
 async function checkDiagramWide({ page, c, route, where }) {
   try {
     for (const width of [1440, 1024]) {
-      await resize(page, width, c.height);
+      await resize(page, c, width);
       const m = await page.evaluate(diagramTextSizes);
       if (m.missing) return bad("new-diagram-wide", where, `${route} has no svg.diag-svg`);
       if (m.hidden) return bad("new-diagram-wide", where, `${route}: the routing drawing is hidden at ${width}`);
@@ -815,7 +818,7 @@ async function checkDiagramWide({ page, c, route, where }) {
       if (min < MIN_DIAGRAM_PX) bad("new-diagram-wide", where, `${route} at ${width}: drawing text is ${min.toFixed(1)}px on screen, under ${MIN_DIAGRAM_PX}px`);
     }
   } finally {
-    await resize(page, c.width, c.height); // what a check that runs after this one sees is the context's own width
+    await resize(page, c, c.width); // what a check that runs after this one sees is the context's own width
   }
 }
 
@@ -956,12 +959,12 @@ async function checkTourWidth({ page, c, route, where }) {
   const widths = c.phone ? [390] : [1440, 1024];
   try {
     for (const w of widths) {
-      if (!c.phone) await resize(page, w, c.height);
+      if (!c.phone) await resize(page, c, w);
       const got = await page.evaluate(() => document.querySelector("video").getBoundingClientRect().width);
       if (got < TOUR_MIN_WIDTH[w]) bad("new-tour-width", where, `${route} at ${w}: the video is ${got.toFixed(0)}px wide, under ${TOUR_MIN_WIDTH[w]}px`);
     }
   } finally {
-    if (!c.phone) await resize(page, c.width, c.height);
+    if (!c.phone) await resize(page, c, c.width);
   }
 }
 
