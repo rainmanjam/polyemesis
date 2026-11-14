@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "Belum ada keyframe yang terlihat, jadi klip bisa diawali gangguan.",
   "clips.roughStart": "awal kasar",
   "clips.startNotChecked": "Awal belum diperiksa",
-  "clips.startNotCheckedBody": "Klip ini diambil sebelum server menyimpan catatan cara klip dimulai dan berapa lamanya, jadi keduanya tidak diketahui.",
+  "clips.startNotCheckedBody": "Tidak ada pengukuran tersimpan tentang cara klip ini dimulai atau berapa lamanya.",
   "media.uploadAria": "Unggah file media",
   "media.dropOrChoose": "Letakkan file di sini, atau {choose}",
   "media.chooseOne": "pilih satu",

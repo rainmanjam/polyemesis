@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "Non è ancora stato visto alcun keyframe, quindi un clip potrebbe iniziare con un difetto.",
   "clips.roughStart": "inizio imperfetto",
   "clips.startNotChecked": "Inizio non verificato",
-  "clips.startNotCheckedBody": "Questo clip è stato catturato prima che il server conservasse come inizia e quanto dura, quindi nessuno dei due dati è noto.",
+  "clips.startNotCheckedBody": "Non c'è alcuna misurazione salvata di come inizia questo clip o di quanto dura.",
   "media.uploadAria": "Carica un file multimediale",
   "media.dropOrChoose": "Trascina qui un file oppure {choose}",
   "media.chooseOne": "scegline uno",

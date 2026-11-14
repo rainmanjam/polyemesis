@@ -20,12 +20,15 @@ its first tagged release.
   that began at a keyframe and ran 30 seconds still read as a rough start of zero length once it was in the list (the
   confirmation when you captured it was right; the list was not). The length, keyframe start and note of each new clip are
   now saved beside it and read back, and deleting a clip, or retention expiring it, removes them with it. Clips captured
-  before this fix have nothing saved: they show a dash for the length and a neutral "Start not checked" instead of a
-  length or a warning, because their start was never measured. `GET /clips` gains a `measured` field to say so; no
-  existing field changed. Nothing else on the Clips page changed.
+  before this fix, and any clip whose record could not be saved, have nothing saved: they show a dash for the length and
+  a neutral "Start not checked" instead of a length or a warning, because their start was never measured. Wherever a
+  clip is returned (`GET /clips` and the reply to `POST /clips`) it gains a `measured` field to say so; no existing
+  field changed. Clips' records stay local: the offload to a bucket uploads the clips, not their records. Nothing else
+  on the Clips page changed.
 - **Free disk space read hundreds of times too large on some Linux mounts.** On a volume whose I/O block size is larger
-  than its allocation unit (Docker Desktop's shared folders are one), free and total space were multiplied by the wrong
-  one, so a volume with 1.8 TB free of 3.6 TB read as roughly 460 TB of 920 TB on the Recordings Disk card. The same
+  than its allocation unit (the figures seen inside Docker Desktop are consistent with its shared folders being one),
+  free and total space were multiplied by the wrong one, so a volume with 1.8 TB free of 3.6 TB read as roughly 460 TB
+  of 920 TB on the Recordings Disk card. The same
   number feeds four checks, which now see the true, smaller figure: the recorder's free-space floor (below it, recording
   stops and the Recordings page says why), the uploads Save floor, the room playlist media needs for its normalised
   copies, and the delay buffer's disk guard. On such a mount with less free than a floor, recording now stops and

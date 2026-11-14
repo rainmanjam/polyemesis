@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "Henüz anahtar kare görülmedi, bu yüzden klip bozuk bir başlangıçla açılabilir.",
   "clips.roughStart": "kusurlu başlangıç",
   "clips.startNotChecked": "Başlangıç denetlenmedi",
-  "clips.startNotCheckedBody": "Bu klip, sunucu nasıl başladığını ve ne kadar sürdüğünü kaydetmeden önce yakalandı; ikisi de bilinmiyor.",
+  "clips.startNotCheckedBody": "Bu klibin nasıl başladığına ve ne kadar sürdüğüne dair kayıtlı bir ölçüm yok.",
   "media.uploadAria": "Medya dosyası yükle",
   "media.dropOrChoose": "Bir dosyayı buraya bırakın ya da {choose}",
   "media.chooseOne": "bir dosya seçin",

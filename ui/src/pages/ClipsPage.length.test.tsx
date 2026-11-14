@@ -70,5 +70,9 @@ describe("ClipsPage rows", () => {
     // Neutral, not the warning style.
     const badge = screen.getByText(/start not checked/i);
     expect(badge.className).not.toContain("warn");
+    // True for every cause of "no record": predates records, failed to write,
+    // unreadable. It must not name one of them.
+    expect(badge.getAttribute("title")).toMatch(/no saved measurement/i);
+    expect(badge.getAttribute("title")).not.toMatch(/before/i);
   });
 });

@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "Er is nog geen keyframe gezien, dus een clip kan met een storing beginnen.",
   "clips.roughStart": "rommelig begin",
   "clips.startNotChecked": "Begin niet gecontroleerd",
-  "clips.startNotCheckedBody": "Deze clip is vastgelegd voordat de server bijhield hoe hij begint en hoe lang hij duurt, dus beide zijn onbekend.",
+  "clips.startNotCheckedBody": "Er is geen opgeslagen meting van hoe deze clip begint of hoe lang hij duurt.",
   "media.uploadAria": "Een mediabestand uploaden",
   "media.dropOrChoose": "Sleep hier een bestand heen, of {choose}",
   "media.chooseOne": "kies er een",

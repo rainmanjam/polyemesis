@@ -506,7 +506,9 @@ export function RenditionsPage() {
   };
 
   const passthrough = (status?.destinations ?? []).filter((d) => d.renditionId == null);
-  const running = allRenditions.filter((r) => processRunning(r.process)).length;
+  // Counted over the cards, not over the live list: the two can differ for a few
+  // seconds after a programme is deleted, and a count has to be of what is drawn.
+  const running = views.filter((v) => processRunning(liveById.get(v.rendition.id)?.process)).length;
   const sourceVideo = status?.source.video ?? null;
 
   const encoders = caps?.encoders ?? [];

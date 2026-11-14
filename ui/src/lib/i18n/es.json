@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "Todavía no se ha visto ningún fotograma clave, así que un clip puede empezar con un fallo.",
   "clips.roughStart": "inicio irregular",
   "clips.startNotChecked": "Inicio sin comprobar",
-  "clips.startNotCheckedBody": "Este clip se capturó antes de que el servidor guardara cómo empieza y cuánto dura, así que no se sabe ninguna de las dos cosas.",
+  "clips.startNotCheckedBody": "No hay ninguna medición guardada de cómo empieza este clip ni de cuánto dura.",
   "media.uploadAria": "Subir un archivo multimedia",
   "media.dropOrChoose": "Suelta un archivo aquí o {choose}",
   "media.chooseOne": "elige uno",

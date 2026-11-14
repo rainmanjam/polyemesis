@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "尚未见到关键帧，因此片段开头可能出现花屏。",
   "clips.roughStart": "开头不齐",
   "clips.startNotChecked": "开头未检查",
-  "clips.startNotCheckedBody": "此片段是在服务器开始记录其开头和时长之前捕获的，因此两者都未知。",
+  "clips.startNotCheckedBody": "没有保存此片段开头和时长的测量结果。",
   "media.uploadAria": "上传媒体文件",
   "media.dropOrChoose": "将文件拖放到这里，或{choose}",
   "media.chooseOne": "选择文件",

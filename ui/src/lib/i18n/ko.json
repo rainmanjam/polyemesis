@@ -2453,7 +2453,7 @@
   "clips.noKeyframeYet": "아직 키프레임이 확인되지 않아 클립 시작 부분이 깨질 수 있습니다.",
   "clips.roughStart": "시작 부분 거침",
   "clips.startNotChecked": "시작 지점 미확인",
-  "clips.startNotCheckedBody": "이 클립은 서버가 시작 지점과 길이를 기록하기 전에 캡처되어 둘 다 알 수 없습니다.",
+  "clips.startNotCheckedBody": "이 클립이 어떻게 시작하는지, 길이가 얼마인지에 대해 저장된 측정값이 없습니다.",
   "media.uploadAria": "미디어 파일 업로드",
   "media.dropOrChoose": "여기에 파일을 끌어다 놓거나 {choose}",
   "media.chooseOne": "파일 선택",
