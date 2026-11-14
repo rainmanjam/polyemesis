@@ -23,9 +23,10 @@ go to the event bus, not to the log file.
 
 ### "ffmpeg 5.x is too old"
 
-polyemesis refuses to start below 6.0 rather than failing later in a way that
-looks like a bug. Ubuntu 22.04 ships 4.4 and Debian 12 ships 5.1, so
-`apt install ffmpeg` is not a universal answer. Your options are a newer distro,
+polyemesis refuses to start below 8.0 rather than failing later in a way that
+looks like a bug. Ubuntu 22.04 ships 4.4, Debian 12 ships 5.1, Ubuntu 24.04
+ships 6.1.1 and Debian 13 ships 7.1.5, so `apt install ffmpeg` is not a
+universal answer. Your options are a newer distro,
 a static FFmpeg build with libsrt, or Docker —
 [INSTALL.md](INSTALL.md#if-your-distro-is-too-old-pick-one-of-three) has all
 three with commands.

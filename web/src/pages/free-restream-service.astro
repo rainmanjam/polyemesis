@@ -283,11 +283,13 @@ const freeHere = [
       goes to Twitch is the mix that goes to YouTube.
     </p>
     <p>
-      polyemesis takes the split audio tracks your encoder already sends
-      (music on one, game on another, microphone on a third) and builds a
-      different mix per destination from them, on the server, from one upload.
-      The platform that mutes music gets the clean feed while the one that does
-      not gets the full one, and neither costs you a second video encode.
+      polyemesis takes the separate audio tracks your encoder already sends (a
+      commentary language on each, the crowd on another) and builds a different
+      mix per destination from them, on the server, from one upload. One match
+      feed goes out to five YouTube channels, each carrying its own commentary
+      language, and none of them costs you a second video encode. The same
+      routing sends music to the destinations that should carry it and leaves it
+      off the ones that should not.
     </p>
     <p>
       That is the whole reason to run a server rather than rent one. If you do

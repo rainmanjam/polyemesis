@@ -23,9 +23,10 @@
  * turns on, and it is quoted rather than paraphrased.
  *
  * NO `merits` BLOCK. The page as it was had no "what they do well" section: what
- * Streamlabs does well was one sentence inside "Use Streamlabs, not this", and it
- * stays there, whole. Splitting it into cards would have meant writing new
- * headings over it, so the page does not pretend to a section it never had.
+ * Streamlabs does well was one sentence inside a "Use Streamlabs, not this"
+ * section, and the owner removed that whole section on 2026-11-14. Nothing
+ * replaced it, so the page still has no section on what they do well and does not
+ * pretend to one.
  *
  * The `glance` and `fits` lists are SUMMARIES, and every cell in them is a
  * phrase lifted word for word from the page below or from docs/COMPARISON.md
@@ -108,22 +109,6 @@ export const DATA = {
       ],
     },
   ],
-  useOther: {
-    heading: "Use Streamlabs, not this",
-    items: [
-      "If you want multistreaming without running a server, Streamlabs is the easier answer and this project is not competing for that.",
-      "Their relay costs you one upload and no hardware, their desktop app and OBS plugin are built for the job, and Multichat reads and posts across YouTube, Twitch and Facebook Pages from one place.",
-      "If one mix suits every platform you send to, you are already done.",
-    ],
-    after: [
-      "polyemesis is for the case where that is the thing that does not work: where the archive needs a different mix from the broadcast, where the stream must not pass through a third party, or where a subscription per month for a fan-out you could run yourself is the wrong shape.",
-    ],
-    links: [
-      { label: "The three ways to multistream", href: "/multistream" },
-      { label: "The full comparison", href: "/comparison" },
-      { label: "How the mix works", href: "/docs/audio-routing" },
-    ],
-  },
   footer:
     "Everything this page says about Streamlabs was checked on <strong>16 August 2026</strong>, and is recorded in <code>docs/evidence/competitor-facts-2026-08-15.md</code>. Prices and plan limits move; check before deciding on the strength of a number here.",
   closing: { heading: "Weighing up the others too?" },
