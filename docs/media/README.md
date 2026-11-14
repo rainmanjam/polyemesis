@@ -24,8 +24,12 @@ make build                                  # compiles the UI and embeds it in t
 
 Each command builds what it needs, photographs, compresses and tears down or
 leaves the rig running as described below. `./scripts/capture-media.sh` is the
-older single-programme arrangement and is not used for any committed shot. It
-removes its work directory, which holds credentials, on every exit.
+older single-programme arrangement and is not used for any committed shot. Its
+capture step no longer completes: four of its sixteen capture tests fail against
+the current spec (monitoring, clips, automod and automation), so committed shots
+come only from `demo-seed.sh` and `capture-lanes.sh`. It and `capture-lanes.sh`
+build their seeder with `scripts/build-seeder.sh`, and each removes its work
+directory, which holds credentials, on every exit.
 
 The binary is stamped with the latest release tag, so the header reads a release,
 not `dev`. `demo-seed.sh` reads the override from `DEMO_VERSION` and
@@ -243,8 +247,17 @@ publisher on the host could not reach a listener bound IPv6-only. The network is
 created with `--internal` (the script asks Docker whether it is), the server
 publishes no port, and the console is reached through a relay container bound to
 `127.0.0.1`, as on the sports rig. Every destination in the fixture is checked
-before anything starts: a network destination must be on a `.invalid` host, and
-a "start" schedule may name file destinations only.
+before anything starts: a network destination must be on a `.invalid` host and
+must not be enabled, and a "start" schedule may name file destinations only.
+Every key in the fixture objects the seeder sends on as they are (destinations,
+renditions, alert rules, schedules and settings) must be spelled exactly as the
+allow-list in `internal/demorig/keys.go` has it, because the server matches keys
+ignoring case, so a case variant of a guarded field would slip past a check on
+its exact name. Both scenes refuse a Docker Engine older than 26.0.0, or one
+whose version cannot be read: before 26.0.0 an `--internal` network forwarded
+DNS queries to the host's resolver (CVE-2024-29018), so it was not fully closed
+(`sports_require_internal_network` in `scripts/lib-demo-sports.sh`). The
+recording renderer's FFmpeg containers run with `--network none`.
 
 ## The sports rig
 
