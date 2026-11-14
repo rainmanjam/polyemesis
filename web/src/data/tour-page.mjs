@@ -96,10 +96,10 @@ export const TOUR_PAGE = {
     },
     {
       film: [
-        "On screen, a Go live sheet lists the five destinations as Ready, each with the audio tracks it carries, and starts them together.",
-        "On screen, each row moves from Not started to Starting to Live, and the dashboard then reads On air with 5 live and all 5 running destinations healthy.",
+        "On screen, a Go live sheet lists the five destinations as Ready, each with the audio tracks it carries, and starts all five.",
+        "On screen, the rows then move one after another from Not started to Starting to Live, and the dashboard then reads On air with 5 live and all 5 running destinations healthy.",
         'The caption reads "One click starts all five."',
-        "On screen, each destination's Routing page then shows the loudness of its output, with the caption \"Each channel's own mix, measured on the way out.\"",
+        "On screen, the Routing page of two of the five destinations then shows an \"Output, after routing\" loudness readout for each, with the caption \"Each channel's own mix, measured on the way out.\"",
       ],
       facts: [
         {

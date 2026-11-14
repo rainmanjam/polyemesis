@@ -60,8 +60,16 @@ describe("the film sentences (P4-R15)", () => {
     for (const n of notes) for (const f of n.film) expect(f).not.toMatch(/\/docs|https?:|\.md\b/);
   });
 
-  it("say that chapter 3 goes live", () => {
-    expect(notes[2].film.some((f) => /live/i.test(f))).toBe(true);
+  it("say that chapter 3's rows reach Live one after another, not only that a Go live sheet appears", () => {
+    const sentence = notes[2].film.find((f) => /\bLive\b/.test(f) && !/Go live sheet/.test(f));
+    expect(sentence).toMatch(/one after another/);
+  });
+
+  it("claim no more of chapter 3 than two Routing pages (the film opens two destinations)", () => {
+    for (const f of notes[2].film) {
+      expect(f, f).not.toMatch(/each destination/i);
+      expect(f, f).not.toMatch(/together/i);
+    }
   });
 
   it("quote a caption exactly as the film shows it", () => {
