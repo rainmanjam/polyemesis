@@ -12,6 +12,7 @@
  * drawn only where its container is at least 640px wide (container query in
  * styles/new-pages.css); below that the same routing is a plain list.
  * No script; nothing moves. */
+import { AUDIENCE_ROUTES } from "../../data/audiences.mjs";
 import { CASES, CASE_ORDER } from "../../data/cases.mjs";
 import RoutingDiagram from "../RoutingDiagram.astro";
 
@@ -30,6 +31,7 @@ const COPY = {
       ["Sources", "Under Sources, annotations, label the incoming tracks so every destination sees the same names."],
       ["Destinations", "Add one destination per channel and, under Tracks, tick its language and the ground sound. Video is copied, not re-encoded."],
     ],
+    fullSetup: "See the full sports setup",
     more: { href: "/docs/audio-routing", text: "How audio routing works" },
   },
   worship: {
@@ -42,6 +44,7 @@ const COPY = {
       ["Destinations", "Add a destination per audience and, under Tracks, tick the mix that audience should hear."],
       ["Meters", "Open Meters: loudness is measured after routing, so you see what each destination receives."],
     ],
+    fullSetup: "See the full church and events setup",
     more: { href: "/docs/obs", text: "Sending multitrack from OBS" },
   },
   streamer: {
@@ -54,6 +57,7 @@ const COPY = {
       ["Renditions", "For a vertical feed, add a rendition with a portrait width and height and blurred fill. It is encoded once and shared by every destination that selects it; audio tracks pass through untouched."],
       ["Destinations", "Add a destination per platform, point the vertical one at the rendition and, under Tracks, tick what each should carry."],
     ],
+    fullSetup: "See the full streamer setup",
     more: { href: "/docs/quickstart", text: "The quickstart, start to finish" },
   },
 } as const;
@@ -108,6 +112,7 @@ import Fold from "./Fold.astro";
                     ))}
                   </ol>
                 </Fold>
+                <a class="more" href={AUDIENCE_ROUTES[key]}>{copy.fullSetup}</a>
                 <a class="more" href={copy.more.href}>{copy.more.text}</a>
                 <p class="aud-fine">{c.fine}</p>
               </div>
