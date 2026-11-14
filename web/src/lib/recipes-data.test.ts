@@ -122,6 +122,19 @@ describe("recipe data", () => {
         expect(url, `${r.slug}: a fact about the publish URL`).toBeGreaterThan(-1);
         expect(url, `${r.slug}: the publish URL comes before Start Recording`).toBeLessThan(start);
         expect(at(t, /Custom Output \(FFmpeg\)/), `${r.slug}: Custom Output (FFmpeg)`).toBeGreaterThan(-1);
+        // Each fact the reader needs to reach "Start Recording" is there, and in the order the docs give.
+        const addSource = at(t, /add a source/i);
+        expect(addSource, `${r.slug}: adds a source`).toBeGreaterThan(-1);
+        expect(t[addSource], `${r.slug}: sets the source to SRT`).toMatch(/SRT/);
+        expect(addSource, `${r.slug}: source before its URL`).toBeLessThan(url);
+        const paste = at(t, /File path or URL/);
+        expect(paste, `${r.slug}: pastes the URL into OBS`).toBeGreaterThan(-1);
+        expect(paste, `${r.slug}: pastes before Start Recording`).toBeLessThan(start);
+        if (r.slug === "two-languages-one-broadcast") {
+          const tracks = at(t, /Audio Track/);
+          expect(tracks, `${r.slug}: ticks Audio Track`).toBeGreaterThan(-1);
+          expect(tracks, `${r.slug}: ticks before Start Recording`).toBeLessThan(start);
+        }
       }
     });
 
@@ -143,9 +156,42 @@ describe("recipe data", () => {
 
     it("picks the connected account before it enables the destination", () => {
       const step = by("obs-to-five-platforms").steps[3].facts.map((f: Fact) => f.text);
-      expect(step.findIndex((x: string) => /connected account/i.test(x))).toBeLessThan(
-        step.findIndex((x: string) => /enable/i.test(x)),
-      );
+      const account = step.findIndex((x: string) => /connected account/i.test(x));
+      const enable = step.findIndex((x: string) => /enable/i.test(x));
+      expect(account, "a fact that picks the connected account").toBeGreaterThan(-1);
+      expect(enable, "a fact that enables the destination").toBeGreaterThan(-1);
+      expect(account).toBeLessThan(enable);
+    });
+
+    it("does not leave the platforms recipe saying that registering an app is the same everywhere", () => {
+      const step = by("obs-to-five-platforms").steps[2].facts.map((f: Fact) => f.text);
+      const form = step.findIndex((x: string) => /redirect URL has the same form/.test(x));
+      const register = step.findIndex((x: string) => /Register an app/.test(x));
+      expect(form, "states the redirect URL's form").toBeGreaterThan(-1);
+      expect(form, "the form comes before the sentence that registers with it").toBeLessThan(register);
+      const all = step.join(" ");
+      expect(all).toMatch(/its own requirements/);
+      expect(all).toMatch(/test user/);
+      expect(all).toMatch(/scopes/);
+    });
+
+    it("says OBS's Audio tab is in Advanced mode, in the first step of the languages recipe", () => {
+      expect(by("two-languages-one-broadcast").steps[0].facts[0].text).toMatch(/Advanced output mode/);
+    });
+
+    it("sets the backpack source's protocol to SRT before anything is pointed at it", () => {
+      expect(by("streaming-from-a-backpack").needs.map((f: Fact) => f.text).join(" ")).toMatch(/protocol set to SRT/);
+    });
+
+    it("keeps to the docs' words about the publish URL", () => {
+      expect(JSON.stringify(RECIPES)).not.toMatch(/keep it private/i);
+    });
+
+    it("labels the platforms recipe's picture as five YouTube destinations", () => {
+      const shot = by("obs-to-five-platforms").steps[3].shot!;
+      expect(shot.caption).toMatch(/^Demo install: /);
+      expect(shot.caption).toMatch(/YouTube/);
+      expect(shot.alt).toMatch(/YouTube/);
     });
 
     it("states the SRTLA compatibility as the doc does, and never says 'works with'", () => {

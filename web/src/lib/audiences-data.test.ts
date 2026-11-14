@@ -53,12 +53,14 @@ describe("audience data", () => {
     }
   });
 
-  it("uses shots that exist, once per page, with the demo caption off the sports page only", () => {
+  it("uses shots that exist, once per page, with the demo caption on every destinations picture and off the other sports shots", () => {
     for (const a of audiences) {
       const shots = a.steps.flatMap((s: { shot?: { file: string; caption?: string } }) => (s.shot ? [s.shot] : []));
       for (const sh of shots) {
         expect(existsSync(shotsDir + sh.file), sh.file).toBe(true);
-        if (a.key === "sports") expect(sh.caption).toBeUndefined();
+        // The destinations picture is the sports demo install everywhere, so it is always labelled as one.
+        if (sh.file === "18-destinations.png") expect(sh.caption, `${a.key} destinations shot`).toMatch(/^Demo install: /);
+        else if (a.key === "sports") expect(sh.caption).toBeUndefined();
       }
       const files = shots.map((s: { file: string }) => s.file);
       expect(new Set(files).size).toBe(files.length);

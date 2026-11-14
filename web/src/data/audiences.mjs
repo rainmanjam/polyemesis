@@ -159,6 +159,7 @@ export const AUDIENCES = {
           file: "18-destinations.png",
           alt: "The dashboard's Destinations section, one card per destination with the tracks it carries",
           chrome: "Dashboard",
+          caption: "Demo install: the five YouTube channels and their tracks in this picture are example names; yours are the ones you add and label.",
         },
       },
       {

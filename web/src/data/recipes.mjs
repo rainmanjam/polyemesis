@@ -36,9 +36,13 @@ const ADD_SOURCE = {
 };
 /** @type {Fact} */
 const COPY_URL = {
-  text: "Copy its publish URL from the Sources page. The URL carries the source's publish token, so keep it private.",
+  text: "Copy its publish URL from the Sources page. The URL's streamid is that source's publish token, which tells polyemesis which source you are.",
   doc: "quickstart",
-  evidence: ["shows the publish URL for the source you just created", "publish token"],
+  evidence: [
+    "shows the publish URL for the source you just created",
+    "that source's publish token",
+    "tells polyemesis which source you are",
+  ],
   anchor: "4-point-obs-at-it",
 };
 /** @type {Fact} */
@@ -109,9 +113,9 @@ export const RECIPES = [
         title: "Give each voice its own track",
         facts: [
           {
-            text: "In OBS, under Settings → Output → Audio, set a bitrate for each track you intend to use.",
+            text: "In OBS's Advanced output mode, open Settings → Output → Audio and set a bitrate for each track you intend to use.",
             doc: "obs",
-            evidence: ["Settings → Output → Audio", "Set a bitrate for each track you intend to use"],
+            evidence: ["Settings → Output → Audio", "Advanced mode", "Set a bitrate for each track you intend to use"],
             anchor: "1-enable-the-audio-tracks",
           },
           {
@@ -243,13 +247,17 @@ export const RECIPES = [
         title: "Connect each platform",
         facts: [
           {
-            text: "Register an app in the platform's developer console, with your redirect URL.",
+            text: "Each platform's app has its own requirements, such as the scopes it must allow, a client type or a test user. The connecting guide lists them under each platform's heading: X, Twitch, Kick, YouTube and Facebook.",
             doc: "connecting-platforms",
-            evidence: ["Register an app", "with your redirect URL"],
-            anchor: "the-same-four-steps-on-every-platform",
+            evidence: [
+              "so the app must allow them",
+              "client type Confidential",
+              "Request the scopes polyemesis uses",
+              "add your Google account as a test user",
+            ],
           },
           {
-            text: "The redirect URL has the form https://your-hostname/api/v1/oauth/<platform>/callback, and Settings → Platform credentials shows the exact one for each platform, with a copy button.",
+            text: "Every platform's redirect URL has the same form, https://your-hostname/api/v1/oauth/<platform>/callback, and Settings → Platform credentials shows the exact one for each platform, with a copy button.",
             doc: "connecting-platforms",
             evidence: [
               "https://polyemesis.example.com/api/v1/oauth/<platform>/callback",
@@ -259,9 +267,21 @@ export const RECIPES = [
             anchor: "server-prerequisites",
           },
           {
-            text: "Paste the app's credentials into Settings → Platform credentials, press Connect account and approve the sign-in.",
+            text: "Register an app in the platform's developer console, with that redirect URL.",
             doc: "connecting-platforms",
-            evidence: ["Paste its credentials into Settings → Platform credentials", "Connect account", "approve the sign-in"],
+            evidence: ["Register an app", "with your redirect URL"],
+            anchor: "the-same-four-steps-on-every-platform",
+          },
+          {
+            text: "Paste the app's credentials, its client ID and secret (App ID and App secret on Facebook), into Settings → Platform credentials, press Connect account and approve the sign-in.",
+            doc: "connecting-platforms",
+            evidence: [
+              "Paste its credentials into Settings → Platform credentials",
+              "client ID and secret",
+              "App ID and App secret on Facebook",
+              "Connect account",
+              "approve the sign-in",
+            ],
             anchor: "the-same-four-steps-on-every-platform",
           },
           {
@@ -290,7 +310,9 @@ export const RECIPES = [
         ],
         shot: {
           ...DESTINATIONS_SHOT,
-          alt: "The dashboard's Destinations section, one card per destination, each live",
+          alt: "The dashboard's Destinations section: five YouTube destinations, each live",
+          caption:
+            "Demo install: all five destinations in this picture are YouTube channels from the sports-club example; yours are one per platform you connect.",
         },
       },
     ],
@@ -322,9 +344,9 @@ export const RECIPES = [
         evidence: ["BELABOX, Moblin and IRL Pro all bond this way"],
       },
       {
-        text: "A source, added on the Sources page.",
+        text: "A source, added on the Sources page, with its protocol set to SRT and Apply pressed.",
         doc: "quickstart",
-        evidence: ["Open the Sources page and add one"],
+        evidence: ["Open the Sources page and add one", "pick its protocol", "SRT for multitrack", "press Apply"],
         anchor: "3-create-a-source",
       },
       { text: "One UDP port open to the server.", doc: "srtla", evidence: ["udp"] },

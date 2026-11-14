@@ -33,11 +33,11 @@ describe("AudiencePage.astro", () => {
     expect(layout).toMatch(/<RoutingDiagram[^>]*\/>\s*<p class="fine" data-fine>\{c\.fine\}<\/p>/);
   });
 
-  it("shows the demo caption on every non-sports shot and the sports page's none", () => {
+  it("shows the demo caption on every non-sports shot and on the destinations picture, and none on the other sports shots", () => {
     for (const a of Object.values(AUDIENCES)) {
-      for (const s of a.steps as { shot?: { caption?: string } }[]) {
+      for (const s of a.steps as { shot?: { file: string; caption?: string } }[]) {
         if (!s.shot) continue;
-        if (a.key === "sports") expect(s.shot.caption).toBeUndefined();
+        if (a.key === "sports" && s.shot.file !== "18-destinations.png") expect(s.shot.caption).toBeUndefined();
         else expect(s.shot.caption).toMatch(/^Demo install: /);
       }
     }
