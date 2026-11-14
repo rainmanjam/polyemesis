@@ -22,7 +22,7 @@ export const SCREENS = [
   {
     id: "inputs",
     shot: "05-sources.png",
-    alt: "polyemesis sources page: three programmes, each running with signal detected, an SRT address on port 6000 and a masked publishing token; the first programme's card is cut off at the top",
+    alt: "polyemesis sources page: two programmes, each showing signal detected, an SRT address on port 6000, a live publishing line and a masked publishing token, with the header of a third programme, running, below them",
     caption:
       "Three programmes on one SRT port: each publishes to port 6000 with its own token (masked here).",
   },
