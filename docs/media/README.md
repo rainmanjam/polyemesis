@@ -16,8 +16,7 @@ image folders disagree.
 ## Regenerating
 
 ```bash
-make build                                  # the UI must be embedded, or you photograph
-                                            # the placeholder page
+make build                                  # compiles the UI and embeds it in the binary
 ./scripts/demo-seed.sh                      # the full installation (the "full" scene)
 ./scripts/demo-seed.sh --scene sports       # the sports installation (the "sports" scene)
 ./scripts/capture-lanes.sh                  # the three lane pictures
@@ -27,8 +26,9 @@ Each command builds what it needs, photographs, compresses and tears down or
 leaves the rig running as described below. `./scripts/capture-media.sh` is the
 older single-programme arrangement and is not used for any committed shot.
 
-The binary is stamped with the latest release tag (override with
-`DEMO_VERSION`), so the header reads a release, not `dev`. The PNGs are
+The binary is stamped with the latest release tag, so the header reads a release,
+not `dev`. `demo-seed.sh` reads the override from `DEMO_VERSION` and
+`capture-lanes.sh` from `CAPTURE_VERSION`. The PNGs are
 palette-compressed. The site keeps byte-identical copies of the shots its pages
 use in `web/src/assets/shots/`; `web/src/lib/features-shots.test.ts` fails if
 they drift, and Astro builds avif and webp variants from them. A shot that no
@@ -49,7 +49,7 @@ shots about live routing and live measurement: `01-dashboard.png`,
 `04-meters.png`, `05-sources.png` and `08-mix-matrix.png`.
 
 **full.** A fuller installation: three programmes, a rendition ladder, thirteen
-destinations across the platforms the product supports, a recording library,
+destinations (YouTube, Twitch, Facebook, Kick and custom destinations), a recording library,
 alert rules, schedules, automod pattern rules and a clip buffer. It owns every
 other shot except the lane pictures.
 
@@ -86,14 +86,15 @@ Plain statements, because a shot name promises more than some pages hold.
 - `14-clips.png`: the rolling buffer, armed, and one captured clip. There is no
   clip editor on that page.
 - `17-settings-full.png`: the whole Settings page. Settings shows one section at
-  a time, so today it is the same height as `16-settings.png`.
+  a time, so the whole page is only slightly taller than the window: this shot is
+  2880x1834 and `16-settings.png` is 2880x1800.
 - `07-monitoring.png`: the process table only, framed so the log pane is outside
   the window. No process has a clean log at the default level: destinations
   print nothing and decoders print warm-up lines.
 - `08-mix-matrix.png`: taken last in the sports scene, after the test puts the
   English destination into matrix mode through the console's own API. The
   window is 1800 px wide so all six tracks fit.
-- `20-automod.png`: a tall frame (2880x5900) from the pattern rules down to the
+- `20-automod.png`: a tall frame (2880x5902) from the pattern rules down to the
   grant matrix.
 - `02-routing.png` and `04-meters.png` are taller than 1440x900 at 2x.
 - `05-sources.png` shows a 172.x address on its PUBLISHING line. That is
@@ -129,7 +130,8 @@ looks broken. It refuses when:
 - the ingest never goes live (the seeder stops with "these programmes never went
   live"), so an install that is not receiving a stream is never photographed;
 - the header would read `dev` (no release tag, for example a shallow clone);
-  `git fetch --tags` or set `DEMO_VERSION`;
+  `git fetch --tags`, or set `DEMO_VERSION` (`CAPTURE_VERSION` for
+  `capture-lanes.sh`);
 - the page is not in the dark theme;
 - a secret is legible on screen: the stream keys and publish tokens of the
   fixture, the admin password and the setup code. The capture is given them as
@@ -142,12 +144,15 @@ looks broken. It refuses when:
   explains it. The rules are in `ui/src/lib/captureGuards.ts`, which has its own
   tests;
 - the sports destinations have not settled: every one must be running for at
-  least 30 s, at a speed between 0.97x and 1.03x (outside it the console shows
-  amber), with no dropped or duplicated frames and a measured loudness verdict
-  of pass;
-- the feed cannot hold its frame rate: the script reads the publisher's speed
-  and dropped frames over 20 s and stops with a hint to rerun with
-  `DEMO_FPS=30`;
+  least 30 s, at a speed between 0.97x and 1.03x, with no dropped or duplicated
+  frames and a measured loudness verdict of pass. The speed window is the
+  capture's own gate (`MIN_SETTLED_SPEED` and `MAX_SETTLED_SPEED` in
+  `captureGuards.ts`); it is stricter than the console, whose destination card
+  turns its speed amber only below 0.95x;
+- the feed cannot hold its frame rate: once the publisher has run 20 s, the
+  script reads its last three speed readings and its dropped-frame count, and
+  stops with a hint to rerun with `DEMO_FPS=30` unless all three readings are at
+  least 0.98x and no frame was dropped;
 - the installation is short of what the fixture describes.
 
 ## The declared exceptions
@@ -213,8 +218,8 @@ the window (see above). The capture asserts no per-process error chip and no
 
 ### Docker network
 
-On the full scene the server and the publisher run as two containers on one
-Docker network, dialling each other by name. That sidesteps
+On the full scene the server and one publisher container per programme (three)
+run on one Docker network, dialling each other by name. That sidesteps
 [#28](https://github.com/rainmanjam/polyemesis/issues/28), where an SRT
 publisher on the host could not reach a listener bound IPv6-only.
 
@@ -283,13 +288,15 @@ clears it. The console is on port 8097 for the sports rig (`DEMO_PORT`).
 reads each destination's path back from the receiver and checks that it carries
 its own language. It needs Python 3 with numpy (`scripts/demo-sports/proof.py`).
 It passes when each path's own voice is at least 15 dB above the strongest other
-voice on that path, and it prints the console's loudness figure for each path.
+voice on that path. It also prints a loudness figure for each path; that figure
+is an independent reading by FFmpeg's `ebur128` filter of the stream read back
+from the receiver, not the console's own figure.
 It is manual, never part of a capture. Measured on the maintainer's machine on
 2026-11-13, after the last change to the rig, the own-voice margins were between
 23.4 and 26.8 dB across the five paths, and each path's integrated loudness was
-between -14.1 and -13.8 LUFS (the console's compliance rows check against -14).
+between -14.1 and -13.8 LUFS in that reading.
 
-Selectors, timings and the frame check a tour author needs are in
+The tour's order of steps, prerequisites, frame check and caption rules are in
 `scripts/tour/README.md`, not here.
 
 ## Timing, for a maintainer
@@ -301,11 +308,16 @@ already built and cached (a first run also builds the image and takes longer):
   capture. The publisher held 59.80 fps at speed 0.994x with 0 dropped frames,
   so `DEMO_FPS=30` was not needed. The destinations settled about 35 s after
   their checks began;
-- the full scene took about 149 s;
+- the full scene's capture took about 1.3 minutes (16 tests passed) after the
+  build, in a clean run. No clean end-to-end wall time for the full scene was
+  recorded;
 - the lanes script took about 138 s for the three shots.
 
-None of this runs in CI. The rig and the capture need Docker, Go (the version in
-`go.mod`), Node, system Google Chrome, FFmpeg and Python 3.
+None of this runs in CI. The host needs Docker, Go (the version in `go.mod`),
+Node and npm (to build the UI and run the capture), system Google Chrome and
+`openssl` (to generate a password when none is supplied). FFmpeg runs inside the
+containers, not on the host. Python 3 is needed only for the optional palette
+compression pass (with Pillow) and for `--proof` (with numpy).
 
 ## The tour
 
