@@ -158,18 +158,6 @@ export const DATA = {
       },
     ],
   },
-  useOther: {
-    heading: "Use Aitum, not this",
-    items: [
-      "One mix suits every platform. This is most broadcasts, and adding a server to serve it is a worse setup, not a better one.",
-      "Your track layout is settled and you are not editing it under load.",
-      "You want a destination at a different resolution or bitrate and your PC has the headroom to encode it. Aitum does this natively.",
-      "You do not want to run, patch or pay for a server. That is a legitimate position and there is no answer to it here.",
-    ],
-    after: [
-      "polyemesis is worth the server when the mixes outnumber the tracks, when the stream PC has no headroom left to encode with, or when the upload is the ceiling: one stream out instead of one per platform.",
-    ],
-  },
   footer:
     "Everything this page says about Aitum was checked on <strong>16 September 2026</strong>, and is recorded in <code>docs/evidence/competitor-facts-2026-08-15.md</code>. Prices and plan limits move; check before deciding on the strength of a number here.",
   closing: { heading: "Weighing up the others too?" },

@@ -57,8 +57,10 @@ ban, polls, chat settings), see
 | **Unverified** | Not built, and the platform's API not confirmed either way. Never a refusal — nothing stops you trying |
 | **Not possible** | Somebody read the platform's published API and the thing is not in it. No amount of setup will produce it |
 
-*Everything else* is the other nineteen entries in the destination preset
-catalogue — PeerTube, Owncast, Cloudflare Stream, Mux, AWS IVS and the rest.
+*Everything else* is the other seventeen entries in the destination preset
+catalogue (thirty-two in all; the table's platforms account for fifteen, two of
+them the RTMPS variants of YouTube and Twitch) — PeerTube, Owncast, Cloudflare
+Stream, Mux, AWS IVS and the rest.
 The platforms named in the table above are not among them, however faint their
 row reads. They stream perfectly over RTMP, RTMPS or SRT with a pasted URL and
 key; we simply have not researched their APIs, and "unverified" is the honest

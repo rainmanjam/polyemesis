@@ -144,18 +144,6 @@ export const DATA = {
       },
     ],
   },
-  useOther: {
-    heading: "Use SE.Live, not this",
-    items: [
-      "You broadcast from Windows and one of the six OBS tracks already carries the right sound for each platform.",
-      "You want the vertical cut composed as its own scene rather than reframed from the horizontal one. Canvas does that in a single OBS session; a polyemesis rendition can only crop, letterbox or blur-fill the frame it received.",
-      "You are already inside the StreamElements ecosystem for overlays, tips and chat, and adding a separate server to the setup buys you nothing you asked for.",
-      "You are on Windows and do not want to run a server. SE.Live needs no host, no port and no certificate; polyemesis needs all three before it sends a byte.",
-    ],
-    after: [
-      "polyemesis is the answer to a narrower question: you are not on Windows, or you want a mix assembled per platform rather than chosen from what OBS prepared, or you want the fan-out to leave a server instead of your own connection.",
-    ],
-  },
   footer:
     "Everything this page says about StreamElements was checked on <strong>15 August 2026</strong>, and is recorded in <code>docs/evidence/competitor-facts-2026-08-15.md</code>. Prices and plan limits move; check before deciding on the strength of a number here.",
   closing: { heading: "Weighing up the others too?" },

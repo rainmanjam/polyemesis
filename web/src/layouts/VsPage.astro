@@ -52,7 +52,6 @@ const index = [
   ...(data.which ? [{ id: "which", label: data.which.heading }] : []),
   ...data.sections.map((s) => ({ id: s.id, label: s.heading })),
   ...(data.merits ? [{ id: "does-well", label: data.merits.heading }] : []),
-  ...(data.useOther ? [{ id: "use-other", label: data.useOther.heading }] : []),
   { id: "others", label: "Also compared" },
 ];
 
@@ -205,22 +204,6 @@ const glanceCaption = `polyemesis compared with ${data.products.map((p) => p.nam
       )
     }
 
-    {
-      data.useOther && (
-        <section id="use-other" class="vs-sec">
-          <h2>{data.useOther.heading}</h2>
-          <ul class="vs-list vs-list-wide">
-            {data.useOther.items.map((t) => <li set:html={t} />)}
-          </ul>
-          {data.useOther.after?.map((p) => <p class="vs-note" set:html={p} />)}
-          {data.useOther.links && (
-            <p class="vs-links">
-              {data.useOther.links.map((l) => <a href={l.href}>{l.label}</a>)}
-            </p>
-          )}
-        </section>
-      )
-    }
 
     <section id="others" class="vs-sec">
       <h2>Also compared</h2>
