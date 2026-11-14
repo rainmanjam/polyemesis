@@ -570,7 +570,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.5
 done
 E2E_PASSWORD=x go run "$ROOT/scripts/demo_seed_driver.go" "http://127.0.0.1:$DEMO_PORT" setup "$TMP/base-variant.json" > "$OUT" 2> "$ERR"; RC=$?
-kill "$LISTENER_PID" 2> /dev/null; LISTENER_PID=""
+# The listener owns requests.log, so see it dead before the log is read.
+kill "$LISTENER_PID" 2> /dev/null; wait "$LISTENER_PID" 2> /dev/null || true; LISTENER_PID=""
 expect_rc 1
 expect_err "spelled exactly"
 [ ! -s "$TMP/requests.log" ] || fail "the driver sent a request before refusing: $(head -n 1 "$TMP/requests.log")"

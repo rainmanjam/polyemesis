@@ -282,7 +282,7 @@ func CheckInvalidDestinations(rows []DestRow) error {
 	// here, so the host half is stripped by giving every row a passing URL.
 	stripped := make([]DestRow, len(rows))
 	for i, r := range rows {
-		r.URL, r.BackupURL = "rtmp://x.invalid/x", ""
+		r.URL, r.BackupURL = "rtmps://x.invalid/x", ""
 		stripped[i] = r
 	}
 	if err := CheckStored(stripped, []string{"x.invalid"}); err != nil {

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -148,6 +149,9 @@ func TestSeedDemoDoesNotFollowRedirects(t *testing.T) {
 // scripts/build-seeder.sh; this runs that step from a directory outside the
 // repository and expects a binary.
 func TestLegacyCaptureScriptsCanBuildTheSeederFromOutsideTheModule(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the capture scripts are bash and Docker and are not run on Windows; build-seeder.sh takes a POSIX output path")
+	}
 	root := repoRootFromTest(t)
 	outside := t.TempDir()
 	if strings.HasPrefix(outside, root) {

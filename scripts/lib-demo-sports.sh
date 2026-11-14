@@ -214,6 +214,7 @@ sports_state() {
 sports_proof() {
   local dir="$WORK/proof" kind key lang
   local langs=(en es pt fr ar) i=0
+  local proof_pids=() proof_pid
   umask 077
   sports_require_internal_network
   [ -s "$WORK/secrets.list" ] || { echo "no $WORK/secrets.list: is the rig up?" >&2; exit 1; }
@@ -255,8 +256,13 @@ PY
         "exec ffmpeg -hide_banner -nostats -y -t 15 -i \"\$PROOF_URL\" -map 0:a:0 -f s16le -ac 2 -ar 48000 /p/$lang.pcm -map 0:a:0 -af ebur128=peak=true:framelog=quiet -f null -" \
         > "$dir/ebur-$lang.log" 2>&1 || true
     ) &
+    proof_pids+=("$!")
   done < "$WORK/secrets.list"
-  wait
+  # Each reader by its pid: a bare `wait` would also block on any other job
+  # this shell has. Every reader ends itself (`-t 15`, `|| true`).
+  for proof_pid in ${proof_pids[@]+"${proof_pids[@]}"}; do
+    wait "$proof_pid" || true
+  done
   # ffmpeg echoes its input URL, which ends in the stream key.
   for f in "$dir"/*.log; do
     sed 's#/live/[^ ]*#/live/(key)#g' "$f" > "$f.masked" && mv "$f.masked" "$f"
