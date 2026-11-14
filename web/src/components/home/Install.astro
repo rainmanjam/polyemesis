@@ -241,9 +241,12 @@ const METHODS = [
   .inst-tab:hover {
     color: var(--color-fg);
   }
+  /* Ink, not coral (owner, 2026-11-14): coral is the primary action. The selected tab is told
+     apart by more than hue: ink text against the muted others, and a 2px ink underline the
+     others do not have. */
   .inst-tab[aria-selected="true"] {
     color: var(--color-fg);
-    border-bottom-color: var(--color-accent);
+    border-bottom-color: var(--color-fg);
   }
   .inst-tab:focus-visible {
     outline: 2px solid var(--color-fg);
