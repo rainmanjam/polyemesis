@@ -12,6 +12,7 @@ import { expect, test } from "@playwright/test";
  * indistinguishable from a broken one.
  */
 
+import { silentTrackProblem } from "../src/lib/captureGuards";
 import {
   EMPTY,
   OUT,
@@ -19,7 +20,10 @@ import {
   populated,
   settle,
   shoot,
+  snap,
+  SCENE,
   topOfFrame,
+  waitSettled,
 } from "./captureKit";
 
 test.beforeEach(async ({ page }) => {
@@ -29,6 +33,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("dashboard — the hero shot", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/");
   // The ingest has to read live before this is worth photographing: a
   // dashboard whose source says "waiting" is a picture of nothing happening.
@@ -115,20 +121,39 @@ test("dashboard — two programmes, and the lanes that divide them", async ({ pa
   // (demo-seed.sh) says "Commentary Booth — Studio B". The full-name match made
   // this shot fail on every demo-seed run, so the site's capture set was always
   // one short. Visible-only, so the closed programme picker cannot satisfy it.
-  const laneHeading = page.getByText(/Studio B/).filter({ visible: true }).first();
+  // The lane heading is an <h3 data-lane-state> (Dashboard.tsx LaneHeading).
+  // Matching the text "Studio B" alone passes on any visible element that
+  // carries it (the programme picker, a header span), which is how this shot
+  // once photographed the top of a one-programme dashboard.
+  const laneHeadings = page.locator("h3[data-lane-state]");
+  const laneHeading = laneHeadings.filter({ hasText: /Studio B/ }).first();
   await expect(
     laneHeading,
     "no lane heading for the second programme, so this is a single-programme " +
       "dashboard being photographed under a multi-programme name",
   ).toBeVisible({ timeout: 120_000 });
+  expect(await laneHeadings.count(), "fewer than two lane headings").toBeGreaterThan(1);
 
-  await topOfFrame(page, page.getByRole("heading", { name: /^Destinations/ }));
+  // Framed on the line between the two lanes: the end of the first programme's
+  // cards, the second programme's heading and its first cards.
+  await laneHeading.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+  await settle(page, 700);
+  // In the frame, and with the first lane's end above it: a heading at the very
+  // top of the window has no lane boundary over it.
+  await expect(laneHeading).toBeInViewport({ ratio: 1 });
+  const box = (await laneHeading.boundingBox())!;
+  expect(box.y, "the second lane's heading is at the top of the frame: no end of the first lane above it").toBeGreaterThan(250);
   await shoot(page, `${OUT}/19-lanes.png`, ["Waiting for a stream…", "Ingest offline"], {
-    settleMs: 700,
+    settleMs: 300,
   });
+  // The heading must still be in the frame the shutter took (shoot() waits and
+  // re-settles, and a re-layout could have moved it).
+  await expect(laneHeading).toBeInViewport({ ratio: 1 });
 });
 
 test("routing — the thing nothing else does", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/routing");
   await populated(page, EMPTY.routing);
   // Track rows are drawn from the PROBED layout, so a routing shot taken
@@ -136,7 +161,16 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // renders perfectly and demonstrates nothing.
   await expect(page.getByText("no signal")).toHaveCount(0, { timeout: 60_000 });
   await settle(page);
-  await page.screenshot({ path: `${OUT}/02-routing.png`, fullPage: false });
+  // The sports scene has six tracks, and at 900 px the sixth row (Crowd, ticked
+  // for every destination) falls below the frame. A taller window shows all six
+  // rows, the ticks and the output after routing.
+  const routingViewport = page.viewportSize()!;
+  if (SCENE === "sports") {
+    await page.setViewportSize({ width: routingViewport.width, height: 1100 });
+    await settle(page, 600);
+  }
+  await snap(page, "02-routing.png", { fullPage: false });
+  if (SCENE === "sports") await page.setViewportSize(routingViewport);
 
   // The compiled filtergraph, which is the claim this product makes about
   // being inspectable. Worth its own frame rather than being cropped out.
@@ -145,11 +179,24 @@ test("routing — the thing nothing else does", async ({ page }) => {
   await page.locator('[data-testid="routing-advanced"] summary').first().click().catch(() => {});
   await page.getByRole("button", { name: "Show FFmpeg graph" }).first().click().catch(() => {});
   const graph = page.locator("text=/pan=stereo/").first();
-  if (await graph.isVisible().catch(() => false)) {
+  const graphShown = await graph.isVisible().catch(() => false);
+  // The manifest expects this file from the sports scene, so its absence there
+  // is a failure and not a skipped frame.
+  if (SCENE === "sports") expect(graphShown, "the FFmpeg graph (pan=stereo) is not on the page").toBe(true);
+  if (graphShown) {
     await graph.scrollIntoViewIfNeeded();
     await settle(page, 400);
-    await page.screenshot({ path: `${OUT}/03-routing-filtergraph.png` });
+    await snap(page, "03-routing-filtergraph.png");
   }
+});
+
+/* The clip for the narrow column. Its own test so the sports scene, which has
+ * no music track, does not take it: docs/media/shots.json gives it the full
+ * scene. It opens the same way the routing test does. */
+test("routing — the clip for narrow columns", async ({ page }) => {
+  await page.goto("/routing");
+  await populated(page, EMPTY.routing);
+  await expect(page.getByText("no signal")).toHaveCount(0, { timeout: 60_000 });
 
   // THE HOME PAGE HERO, AS ITS OWN FRAME (UX Council S1).
   //
@@ -224,14 +271,15 @@ test("routing — the thing nothing else does", async ({ page }) => {
   // (found while re-aiming this, reported, not fixed here). A presence check
   // around the shutter cannot hold it -- it toggles faster than a screenshot
   // -- so the committed frame is one checked by eye to show all four meters.
-  await page.screenshot({
-    path: `${OUT}/02-routing-hero.png`,
+  await snap(page, "02-routing-hero.png", {
     clip: { x, y, width: vw - 12 - x, height: tail.y + tail.height + 18 - y },
   });
   await page.setViewportSize(fullViewport);
 });
 
 test("meters — loudness measured after routing", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/meters");
   // A meter reads per RUNNING destination, so this page is empty until one is
   // actually publishing -- and an empty meters page is the single most
@@ -276,10 +324,104 @@ test("meters — loudness measured after routing", async ({ page }) => {
   ).toHaveCount(0, { timeout: 60_000 });
 
   await settle(page, 800);
-  await page.screenshot({ path: `${OUT}/04-meters.png` });
+  // Five destinations' compliance rows, not two and a half: taller in the
+  // sports scene so every "PASS" row is in the frame.
+  const metersViewport = page.viewportSize()!;
+  if (SCENE === "sports") {
+    await page.setViewportSize({ width: metersViewport.width, height: 1300 });
+    await settle(page, 600);
+  }
+  await snapWithEveryTrackReading(page, "04-meters.png", 6);
+  if (SCENE === "sports") await page.setViewportSize(metersViewport);
 });
 
+/** The six per-track cards' header readings, as the page prints them. */
+async function trackReadingProblem(page: import("@playwright/test").Page, expected: number): Promise<string | null> {
+  const headers = await page
+    .locator("[data-slot=card-title]")
+    .filter({ hasText: /^Track \d+/ })
+    .evaluateAll((els) => els.map((el) => el.parentElement?.innerText ?? ""));
+  return silentTrackProblem(headers, expected);
+}
+
+/** EVERY TRACK READS A LEVEL AT THE SHUTTER, or the shot is not taken.
+ *
+ *  The synthetic commentary voices take turns (scripts/demo-sports/voices.py:
+ *  each is a burst with its own period and duty), so a frame caught between
+ *  bursts shows a track at "-∞ dBFS" with no bar, under the homepage's "Meters
+ *  on every track". This polls the page's own readings for a moment when all of
+ *  them are finite, shoots at once, and reads them again after the shutter: a
+ *  frame whose readings went silent in between leaves no file and the wait
+ *  goes on. Bounded at 90 s; past that the test fails naming the silent
+ *  tracks. It never shoots a frame with a silent track and never skips one. */
+async function snapWithEveryTrackReading(page: import("@playwright/test").Page, file: string, expected: number) {
+  const deadline = Date.now() + 90_000;
+  let polls = 0;
+  let lit = 0;
+  let shots = 0;
+  let last = "never read";
+  while (Date.now() < deadline) {
+    const problem = await trackReadingProblem(page, expected);
+    polls++;
+    if (problem !== null) {
+      last = problem;
+      await page.waitForTimeout(40);
+      continue;
+    }
+    lit++;
+    shots++;
+    const broke = await snap(page, file, { frameCheck: () => trackReadingProblem(page, expected) });
+    if (broke === null) {
+      console.log(`capture: ${file}: every track read a level at the shutter (poll ${polls}, ${lit} lit polls, ${shots} shutter(s))`);
+      return;
+    }
+    last = `${broke} after the shutter`;
+  }
+  throw new Error(
+    `${file}: no moment in 90 s when all ${expected} tracks read a level (${polls} polls, ${lit} with every track lit): ` +
+      `last problem: ${last}. Refusing to photograph a track that reads silent.`,
+  );
+}
+
+/** THE CAPTION OF 05-sources' `degraded` ALLOWANCE. The shot's manifest entry lets
+ *  the word "degraded" through the failed-state guard because the failover card
+ *  carries static help text with it ("Leave a degraded link"). This is the
+ *  screen where a REAL degraded state would also appear, so the allowance is
+ *  only honest if no source is in one: read from the API the page reads
+ *  (/sources: listenerHealth; /source: degraded) and from the badges themselves,
+ *  not from page text. */
+async function assertNoSourceDegraded(page: import("@playwright/test").Page) {
+  const states = await page.evaluate(async () => {
+    const rows = (await (await fetch("/api/v1/sources", { credentials: "same-origin" })).json()) as {
+      id: number;
+      name: string;
+      listenerHealth?: { state?: string };
+    }[];
+    const out: { name: string; listener: string; degraded: string }[] = [];
+    for (const r of rows) {
+      const info = (await (await fetch(`/api/v1/source?source=${r.id}`, { credentials: "same-origin" })).json()) as {
+        degraded?: string;
+      };
+      out.push({ name: r.name, listener: r.listenerHealth?.state ?? "", degraded: info.degraded ?? "" });
+    }
+    return out;
+  });
+  expect(states.length, "no source rows to check").toBeGreaterThan(0);
+  expect(
+    states.filter((s) => s.listener === "degraded" || s.degraded !== ""),
+    "a source is in a degraded state, so the `degraded` allowance on 05-sources is no longer only static help text",
+  ).toEqual([]);
+  // The badges the page draws for those states (sources.listenerDegraded,
+  // sources.degraded in en.json).
+  await expect(page.getByText("Partly bound", { exact: true })).toHaveCount(0);
+  await expect(page.locator("output").filter({ hasText: "Link degraded" })).toHaveCount(0);
+}
+
 test("sources — one port, many programmes", async ({ page }) => {
+  // THE FULL SCENE, NOT THE SPORTS ONE: the features page captions this image
+  // "Three programmes on one SRT port: each publishes to port 6000 with its own
+  // token". The sports scene has one source and would photograph the opposite
+  // claim; docs/media/shots.json gives this shot to the full scene.
   await page.goto("/sources");
   await populated(page, EMPTY.sources);
   // MORE THAN ONE, which is the entire claim of the page. One source renders
@@ -291,29 +433,48 @@ test("sources — one port, many programmes", async ({ page }) => {
   // themselves are one per protocol and would reach two on a single source.
   const perSource = page.locator('[data-tour="source-publish-urls"]');
   await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
-  // RE-AIMED. Each programme's card now carries its caption track and caption
-  // words above the ingest fields, so a card is about a thousand pixels tall
-  // and the 900px frame at the top of the page held the first programme's
-  // caption-word boxes and nothing else -- under a caption about three
-  // programmes on one port. Taller, and framed from the first programme's
-  // "Signal detected" and publish URL down through the second programme's
-  // whole card to the third programme's header: three programmes, two of their
-  // per-programme publish URLs, one port.
+  // THE FRAME THE FEATURES PAGE WAS SIGNED OFF WITH, sized from the page. It
+  // starts at the first programme's "Signal detected" block (thumbnail, SRT
+  // address on port 6000, PUBLISHING line and masked token whole), runs through
+  // the whole of the second programme's card, and ends just below the third
+  // programme's header line: its name and RUNNING badge, and nothing of its
+  // form. (A frame down to the third programme's own publish URLs was 5704 px
+  // tall and rendered as a wall of caption-word forms.) The window height comes
+  // from where the third card's "Caption track" label sits, the first element of
+  // its form, rather than from a number that happens to fit today.
   const fullViewport = page.viewportSize()!;
   await page.setViewportSize({ width: fullViewport.width, height: 1500 });
   const names = page.locator("[data-slot=card-title]");
   await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
+  await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBe(3);
+  const formStarts = page.getByText("Caption track", { exact: true });
+  await expect.poll(() => formStarts.count(), { timeout: 30_000 }).toBe(3);
   await topOfFrame(page, page.getByText("Signal detected").first());
   // Clear of the sticky header, which would otherwise sit on the line framed.
   await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
   await settle(page);
-  // The third programme's name has to be in the frame, or this is two.
-  const third = (await names.nth(2).boundingBox())!;
-  expect(third.y + third.height, "the third programme is below the frame").toBeLessThan(1500);
+  const thirdForm = (await formStarts.nth(2).boundingBox())!;
+  const needed = Math.ceil(thirdForm.y - 8);
+  await page.setViewportSize({ width: fullViewport.width, height: needed });
+  await settle(page, 600);
+  // Asserted AFTER the resize, which can change how far `main` can scroll, and
+  // failing rather than skipping: the first two programmes' signal, publish line
+  // and masked token, and the third programme's header, are all in the frame.
+  for (let i = 0; i < 2; i++) {
+    await expect(page.getByText("Signal detected").nth(i), `programme ${i + 1}'s signal block is not whole in the frame`).toBeInViewport({ ratio: 1 });
+    await expect(perSource.nth(i), `programme ${i + 1}'s publish address is not whole in the frame`).toBeInViewport({ ratio: 1 });
+    await expect(page.getByText(/publishing/i).nth(i), `programme ${i + 1}'s PUBLISHING line is not in the frame`).toBeInViewport({ ratio: 1 });
+    await expect(page.getByText(/^token$/i).nth(i), `programme ${i + 1}'s masked token is not in the frame`).toBeInViewport({ ratio: 1 });
+  }
+  await expect(names.nth(2), "the third programme's header is not whole in the frame").toBeInViewport({ ratio: 1 });
+  expect(thirdForm.y - 8, "the frame would include the third programme's form").toBeGreaterThan(
+    (await names.nth(2).boundingBox())!.y,
+  );
   // Masked last, right before the shutter: the resize and the scroll above
   // re-render the cards, and a re-render can put a token back.
   await maskPublishTokens(page);
-  await page.screenshot({ path: `${OUT}/05-sources.png` });
+  await assertNoSourceDegraded(page);
+  await snap(page, "05-sources.png");
   await assertNoTokenSurvived(page);
   await page.setViewportSize(fullViewport);
 });
@@ -455,7 +616,7 @@ test("renditions — the ladder, shared across destinations", async ({ page }) =
   // feature that does not exist.
   await populated(page, EMPTY.renditions);
   await settle(page);
-  await page.screenshot({ path: `${OUT}/06-renditions.png` });
+  await snap(page, "06-renditions.png");
 });
 
 test("monitoring — every process, with its own FFmpeg output", async ({ page }) => {
@@ -480,30 +641,19 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   // which is the point, and is also a picture of nothing. All shows the lines.
   await page.getByRole("button", { name: "All", exact: true }).click();
 
-  // One process's own output. The preview first: it restarts whenever a
-  // dashboard opens, so its join-time decoder warm-up is the most recent
-  // thing in the log, now as info lines rather than errors -- the case this
-  // frame exists to show honestly. The console keeps the last 800 lines across
-  // every process, so a child that started minutes ago may have scrolled out;
-  // any process that still has lines will do.
-  const empty = page.getByText("No lines match this view.", { exact: true });
-  const select = page.getByRole("combobox").filter({ hasText: /All processes|:|^preview$|^meters$/ }).first();
-  await select.click();
-  const names = (await page.getByRole("option").allInnerTexts()).filter((n) => n !== "All processes");
-  await page.keyboard.press("Escape");
-  const order = [...names.filter((n) => n === "preview"), ...names.filter((n) => n !== "preview")];
-  let shown = "";
-  for (const name of order) {
-    await select.click();
-    await page.getByRole("option", { name, exact: true }).click();
-    await settle(page, 600);
-    if ((await empty.count()) === 0) {
-      shown = name;
-      break;
-    }
-  }
-  expect(shown, "no process has any lines left in the console's log").not.toBe("");
-  await settle(page, 1500);
+  // THE FFMPEG LOG IS NOT IN THIS FRAME, and the reason is measured, not a
+  // preference. A log shows "ordinary progress" only for a process that prints
+  // some. At the server's default level a destination's FFmpeg, a loudness
+  // monitor and the playout source print NOTHING (the log reads "No lines match
+  // this view."), and the only processes with lines are the video decoders
+  // (preview, meters, the renditions), whose join-time warm-up lines
+  // ("non-existing PPS 0 referenced", "no frame!", "Last message repeated 17
+  // times") read as a failing decoder under an "ERRORS 0" chip. Raising FFmpeg's
+  // level (POLYEMESIS_FFMPEG_LOGLEVEL=info) gives the destinations lines but
+  // makes the supervisor count one error per process, which this shot must not
+  // show either. So the frame is the process list, with the log below it left
+  // out, and this asserts the log is not in what is photographed.
+  const logPane = page.locator('[class~="h-[22rem]"]');
 
   // NO FALSE ERRORS: no per-process error chip, and the log's own count at 0.
   // Asserted rather than hoped: a frame showing "N errors" on a healthy stream
@@ -530,41 +680,28 @@ test("monitoring — every process, with its own FFmpeg output", async ({ page }
   // Every running process has an uptime: the meters used to read --:--:--
   // for their whole life, because their stdout is level data and the
   // supervisor never heard that media was flowing.
-  await shoot(page, `${OUT}/07-monitoring.png`, [
-    { text: "No lines match this view.", exact: true },
-    { text: "--:--:--", exact: true },
-  ]);
+  await expect(page.getByText("--:--:--", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("No lines match this view.", { exact: true })).toHaveCount(0);
+  // The window is cut just below the process table, so the log pane is below
+  // the frame. The width and the table's position are as before: the site
+  // crops this image by percentages of its width (Why.astro .why-crop-mon),
+  // so a differently framed image would show the wrong part of the page.
+  const vp = page.viewportSize()!;
+  const table = (await processTable.boundingBox())!;
+  const logBox = (await logPane.boundingBox())!;
+  const cut = Math.ceil(table.y + table.height + 16);
+  expect(cut, "the Processes table runs into the log pane").toBeLessThanOrEqual(logBox.y);
+  await page.setViewportSize({ width: vp.width, height: cut });
+  await settle(page, 400);
+  expect(
+    (await logPane.boundingBox())!.y,
+    "the log pane is inside the photographed window",
+  ).toBeGreaterThanOrEqual(cut);
+  await snap(page, "07-monitoring.png");
+  await page.setViewportSize(vp);
   await expect(falseErrors).toHaveCount(0);
-});
-
-/* The video. One take, no cuts, following the same argument as the stills:
- * this is a live stream; here is where each destination's mix is chosen; here
- * is the graph that produces it; here is the measurement proving it.
- *
- * Deliberately slow. A tour that moves at the speed the operator can click is
- * readable; one that moves at the speed a script can navigate is a blur. */
-test("tour — dashboard to routing to meters", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.locator("nav")).toBeVisible();
-  await page.waitForTimeout(3000);
-
-  await page.goto("/routing");
-  await settle(page, 2000);
-
-  // Walk the destination list so the video shows the selections differing,
-  // which is the entire point and is invisible in a single frame.
-  const rows = page.locator("[role='tab'], button").filter({ hasText: /YouTube|Twitch|Podcast/ });
-  const n = Math.min(await rows.count(), 3);
-  for (let i = 0; i < n; i++) {
-    await rows.nth(i).click().catch(() => {});
-    await page.waitForTimeout(2200);
-  }
-
-  await page.goto("/meters");
-  await page.waitForTimeout(6000);
-
-  await page.goto("/monitoring");
-  await page.waitForTimeout(3000);
+  // The decoder lines are in the log pane only; none may be in the card.
+  expect(await processTable.innerText(), "a decoder warm-up line is inside the photographed table").not.toMatch(/no frame|non-existing/i);
 });
 
 /* ---------------------------------------------------------------- part two
@@ -576,16 +713,25 @@ test("tour — dashboard to routing to meters", async ({ page }) => {
  */
 
 test("routing mix matrix — channel-level control", async ({ page }) => {
+  // The sports scene is photographed only once every destination has settled.
+  if (SCENE === "sports") await waitSettled(page);
   await page.goto("/routing");
   await populated(page, EMPTY.routing);
   await settle(page);
-  // SELECT A DESTINATION THAT IS ALREADY IN MATRIX MODE FIRST.
+  // SPORTS: THE LAST SHOT OF THE SCENE, BY DESIGN. The shot list wants the
+  // six-track matrix for English with tracks 1 and 6 lit. English runs in simple
+  // mode, and clicking the Mix matrix tab on it would only patch an UNSAVED draft
+  // (and saving restarts a live destination). So this puts English into matrix
+  // mode through the console's own API -- the same PUT the editor's Save sends --
+  // waits for it to be live again with measured loudness, and shoots. The restart
+  // is harmless only because nothing is photographed after it: this test is the
+  // last of the sports scene in this file, and the rig is torn down next.
+  if (SCENE === "sports") await putEnglishInMatrixMode(page);
+  // FULL: SELECT A DESTINATION THAT IS ALREADY IN MATRIX MODE FIRST.
   //
-  // Clicking the tab on whichever destination happens to be selected — the
-  // first in the list, which is in simple mode — SWITCHES ITS MODE. What that
-  // photographs is a grid of zeros with an UNSAVED badge in the corner: a
-  // striking picture of a control nobody has used, on a destination this
-  // capture has just dirtied. The matrix is worth showing with numbers in it.
+  // Clicking the tab on whichever destination happens to be selected -- the
+  // first in the list, which is in simple mode -- SWITCHES ITS MODE. What that
+  // photographs is a grid of zeros with an UNSAVED badge in the corner.
   //
   // Found through the API rather than by name, so this keeps working against
   // an install that is not this fixture. Matched on a prefix because the list
@@ -596,10 +742,13 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
     const rows = (await res.json()) as { destination?: { name?: string; profile?: { mode?: string } } }[];
     return rows.find((r) => r.destination?.profile?.mode === "matrix")?.destination?.name ?? null;
   });
-  if (!matrixName) {
-    // Nothing to photograph, and saying so beats writing a picture of an empty
-    // grid that looks exactly like the feature not working.
-    test.skip(true, "no destination on this install uses the mix matrix");
+  // A missing one is a failure, never a quiet skip, and never a picture of an
+  // empty grid that looks like the feature not working.
+  expect(matrixName, "no destination on this install uses the mix matrix").not.toBeNull();
+  if (SCENE === "sports") {
+    await page.reload();
+    await populated(page, EMPTY.routing);
+    await settle(page);
   }
   await page.getByText(matrixName!.slice(0, 12), { exact: false }).first().click();
   await settle(page, 500);
@@ -610,8 +759,56 @@ test("routing mix matrix — channel-level control", async ({ page }) => {
   await expect(tab).toBeVisible({ timeout: 15_000 });
   await tab.click();
   await settle(page, 800);
-  await page.screenshot({ path: `${OUT}/08-mix-matrix.png` });
+  if (SCENE === "sports") {
+    // Six tracks, none of them UNSAVED, and the loudness measured again.
+    await expect(page.getByText(/^unsaved$/i)).toHaveCount(0);
+    // Tracks 1 and 6 lit, every other row dark: read from the grid's own cells.
+    await expect(page.getByRole("spinbutton", { name: "Track 1 channel 1 to left" })).toHaveValue("1");
+    await expect(page.getByRole("spinbutton", { name: "Track 6 channel 2 to right" })).toHaveValue("1");
+    await expect(page.getByRole("spinbutton", { name: "Track 2 channel 1 to left" })).toHaveValue("0");
+    const vp = page.viewportSize()!;
+    // Wide enough for all six tracks' L and R columns (the grid scrolls sideways
+    // at 1440), and tall enough for the grid and the save bar below it.
+    await page.setViewportSize({ width: 1800, height: 1020 });
+    await settle(page, 800);
+    await expect(page.getByRole("spinbutton", { name: "Track 6 channel 2 to right" })).toBeInViewport({ ratio: 1 });
+    await snap(page, "08-mix-matrix.png");
+    await page.setViewportSize(vp);
+    return;
+  }
+  await snap(page, "08-mix-matrix.png");
 });
+
+/** Puts the first sports destination (YouTube · English) in matrix mode with
+ *  tracks 1 (English) and 6 (Crowd) on, through PUT /destinations/{id}, then
+ *  waits until every destination is live again with measured loudness. */
+async function putEnglishInMatrixMode(page: import("@playwright/test").Page) {
+  const csrf = (await page.context().cookies()).find((c) => c.name.toLowerCase().includes("csrf"))?.value ?? "";
+  const list = await page.request.get("/api/v1/destinations");
+  expect(list.ok()).toBe(true);
+  const rows = (await list.json()) as { destination: Record<string, unknown> & { id: number; name: string } }[];
+  const english = rows.map((r) => r.destination).find((d) => d.name.endsWith("English"));
+  expect(english, "no destination named ... English on this install").toBeTruthy();
+  const profile = { ...(english!.profile as Record<string, unknown>) };
+  const tracks = profile.tracks as { track: number; enabled: boolean; gain: number }[];
+  expect(tracks.length, "the sports source has six tracks").toBeGreaterThanOrEqual(6);
+  profile.mode = "matrix";
+  profile.tracks = tracks.map((t) => ({ ...t, enabled: t.track === 0 || t.track === 5 }));
+  profile.matrix = [
+    { track: 0, channel: 0, out: 0, gain: 1 },
+    { track: 0, channel: 0, out: 1, gain: 1 },
+    { track: 5, channel: 0, out: 0, gain: 1 },
+    { track: 5, channel: 1, out: 1, gain: 1 },
+  ];
+  const res = await page.request.put(`/api/v1/destinations/${english!.id}`, {
+    data: { ...english, profile },
+    headers: { "X-CSRF-Token": csrf },
+  });
+  expect(res.ok(), `PUT of the English destination answered ${res.status()}`).toBe(true);
+  // The save restarts it; it is shot only once it has run long enough again.
+  await page.waitForTimeout(3000);
+  await waitSettled(page);
+}
 
 /* THE FIRST STUBBED SHOT, AND IT IS DECLARED RATHER THAN QUIET.
  *
@@ -726,21 +923,46 @@ test("chat — four platforms in one hub", async ({ page }) => {
       }),
   );
 
+  // THE TOAST'S CAUSE, REMOVED AT THE SOURCE. With a connected YouTube account in
+  // the stubbed overview above, the moderator card (ChatModerators.tsx) asks
+  // GET /api/v1/chat/moderators, and this install has no chat account, so the
+  // server answers with an error that the card raises as a red toast. Stubbed
+  // here the way the overview is: an empty moderator list.
+  await page.route(
+    (url) => url.pathname === "/api/v1/chat/moderators",
+    (route) => route.fulfill({ json: { moderators: [] } }),
+  );
+
   // A shorter viewport, clipped to the timeline card and its composer. At the
   // full 1440x900 the ten messages fill a third of the panel and the rest is
-  // empty space, and the side cards (moderator tools that need a live account)
-  // raise a "not connected" toast. The site shows this shot at about 600px
-  // wide, so the clip keeps the message text legible.
+  // empty space. The site shows this shot at about 600px wide, so the clip
+  // keeps the message text legible.
   await page.setViewportSize({ width: 1440, height: 720 });
   await page.goto("/chat");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/09-chat.png`, clip: { x: 180, y: 150, width: 950, height: 560 } });
+  // NO TOAST AT ALL, and none is ever closed unread: a toast that appears is a
+  // failure of this capture whose text goes into the message.
+  await page.waitForTimeout(3000);
+  expect(
+    await page.locator("[data-sonner-toast]").allInnerTexts(),
+    "the chat page raised a toast; it is not to be closed unread, find its cause",
+  ).toEqual([]);
+  await snap(page, "09-chat.png", { clip: { x: 180, y: 150, width: 950, height: 560 } });
 });
 
 test("playout — serving a player from polyemesis itself", async ({ page }) => {
   await page.goto("/playout");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/10-playout.png` });
+  // THE COMPENSATING CHECK FOR THIS SHOT'S `offline` ALLOWANCE. The manifest lets
+  // the word through because "Offline card" names a settings card. A real
+  // offline state would print the same word, so the API the page reads says
+  // whether playout is serving: the manager is wired up and enabled.
+  const view = await page.request.get("/api/v1/playout");
+  expect(view.ok(), `GET /api/v1/playout answered ${view.status()}`).toBe(true);
+  const playout = (await view.json()) as { running?: boolean; status?: { enabled?: boolean } };
+  expect(playout.running, "the playout manager is not running, so `offline` on this page may be a real state").toBe(true);
+  expect(playout.status?.enabled, "playout is not enabled, so `offline` on this page may be a real state").toBe(true);
+  await snap(page, "10-playout.png");
 });
 
 test("library — the recorded catalogue", async ({ page }) => {
@@ -763,78 +985,155 @@ test("library — the recorded catalogue", async ({ page }) => {
   // page rather than a missing letter.
   await topOfFrame(page, page.getByText(/\d+ sessions?\b/).first());
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/11-library.png` });
+  await snap(page, "11-library.png");
 });
 
 test("jobs — the post-production queue and its governor", async ({ page }) => {
   await page.goto("/jobs");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/12-jobs.png` });
+  await snap(page, "12-jobs.png");
 });
 
-test("automation — schedules and alert rules", async ({ page }) => {
+/** The schedules and alert rules the fixture seeds (demo-seed.fixture.json,
+ *  "automation"). Asserted by name, so an empty panel or a stale install fails
+ *  this shot rather than photographing "No alert rules yet". */
+const DEMO_ALERT_RULES = [
+  "Ops — #broadcast-alerts",
+  "On-call pager — critical only",
+  "Audio desk — clipping and loudness",
+  "Security log — sign-ins and tokens",
+  "Recording volume — disk watch",
+];
+const DEMO_SCHEDULES = [
+  "Weeknight show — on air 19:00",
+  "Archive — stop recording 21:30",
+  "Overnight filler — playlist from 02:00",
+  "Saturday rehearsal — on air 11:00",
+];
+
+test("automation — alert rules, with the schedules asserted on their tab", async ({ page }) => {
   await page.goto("/automation");
+  await populated(page, "No alert rules yet");
+  // The schedules live on their own tab, so one frame holds one of the two: the
+  // alert rules are shot, and the schedules are asserted here before it, so a
+  // seed that lost them fails the shot.
+  await page.getByRole("tab", { name: "Schedules" }).click();
+  for (const name of DEMO_SCHEDULES) {
+    await expect(page.getByText(name).first(), `schedule ${name} is not on the Schedules tab`).toBeVisible({ timeout: 30_000 });
+  }
+  await page.getByRole("tab", { name: "Alerts" }).click();
+  for (const name of DEMO_ALERT_RULES) {
+    await expect(page.getByText(name, { exact: true }).first(), `alert rule ${name} is not on the Alerts tab`).toBeVisible({ timeout: 30_000 });
+  }
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/13-automation.png` });
+  // A HEALTHY RIG DELIVERS NOTHING. The Delivery card must read Failed 0 and
+  // Retried 0 and hold no error box at the shutter: a failed delivery on a demo
+  // install is a rule subscribed to an event the run itself produces (the
+  // fixture's note says which are avoided). Read from the card, then asserted
+  // again after the shutter's settle by the guard's own failed-word check.
+  // CardTitle -> CardHeader -> Card.
+  const delivery = page.locator("[data-slot=card-title]", { hasText: "Delivery" }).first().locator("xpath=../..");
+  await expect(delivery, "no Delivery card").toBeVisible();
+  const counters = await delivery.innerText();
+  for (const label of ["Failed", "Retried"]) {
+    const m = new RegExp(`${label}\\s*\\n?\\s*(\\d+)`, "i").exec(counters);
+    expect(m, `the Delivery card has no ${label} count`).not.toBeNull();
+    expect(Number(m![1]), `the Delivery card reads ${label} ${m![1]}: an alert delivery failed during the run`).toBe(0);
+  }
+  await expect(delivery.getByText(/no such host|lookup|Post https?:/i), "the Delivery card holds an error box").toHaveCount(0);
+  await expect(delivery.locator('[class*="border-down"]'), "the Delivery card holds an alert box").toHaveCount(0);
+  await snap(page, "13-automation.png");
 });
 
-test("clips — the editor", async ({ page }) => {
+test("clips — the rolling buffer and a captured clip", async ({ page }) => {
   await page.goto("/clips");
+  // THE BUFFER ARMED AND A CLIP CAPTURED FROM IT: neither the "rolling buffer is
+  // off" empty state nor "No clips yet." is the picture.
+  await expect(page.getByText("The rolling buffer is off")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText("No clips yet.")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText(/clip-\d{8}-\d{6}\.ts/).first(), "no captured clip is listed").toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Holding", { exact: false }).first()).toBeVisible();
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/14-clips.png` });
+  await snap(page, "14-clips.png");
 });
 
 test("recordings — segments and retention", async ({ page }) => {
   await page.goto("/recordings");
   await populated(page, EMPTY.recordings);
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/15-recordings.png` });
+  await snap(page, "15-recordings.png");
 });
 
 test("automod — the rules, and the matrix that grants them", async ({ page }) => {
-  // The pipeline tab, because that is where the card is mounted: automod sits
-  // directly after chat retention, since retention is the depth its history
-  // checker can see.
+  // The pipeline tab, because that is where the cards are mounted: the pattern
+  // rules, the model checker, then the grant matrix ("Automatic moderation").
   await page.goto("/settings?tab=pipeline");
 
-  // The matrix is the shot. It renders every platform against every action
-  // with the cells a platform cannot do greyed and reasoned, so it is full of
-  // content whether or not anything is configured -- but an empty rule list
-  // above it would still photograph as a form nobody has used, which is why
-  // seed_demo.go writes two rules and a detector.
-  // Located by the switch the card is named for, not by a table: the matrix is
-  // a grid of divs, and the first version of this waited thirty seconds for a
-  // <table> that was never going to exist.
   const toggle = page.getByRole("switch", { name: /automatic moderation/i }).first();
   await expect.poll(() => toggle.count(), { timeout: 30_000 }).toBeGreaterThan(0);
-  await toggle.scrollIntoViewIfNeeded();
   // Seeded on, so a screenshot of it off would be a screenshot of the feature
   // switched off -- worth asserting rather than hoping.
   await expect(toggle).toBeChecked();
-  // RE-AIMED after the Settings reorganisation. The tab is a two-column grid
-  // now, and the model checker card (endpoint, instruction, confidence floor,
-  // hourly ceiling, then an action per category) is about 1800px tall, with
-  // the matrix below it. Scrolling the switch into view landed on the bottom
-  // of the model card's category dropdowns and the save bar, with neither
-  // card's purpose in frame. Framed instead on the top of the two automod
-  // cards, side by side: the seeded pattern rules and the model checker, off.
-  // The matrix is the subject of the caption's second sentence, not the frame.
-  const model = page.locator("[data-slot=card-title]", { hasText: "Model checker" }).first();
-  await topOfFrame(page, model);
-  // Clear of the tab's sticky save bar, which otherwise covers the titles.
-  await page.locator("main").evaluate((m) => m.scrollBy(0, -88));
+
+  // BOTH ARE THE SHOT, and either one missing fails it. The rules the fixture
+  // seeds (settings.automod.rules), by name, in their inputs; the matrix by a
+  // cell, which is inside a platform row and needs the Twitch row opened.
+  const rules = page.locator("[data-slot=card-title]", { hasText: "Pattern rules" }).first();
+  await expect(rules, "no Pattern rules card").toBeVisible({ timeout: 30_000 });
+  for (const name of ["Link spam", "Shouting", "Giveaway scam"]) {
+    await expect(
+      page.locator(`input[value="${name}"]`).first(),
+      `the seeded rule ${name} is not in the Pattern rules card`,
+    ).toBeVisible();
+  }
+  // A pattern the page's own check cannot compile prints a warning under it.
+  await expect(page.getByText("This pattern does not compile")).toHaveCount(0);
+  const matrix = page.locator("[data-slot=card-title]", { hasText: "Automatic moderation" }).first();
+  await expect(matrix, "no grant matrix card").toBeVisible();
+  await page.getByRole("button", { name: /^twitch \d+ automatic actions?$/i }).click();
+  // automod.cellLabel: "{checker} may {action} on {platform}".
+  const cell = page.getByRole("switch", { name: / may .* on twitch$/i }).first();
+  await expect(cell, "no grant matrix cell is visible under Twitch").toBeVisible({ timeout: 15_000 });
+
+  // A frame tall enough for the rules above and the matrix below, with the
+  // viewport scrolled so that the first rule card is at the top of it (clear of
+  // the app header and the tab's sticky save bar), and cut at the last platform
+  // row of the matrix.
+  const vp = page.viewportSize()!;
+  const main = page.locator("main");
+  await page.setViewportSize({ width: vp.width, height: 3400 });
+  await settle(page, 600);
+  await topOfFrame(page, rules);
+  await main.evaluate((m) => m.scrollBy(0, -110));
   await settle(page);
-  await expect(page.getByText("Pattern rules", { exact: true }).first()).toBeInViewport();
-  await page.screenshot({ path: `${OUT}/20-automod.png` });
+  const last = (await page.getByRole("button", { name: /^rumble /i }).boundingBox())!;
+  await page.setViewportSize({ width: vp.width, height: Math.ceil(last.y + last.height) + 40 });
+  await settle(page, 600);
+  await expect(rules).toBeInViewport({ ratio: 1 });
+  await expect(matrix).toBeInViewport({ ratio: 1 });
+  await expect(cell).toBeInViewport({ ratio: 1 });
+  await snap(page, "20-automod.png");
+  await page.setViewportSize(vp);
 });
 
 test("settings — listeners, and the one-port design in the UI", async ({ page }) => {
   await page.goto("/settings");
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/16-settings.png` });
-  // Full page as well: settings is long, and the single-viewport crop cuts off
-  // most of what the page is for.
-  await page.screenshot({ path: `${OUT}/17-settings-full.png`, fullPage: true });
+  await snap(page, "16-settings.png");
+  // THE WHOLE PAGE, not a second look at the same 900 px. <main> is the
+  // scroller, so Playwright's fullPage cannot see past the window; the window is
+  // made as tall as the page instead, and asserted to hold all of it. The page
+  // is as long as it is: Settings shows one section at a time now, so this is
+  // that section in full.
+  const vp = page.viewportSize()!;
+  const main = page.locator("main");
+  const whole = await main.evaluate((m) => m.scrollHeight + m.getBoundingClientRect().top);
+  await page.setViewportSize({ width: vp.width, height: Math.max(vp.height, Math.ceil(whole) + 16) });
+  await settle(page, 800);
+  const fits = await main.evaluate((m) => m.scrollHeight <= m.clientHeight + 1);
+  expect(fits, "the page is still taller than the window, so this is not the whole page").toBe(true);
+  await snap(page, "17-settings-full.png");
+  await page.setViewportSize(vp);
 });
 
 test("platforms — sign-in and credentials, honestly not connected", async ({ page }) => {
@@ -863,7 +1162,7 @@ test("platforms — sign-in and credentials, honestly not connected", async ({ p
   // <main> is the scroller, not the window: clear the banner of the header.
   await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/21-platforms.png` });
+  await snap(page, "21-platforms.png");
 });
 
 /* THE SECOND STUBBED SHOT, DECLARED FOR THE SAME REASON AS CHAT.
@@ -940,8 +1239,19 @@ test("platforms — connected, the end state of the one-time setup", async ({ pa
       "the stubbed accounts did not render, so this would photograph the empty state under a 'connected' name",
     ).toBeVisible({ timeout: 20_000 });
   }
+  // The LAST row opened, with its app credentials expanded: the other rows keep
+  // their Connected pills above it, and the registered app's client id (an
+  // input's value, which is why it is checked as one) and the viewer readout
+  // are on the page too.
+  const panel = page.locator("#platform-panel-facebook");
+  await connected.locator('[data-platform-row="facebook"]').getByRole("button", { name: /Manage/ }).click();
+  await panel.getByText(/App credentials/).first().click();
+  await expect(
+    panel.locator("input").first(),
+    "the opened row does not show the demo client id",
+  ).toHaveValue("demo-facebook-client-not-real", { timeout: 20_000 });
   await topOfFrame(page, page.getByText("Optional.", { exact: true }));
   await page.locator("main").evaluate((m) => m.scrollBy(0, -24));
   await settle(page, 1500);
-  await page.screenshot({ path: `${OUT}/22-platforms-connected.png` });
+  await snap(page, "22-platforms-connected.png");
 });

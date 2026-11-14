@@ -55,6 +55,10 @@ cleanup() {
     docker rm -f "$n" >/dev/null 2>&1 || true
   done
   docker network rm "$NET" >/dev/null 2>&1 || true
+  # The work directory holds secrets.tsv (the publish tokens), so it goes on
+  # EVERY exit path -- success, a failed step and a signal -- not only when the
+  # script reaches its last line.
+  command rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
 
@@ -70,10 +74,31 @@ export E2E_PASSWORD
 
 # First-run setup needs the server's one-time setup code; preset it so the
 # server started below and the seeder share it. See lib-preflight.sh.
-export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+# Generated per run, as scripts/demo-seed.sh does: a literal here is a setup
+# code committed to a public repository.
+if [ -z "${POLYEMESIS_SETUP_CODE:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate a setup code; export POLYEMESIS_SETUP_CODE yourself" >&2
+    exit 1
+  }
+  POLYEMESIS_SETUP_CODE="demo-$(openssl rand -hex 8)"
+fi
+export POLYEMESIS_SETUP_CODE
 
 echo "==> fresh data directory"
-rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
+rm -rf "$WORK"
+# Private: it will hold the admin password, the setup code and the publish tokens.
+( umask 077; mkdir -p "$WORK" )
+mkdir -p "$OUT"
+
+# The credentials this server holds, one `kind<TAB>value` per line, for the
+# capture to refuse any frame on which one is legible (ui/e2e/captureKit.ts).
+# Mode 600, in the work directory, and never printed. Tokens are appended as
+# each programme is seeded; the file exists before the first shot.
+SHOT_SECRETS_FILE="$WORK/secrets.tsv"
+export SHOT_SECRETS_FILE
+( umask 077
+  printf 'password\t%s\nsetupCode\t%s\n' "$E2E_PASSWORD" "$POLYEMESIS_SETUP_CODE" > "$SHOT_SECRETS_FILE" )
 
 # Refuse to run against a server this script did not start; otherwise the
 # seeder talks to a leftover instance with a different admin password and
@@ -89,17 +114,32 @@ fi
 echo "==> building the UI and the capture image"
 ( cd "$ROOT" && make build >/dev/null ) || { echo "make build failed"; exit 1; }
 GOARCH_LOCAL="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+# The console header prints this. A build without it reads "dev", which is not
+# a version anyone runs; the latest release tag is what demo-seed.sh stamps too.
+LANES_VERSION="${CAPTURE_VERSION:-$(cd "$ROOT" && git describe --tags --abbrev=0 2>/dev/null || echo dev)}"
+if [ "$LANES_VERSION" = dev ]; then
+  echo "no release tag found (shallow clone?): the header would read \"dev\". git fetch --tags, or set CAPTURE_VERSION." >&2
+  exit 1
+fi
 ( cd "$ROOT" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH_LOCAL" \
-    go build -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
+    go build -trimpath -ldflags "-s -w -X main.version=$LANES_VERSION" \
+    -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
   echo "cross-compile for the container failed"; exit 1; }
 docker build -q -t "$IMAGE" -f - "$WORK" >/dev/null <<'DOCKERFILE' || { echo "docker build failed"; exit 1; }
-FROM alpine:3.20
+# 3.24, as demo-seed.sh and capture-media.sh use: polyemesis refuses to start on
+# the FFmpeg 6.1 that 3.20 ships, and the server exited before the seeder's
+# first request.
+FROM alpine:3.24
 RUN apk add --no-cache ffmpeg ca-certificates
 COPY polyemesis-linux /usr/local/bin/polyemesis
 ENTRYPOINT ["/usr/local/bin/polyemesis"]
 DOCKERFILE
 
 echo "==> starting polyemesis (container) on :$PORT"
+# The seeder is built from the module (it imports internal/demorig); see
+# scripts/build-seeder.sh. Run from anywhere.
+SEEDER="$WORK/seed_demo"
+"$ROOT/scripts/build-seeder.sh" "$SEEDER" || { echo "could not build the seeder" >&2; exit 1; }
 docker network create "$NET" >/dev/null 2>&1 || true
 docker run -d --rm --name "$SRV_NAME" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "127.0.0.1:$PORT:$PORT" \
@@ -148,7 +188,7 @@ publish() {
 shoot() {
   local n="$1" name="$2"
   echo "==> confirming $n programme(s) live"
-  ( cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" waitlive ) || {
+  ( "$SEEDER" "$PORT" waitlive ) || {
     echo "the ingest never went live at $n programme(s) -- refusing to capture."
     docker logs "$SRV_NAME" 2>&1 | tail -15 || true
     exit 1
@@ -166,9 +206,10 @@ shoot() {
 # a one-programme dashboard with no destinations photographs as an install that
 # does not work rather than as the shape below the threshold.
 echo "==> seeding one programme"
-SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" solo)"
+SEEDED="$("$SEEDER" "$PORT" solo)"
 TOKEN1="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
 [ -n "$TOKEN1" ] || { echo "no publish token for the first programme"; exit 1; }
+printf 'token\t%s\n' "$TOKEN1" >> "$SHOT_SECRETS_FILE"
 
 echo "==> publishing programme 1"
 publish 1 "$TOKEN1" "testsrc2=size=1280x720:rate=30" 300 900 2000
@@ -177,8 +218,9 @@ shoot 1 "dashboard-1-programme.png"
 
 # ---------------------------------------------------------------- two
 echo "==> adding the second programme"
-TOKEN2="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" add b | sed -n 1p)"
+TOKEN2="$("$SEEDER" "$PORT" add b | sed -n 1p)"
 [ -n "$TOKEN2" ] || { echo "no publish token for the second programme"; exit 1; }
+printf 'token\t%s\n' "$TOKEN2" >> "$SHOT_SECRETS_FILE"
 echo "==> publishing programme 2, same port, different streamid"
 publish 2 "$TOKEN2" "smptebars=size=1280x720:rate=30" 440 1200
 sleep 15
@@ -186,14 +228,47 @@ shoot 2 "dashboard-2-programmes.png"
 
 # ---------------------------------------------------------------- three
 echo "==> adding the third programme"
-TOKEN3="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" add c | sed -n 1p)"
+TOKEN3="$("$SEEDER" "$PORT" add c | sed -n 1p)"
 [ -n "$TOKEN3" ] || { echo "no publish token for the third programme"; exit 1; }
+printf 'token\t%s\n' "$TOKEN3" >> "$SHOT_SECRETS_FILE"
 echo "==> publishing programme 3, same port, different streamid"
 publish 3 "$TOKEN3" "testsrc=size=1280x720:rate=30" 660 1800
 sleep 15
 shoot 3 "dashboard-3-programmes.png"
 
 rm -rf "$OUT/.playwright-lanes"
+
+# THE SAME COMPRESSION scripts/demo-seed.sh applies to its own shots (a
+# 256-colour palette, resolution unchanged): the three PNGs came out of the
+# capture at 750 KB each.
+echo "==> compressing"
+if python3 -c "import PIL" 2>/dev/null; then
+  python3 - "$OUT" <<'PY'
+import os, sys
+from PIL import Image
+before = after = 0
+for name in ("dashboard-1-programme.png", "dashboard-2-programmes.png", "dashboard-3-programmes.png"):
+    path = os.path.join(sys.argv[1], name)
+    was = os.path.getsize(path)
+    im = Image.open(path).convert("RGB")
+    # Written beside the target and renamed over it, as demo-seed.sh does: a
+    # kill mid-save leaves the old file, never a truncated one.
+    tmp = path + ".tmp"
+    try:
+        im.quantize(colors=256, method=Image.MEDIANCUT,
+                    dither=Image.FLOYDSTEINBERG).save(tmp, format="PNG", optimize=True)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    before, after = before + was, after + os.path.getsize(path)
+print(f"    {before // 1024}K -> {after // 1024}K "
+      f"({100 - 100 * after / before:.0f}% smaller, resolution unchanged)")
+PY
+else
+  echo "    skipped: python3 with Pillow not found, shots left unquantised" >&2
+fi
+
 echo
 echo "wrote:"
 for f in dashboard-1-programme.png dashboard-2-programmes.png dashboard-3-programmes.png; do

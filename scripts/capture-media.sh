@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Capture screenshots and video of a LIVE polyemesis, for the README and the
-# website.
+# Capture screenshots of a LIVE polyemesis, for the README and the website.
 #
 #   ./scripts/capture-media.sh
 #
@@ -66,7 +65,16 @@ export E2E_PASSWORD
 
 # First-run setup needs the server's one-time setup code; preset it so the
 # server started below and the seeder share it. See lib-preflight.sh.
-export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+# Generated per run, as scripts/demo-seed.sh does: a literal here is a setup
+# code committed to a public repository.
+if [ -z "${POLYEMESIS_SETUP_CODE:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate a setup code; export POLYEMESIS_SETUP_CODE yourself" >&2
+    exit 1
+  }
+  POLYEMESIS_SETUP_CODE="demo-$(openssl rand -hex 8)"
+fi
+export POLYEMESIS_SETUP_CODE
 
 # Everything this script starts is a container, so cleanup is docker's job. The
 # host-process kills that used to be here were left over from the binary-launch
@@ -78,6 +86,9 @@ cleanup() {
   pkill -f "capture-source" 2>/dev/null || true
   docker rm -f "$SRC_NAME" "$SRC2_NAME" "$SRV_NAME" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+  # The work directory holds secrets.tsv (the admin password, the setup code and
+  # the publish tokens) and the server log, so it goes on EVERY exit path.
+  if [ -n "${WORK:-}" ]; then command rm -rf "$WORK"; fi
 }
 trap cleanup EXIT INT TERM
 
@@ -85,7 +96,18 @@ command -v docker >/dev/null || { echo "docker required"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "docker is not running"; exit 1; }
 
 echo "==> fresh data directory"
-rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
+rm -rf "$WORK"
+# Private: it will hold the admin password, the setup code and the publish tokens.
+( umask 077; mkdir -p "$WORK" )
+mkdir -p "$OUT"
+
+# What the capture must refuse to show (ui/e2e/captureKit.ts requires this list
+# in every scene): `kind<TAB>value`, mode 600, never printed. Publish tokens are
+# appended once seeding has produced them.
+SHOT_SECRETS_FILE="$WORK/secrets.tsv"
+export SHOT_SECRETS_FILE
+( umask 077
+  printf 'password\t%s\nsetupCode\t%s\n' "$E2E_PASSWORD" "$POLYEMESIS_SETUP_CODE" > "$SHOT_SECRETS_FILE" )
 
 # Refuse to run against a server this script did not start. Without this the
 # seeder happily talks to a leftover instance -- different data directory,
@@ -132,16 +154,23 @@ ENTRYPOINT ["/usr/local/bin/polyemesis"]
 DOCKERFILE
 
 echo "==> starting polyemesis (container) on :$PORT"
+# The seeder is built from the module (it imports internal/demorig); see
+# scripts/build-seeder.sh. Run from anywhere.
+SEEDER="$WORK/seed_demo"
+"$ROOT/scripts/build-seeder.sh" "$SEEDER" || { echo "could not build the seeder" >&2; exit 1; }
 docker network create "$NET" >/dev/null 2>&1 || true
 docker run -d --rm --name "$SRV_NAME" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "127.0.0.1:$PORT:$PORT" \
   "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null
 
 echo "==> seeding"
-SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT")"
+SEEDED="$("$SEEDER" "$PORT")"
 RELAY="$(printf '%s\n' "$SEEDED" | sed -n 1p)"
 TOKEN="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
 TOKEN2="$(printf '%s\n' "$SEEDED" | sed -n 3p)"
+for t in "$TOKEN" "$TOKEN2"; do
+  if [ -n "$t" ]; then printf 'token\t%s\n' "$t" >> "$SHOT_SECRETS_FILE"; fi
+done
 # A relay port is a number. Anything else means the seeder failed partway and
 # printed a diagnostic, which would otherwise be handed to ffmpeg as a port.
 case "$RELAY" in
@@ -230,7 +259,7 @@ sleep 15
 # for '"live":true', from a stream that never arrived. That is exactly how an
 # earlier version of this guard declared a perfectly healthy ingest dead.
 echo "==> confirming the ingest is live before photographing it"
-if (cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" waitlive); then
+if ("$SEEDER" "$PORT" waitlive); then
   LIVE=yes
 else
   LIVE=no
@@ -247,18 +276,6 @@ echo "==> capturing"
 ( cd "$ROOT/ui" && BASE_URL="http://127.0.0.1:$PORT" \
     npx --no-install playwright test --config=e2e/capture.config.ts )
 
-# Playwright names video files by a hash, which is useless in a README.
-echo "==> collecting video"
-VID="$(find "$OUT/.playwright" -name '*.webm' -print0 2>/dev/null | xargs -0 ls -S 2>/dev/null | head -1 || true)"
-if [ -n "$VID" ]; then
-  cp "$VID" "$OUT/tour.webm"
-  # An MP4 alongside it, because GitHub will not inline a .webm in a README.
-  if ffmpeg -hide_banner -loglevel error -y -i "$VID" \
-       -c:v libx264 -pix_fmt yuv420p -movflags +faststart -an "$OUT/tour.mp4" 2>/dev/null; then
-    echo "    docs/media/tour.mp4"
-  fi
-  echo "    docs/media/tour.webm"
-fi
 rm -rf "$OUT/.playwright"
 
 # Quantise to a 256-colour palette. HERE rather than as a hand-run afterthought,

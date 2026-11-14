@@ -25,16 +25,17 @@ describe("the features page's track layout", () => {
   });
 
   it("matches the layout of the seeded install the screenshots come from", () => {
-    // plan 3 Task 11 retargets this to scripts/demo-seed.sports.fixture.json
     const fixture = JSON.parse(
-      readFileSync(join(here, "..", "..", "..", "scripts", "demo-seed.fixture.json"), "utf8"),
+      readFileSync(join(here, "..", "..", "..", "scripts", "demo-seed.sports.fixture.json"), "utf8"),
     ) as { sources: { audio: { label: string }[] }[] };
     const captured = fixture.sources[0].audio.map((a) => a.label);
     expect(
       TRACK_LAYOUT.map((t) => t.fixtureLabel),
-      "src/data/tracks.mjs no longer matches the first programme in the demo-seed fixture, so the " +
+      "src/data/tracks.mjs no longer matches the first programme in the sports demo-seed fixture (scripts/demo-seed.sports.fixture.json), so the " +
         "features page names tracks the routing screenshot does not show",
     ).toEqual(captured);
+    // The sports scene has no music track, so neither does the layout.
+    expect(TRACK_LAYOUT.some((t) => /music/i.test(t.fixtureLabel))).toBe(false);
   });
 
   it("does not end the lead with the Twitch GPU requirement", () => {

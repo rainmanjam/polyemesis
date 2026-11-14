@@ -1,0 +1,31 @@
+[0:v]format=yuv420p,
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0xd62828:x='420+90*sin(2*PI*t/17+0.0)-text_w/2':y='300+70*cos(2*PI*t/13+0.0)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0x2f74e0:x='1700+90*sin(2*PI*t/19+0.5)-text_w/2':y='430+75*cos(2*PI*t/15+0.5)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0xd62828:x='570+105*sin(2*PI*t/20+1.1)-text_w/2':y='410+70*cos(2*PI*t/15+1.1)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0x2f74e0:x='1550+102*sin(2*PI*t/21+1.4)-text_w/2':y='530+75*cos(2*PI*t/17+1.4)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0xd62828:x='720+120*sin(2*PI*t/23+2.2)-text_w/2':y='520+70*cos(2*PI*t/17+2.2)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0x2f74e0:x='1400+114*sin(2*PI*t/23+2.3)-text_w/2':y='630+75*cos(2*PI*t/19+2.3)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0xd62828:x='870+135*sin(2*PI*t/26+3.3000000000000003)-text_w/2':y='630+70*cos(2*PI*t/19+3.3000000000000003)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0x2f74e0:x='1250+126*sin(2*PI*t/25+3.2)-text_w/2':y='330+75*cos(2*PI*t/21+3.2)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0xd62828:x='1020+150*sin(2*PI*t/29+4.4)-text_w/2':y='300+70*cos(2*PI*t/21+4.4)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0x2f74e0:x='1100+138*sin(2*PI*t/27+4.1)-text_w/2':y='430+75*cos(2*PI*t/23+4.1)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0xd62828:x='1170+165*sin(2*PI*t/32+5.5)-text_w/2':y='410+70*cos(2*PI*t/23+5.5)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=46:fontcolor=0x2f74e0:x='950+150*sin(2*PI*t/29+5.0)-text_w/2':y='530+75*cos(2*PI*t/25+5.0)-text_h/2',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='●':fontsize=24:fontcolor=white:x='1056+620*sin(2*PI*t/9)-text_w/2':y='594+300*sin(2*PI*t/6.3)-text_h/2',
+  crop=1920:1080:x='96+84*sin(2*PI*t/37)':y='54+40*sin(2*PI*t/53+1)',
+  noise=alls=3:allf=t,
+  drawbox=x=56:y=44:w=740:h=76:c=black@0.74:t=fill,
+  drawbox=x=56:y=44:w=10:h=76:c=0xd62828:t=fill,
+  drawbox=x=786:y=44:w=10:h=76:c=0x2f74e0:t=fill,
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:text='HOME':fontsize=40:fontcolor=white:x=86:y=62,
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:text='1 – 0':fontsize=44:fontcolor=0xffd84a:x=250:y=59,
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:text='AWAY':fontsize=40:fontcolor=white:x=410:y=62,
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf:fontsize=40:fontcolor=white:x=600:y=62:text='%{eif\:floor((3792+t)/60)\:d}\:%{eif\:mod(floor(3792+t)\,60)\:d\:2}',
+  drawtext=fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:text='MATCH CAM 1 · MANCHESTER':fontsize=28:fontcolor=white@0.8:x=56:y=h-70,
+  format=yuv420p,realtime[v];
+aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/3.1+0.0)+0.5,0,1)*(0.55+0.45*abs(sin(2*PI*3.4*t)))*(sin(2*PI*118*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*118*t)+0.25*sin(6.2*PI*118*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a0];
+aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/2.3+0.9)+0.3,0,1)*(0.55+0.45*abs(sin(2*PI*4.1*t)))*(sin(2*PI*152*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*152*t)+0.25*sin(6.2*PI*152*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a1];
+aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/3.7+1.8)+0.7,0,1)*(0.55+0.45*abs(sin(2*PI*3.0*t)))*(sin(2*PI*186*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*186*t)+0.25*sin(6.2*PI*186*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a2];
+aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/2.7+2.7)+0.4,0,1)*(0.55+0.45*abs(sin(2*PI*4.6*t)))*(sin(2*PI*224*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*224*t)+0.25*sin(6.2*PI*224*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a3];
+aevalsrc=exprs='0.08*clip(2.5*sin(2*PI*t/4.3+3.6)+0.6,0,1)*(0.55+0.45*abs(sin(2*PI*3.7*t)))*(sin(2*PI*98*t+12*sin(2*PI*0.3*t))+0.5*sin(4*PI*98*t)+0.25*sin(6.2*PI*98*t))':sample_rate=48000:channel_layout=mono,pan=stereo|c0=c0|c1=c0,arealtime[a4];
+anoisesrc=color=pink:amplitude=0.07:sample_rate=48000,lowpass=f=3500,volume='1+2.2*pow(max(0,sin(2*PI*t/23)),8)':eval=frame,pan=stereo|c0=c0|c1=c0,arealtime[a5]

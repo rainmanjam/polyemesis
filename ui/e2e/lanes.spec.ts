@@ -68,7 +68,9 @@ test(`dashboard at ${N} programme(s)`, async ({ page }) => {
     if (i === 0 && N < 2) continue;
     if (i < N) {
       await expect(
-        page.getByText(name, { exact: false }).first(),
+        // Visible ones only: the header also carries the programme's name in a
+        // span that is hidden at this width, and .first() would pick that.
+        page.getByText(name, { exact: false }).locator("visible=true").first(),
         `no sign of ${name}, so this install is carrying fewer than the ${N} ` +
           `programmes this shot is named for`,
       ).toBeVisible({ timeout: 120_000 });

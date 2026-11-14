@@ -22,7 +22,22 @@
 //	go run scripts/demo_seed_driver.go <base> wait       <fixture>
 //	go run scripts/demo_seed_driver.go <base> finish     <fixture>
 //	go run scripts/demo_seed_driver.go <base> recordings <fixture>
+//	go run scripts/demo_seed_driver.go <base> content    <fixture>
+//	go run scripts/demo_seed_driver.go <base> clip       <fixture>
 //	go run scripts/demo_seed_driver.go <base> census     <fixture>
+//
+// The sports scene adds (see scripts/lib-demo-sports.sh); <base> is "-" for the
+// one that needs no server:
+//
+//	go run scripts/demo_seed_driver.go -      guardcontent <fixture>     (the full scene's alert URLs)
+//	go run scripts/demo_seed_driver.go -      guardfixture <fixture> <host>
+//	go run scripts/demo_seed_driver.go <base> guard        <fixture> <host>
+//	go run scripts/demo_seed_driver.go <base> routing      <fixture> <initial|final>
+//	go run scripts/demo_seed_driver.go <base> start        <fixture> <host>
+//	go run scripts/demo_seed_driver.go <base> stop         <fixture>
+//	go run scripts/demo_seed_driver.go <base> status       <fixture>
+//	go run scripts/demo_seed_driver.go <base> waitlive     <fixture> [seconds]
+//	go run scripts/demo_seed_driver.go <base> secrets      <fixture>   (stdout must be a file)
 //
 // Stdout is machine-readable, one record per line, tab-separated. Everything a
 // human reads goes to stderr, so the caller can consume the first without
@@ -37,9 +52,11 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/rainmanjam/polyemesis/internal/demorig"
 	"github.com/rainmanjam/polyemesis/internal/recording/segname"
 )
 
@@ -47,7 +64,10 @@ import (
 // creates. REQUIRED rather than defaulted for the reason scripts/seed_demo.go
 // gives: a literal here is a password in a public repository, however
 // short-lived the account it protects.
-var password = mustEnv("E2E_PASSWORD")
+//
+// Read in authenticate, not at package level: the offline commands (recordings,
+// guardfixture) must run with no credential in the environment at all.
+var password string
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)
@@ -68,6 +88,22 @@ type fixture struct {
 	// scanner indexes them, which is the only way the durations, sizes and
 	// track counts on the library page are measurements rather than assertions.
 	Recordings []fixRecording `json:"recordings"`
+	// Automation and Clips are the full scene's alert rules, schedules and
+	// rolling buffer; both are absent from the sports fixture.
+	Automation fixAutomation `json:"automation"`
+	Clips      *fixClips     `json:"clips"`
+}
+
+type fixAutomation struct {
+	AlertRules []map[string]any `json:"alertRules"`
+	Schedules  []map[string]any `json:"schedules"`
+}
+
+type fixClips struct {
+	Source         string `json:"source"`
+	WindowSeconds  int    `json:"windowSeconds"`
+	AfterSeconds   int    `json:"afterSeconds"`
+	CaptureSeconds int    `json:"captureSeconds"`
 }
 
 type fixSource struct {
@@ -117,6 +153,19 @@ type fixRecording struct {
 
 // ---------------------------------------------------------------------- main
 
+// newClient builds the HTTP client. It never follows a redirect: on a 307 or
+// 308 Go would send the same POST body (the password, on /setup and
+// /auth/login) to wherever the response points.
+func newClient(jar http.CookieJar) *http.Client {
+	return &http.Client{
+		Jar:     jar,
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 var (
 	base   string
 	client *http.Client
@@ -125,7 +174,7 @@ var (
 
 func main() {
 	if len(os.Args) < 4 {
-		die("usage: demo_seed_driver.go <base> <setup|wait|finish|recordings|census> <fixture>")
+		die("usage: demo_seed_driver.go <base> <setup|wait|finish|recordings|census|guardfixture|guard|routing|start|stop|status|waitlive|secrets> <fixture> [args...]")
 	}
 	base = strings.TrimSuffix(os.Args[1], "/") + "/api/v1"
 	cmd := os.Args[2]
@@ -137,9 +186,28 @@ func main() {
 		printRecordingPlan(fx)
 		return
 	}
+	// Same for the allow-list check on the fixture itself: it runs before any
+	// container exists, which is the point of it.
+	if cmd == "guardfixture" {
+		guardFixture(fx, argOrDie(4, "guardfixture <fixture> <host>"))
+		return
+	}
+
+	// Same for the alert-rule URLs: the full scene's first safety layer, run
+	// before any container exists.
+	if cmd == "guardcontent" {
+		guardContent(fx)
+		return
+	}
+
+	// `setup` is all --base runs, and it signs in first: the keys are checked
+	// before the driver sends anything.
+	if cmd == "setup" {
+		guardKeys(fx)
+	}
 
 	jar, _ := cookiejar.New(nil)
-	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	client = newClient(jar)
 	waitUp()
 	authenticate()
 
@@ -149,9 +217,40 @@ func main() {
 	case "wait":
 		waitPublishing(fx)
 	case "finish":
+		// "invalid" is the full scene: its destinations must all be on .invalid
+		// hosts (or files), checked again here before any row is created.
+		if len(os.Args) > 4 && os.Args[4] == "invalid" {
+			guardContent(fx)
+		}
 		finish(fx)
+	case "content":
+		content(fx)
+	case "clip":
+		captureClip(fx)
 	case "census":
 		census(fx)
+	case "guard":
+		guardLive(argOrDie(4, "guard <fixture> <host>"))
+	case "routing":
+		routeAll(fx, argOrDie(4, "routing <fixture> <initial|final>"))
+	case "start":
+		startAll(argOrDie(4, "start <fixture> <host>"))
+	case "stop":
+		stopAll()
+	case "status":
+		statusAll()
+	case "waitlive":
+		secs := 120
+		if len(os.Args) > 4 {
+			n, err := strconv.Atoi(os.Args[4])
+			if err != nil || n <= 0 {
+				die("waitlive: %q is not a positive number of seconds", os.Args[4])
+			}
+			secs = n
+		}
+		waitLive(fx, time.Duration(secs)*time.Second)
+	case "secrets":
+		printSecrets(fx)
 	default:
 		die("unknown command %q", cmd)
 	}
@@ -297,13 +396,13 @@ func createSource(s fixSource) int64 {
 		"name": s.Name, "enabled": true, "ingest": ingest,
 	})
 	if code >= 300 {
-		die("create source %q: %d %s", s.Name, code, body)
+		die("create source %q: HTTP %d (%d-byte body not shown)", s.Name, code, len(body))
 	}
 	var row struct {
 		ID int64 `json:"id"`
 	}
 	if err := json.Unmarshal(body, &row); err != nil || row.ID == 0 {
-		die("create source %q returned no id: %s", s.Name, body)
+		die("create source %q returned no id (%d-byte body not shown)", s.Name, len(body))
 	}
 	return row.ID
 }
@@ -425,6 +524,7 @@ func waitProbed(fx *fixture) []string {
 // actually arrived — so both are written once there is a layout to write them
 // against, rather than hopefully before there is one.
 func finish(fx *fixture) {
+	guardKeys(fx)
 	sources := sourcesByName()
 	rends := renditionsByName()
 	dests := destinationsByName()
@@ -445,16 +545,16 @@ func finish(fx *fixture) {
 			body["sourceId"] = sid
 			code, out := send("POST", "/renditions", body)
 			if code >= 300 {
-				die("create rendition %q: %d %s", name, code, out)
+				die("create rendition %q: HTTP %d (%d-byte body not shown)", name, code, len(out))
 			}
-			var resp struct {
+			var made struct {
 				Rendition struct {
 					ID int64 `json:"id"`
 				} `json:"rendition"`
 			}
-			decode(out, &resp)
-			rends[name] = resp.Rendition.ID
-			fmt.Fprintf(os.Stderr, "  rendition %q (id %d)\n", name, resp.Rendition.ID)
+			decode(out, &made)
+			rends[name] = made.Rendition.ID
+			fmt.Fprintf(os.Stderr, "  rendition %q (id %d)\n", name, made.Rendition.ID)
 		}
 
 		for _, d := range s.Destinations {
@@ -472,7 +572,7 @@ func finish(fx *fixture) {
 			}
 			code, out := send("POST", "/destinations", body)
 			if code >= 300 {
-				die("create destination %q: %d %s", d.Name, code, out)
+				die("create destination %q: HTTP %d (%d-byte body not shown)", d.Name, code, len(out))
 			}
 			dests[d.Name] = true
 			fmt.Fprintf(os.Stderr, "  destination %q\n", d.Name)
@@ -493,7 +593,7 @@ func reannotate(id int64, s fixSource) {
 		"name": s.Name, "enabled": true, "ingest": ingest,
 	})
 	if code >= 300 {
-		die("annotate source %d: %d %s", id, code, out)
+		die("annotate source %d: HTTP %d (%d-byte body not shown)", id, code, len(out))
 	}
 }
 
@@ -530,6 +630,219 @@ func printRecordingPlan(fx *fixture) {
 // would still pass — it would just photograph an emptier product than the one
 // this script exists to build, which is the exact failure mode
 // docs/media/README.md says the capture harness must not produce.
+// content seeds what the full scene's automation, clips and buffer pages show:
+// the alert rules and schedules, and the first programme's armed rolling buffer.
+// Idempotent by name, like everything here. The automod rules are ordinary
+// settings and travel with `setup`.
+//
+// NO HOOKS, and every alert URL goes through demorig first: the rule is refused
+// by the server without one, so it is https on a .invalid host or it is not sent.
+func content(fx *fixture) {
+	guardContent(fx)
+	for _, r := range fx.Automation.AlertRules {
+		name, _ := r["name"].(string)
+		if hasNamed("/alerts/rules", name) {
+			continue
+		}
+		mustSend("POST", "/alerts/rules", r)
+		fmt.Fprintf(os.Stderr, "  alert rule %q\n", name)
+	}
+	ids := destinationIDsByName()
+	for _, sc := range fx.Automation.Schedules {
+		name, _ := sc["name"].(string)
+		if hasNamed("/schedules", name) {
+			continue
+		}
+		body := cloneMap(sc)
+		targets, _ := body["destinations"].([]any)
+		delete(body, "destinations")
+		want := []int64{}
+		for _, t := range targets {
+			tn, _ := t.(string)
+			id, ok := ids[tn]
+			if !ok {
+				die("schedule %q targets %q, which does not exist (an empty list would mean every destination)", name, tn)
+			}
+			want = append(want, id)
+		}
+		body["destinationIds"] = want
+		mustSend("POST", "/schedules", body)
+		fmt.Fprintf(os.Stderr, "  schedule %q\n", name)
+	}
+	if c := fx.Clips; c != nil {
+		sid := clipSource(c)
+		mustSend("PUT", fmt.Sprintf("/clips/buffer?source=%d", sid), map[string]any{"enabled": true, "windowSeconds": c.WindowSeconds})
+		fmt.Fprintf(os.Stderr, "  rolling buffer armed on source %d (%d s)\n", sid, c.WindowSeconds)
+	}
+}
+
+// guardKeys refuses any key, in any object this driver sends to the server
+// from a fixture, that is not spelled exactly as demorig lists it. The server
+// matches keys ignoring case, so a guard that reads exact spellings is blind to
+// "backupurl" or "Enabled"; see demorig/keys.go. The objects taken raw from a
+// fixture are: settings (merged into PUT /settings), renditions, destinations,
+// alert rules and schedules. Sources, the rolling buffer, clips and the sign-in
+// are built from typed fields.
+func guardKeys(fx *fixture) {
+	objs := demorig.FixtureObjects{
+		Settings:   fx.Settings,
+		AlertRules: fx.Automation.AlertRules,
+		Schedules:  fx.Automation.Schedules,
+	}
+	for _, s := range fx.Sources {
+		objs.Renditions = append(objs.Renditions, s.Renditions...)
+		for _, d := range s.Destinations {
+			o := cloneMap(d.Rest)
+			if d.Rendition != "" {
+				o["rendition"] = d.Rendition
+			}
+			objs.Destinations = append(objs.Destinations, o)
+		}
+	}
+	if err := demorig.CheckFixtureObjects(objs); err != nil {
+		die("%v", err)
+	}
+}
+
+// guardContent is the full scene's first safety layer: it refuses a fixture
+// whose alert rules or destinations could reach anybody. Every alert URL must
+// pass demorig.CheckWebhookURLs and every destination demorig.CheckInvalidDestinations,
+// and a "start" schedule must name its targets, each a file destination (an
+// empty list means every destination). Run before any container exists, again
+// before the rules are sent, and again before the destinations are created.
+func guardContent(fx *fixture) {
+	guardKeys(fx)
+	var urls []demorig.WebhookRule
+	for _, r := range fx.Automation.AlertRules {
+		name, _ := r["name"].(string)
+		u, _ := r["url"].(string)
+		urls = append(urls, demorig.WebhookRule{Name: name, URL: u})
+	}
+	if err := demorig.CheckWebhookURLs(urls); err != nil {
+		die("%v", err)
+	}
+	rows := fixtureDestRows(fx)
+	if err := demorig.CheckInvalidDestinations(rows); err != nil {
+		die("%v", err)
+	}
+	kinds := map[string]string{}
+	for _, r := range rows {
+		kinds[r.Name] = r.Kind
+	}
+	var bad []string
+	for _, sc := range fx.Automation.Schedules {
+		if action, _ := sc["action"].(string); action != "start" {
+			continue
+		}
+		name, _ := sc["name"].(string)
+		targets, _ := sc["destinations"].([]any)
+		if len(targets) == 0 {
+			bad = append(bad, name+": a start schedule with no targets starts every destination")
+		}
+		for _, t := range targets {
+			tn, _ := t.(string)
+			if kinds[tn] != "file" {
+				bad = append(bad, name+": a start schedule may target file destinations only")
+				break
+			}
+		}
+	}
+	if len(bad) > 0 {
+		die("demo rig: schedules that could start a network destination: %s", strings.Join(bad, "; "))
+	}
+}
+
+func clipSource(c *fixClips) int64 {
+	id, ok := sourcesByName()[c.Source]
+	if !ok {
+		die("clips: source %q does not exist", c.Source)
+	}
+	return id
+}
+
+// captureClip waits until the buffer holds AfterSeconds of the live feed, then
+// captures one clip, unless the programme already has one. A 409 means the
+// buffer is still empty, so it retries for a minute rather than failing.
+func captureClip(fx *fixture) {
+	c := fx.Clips
+	if c == nil {
+		return
+	}
+	sid := clipSource(c)
+	listPath := fmt.Sprintf("/clips?source=%d", sid)
+	var have struct {
+		Clips []map[string]any `json:"clips"`
+	}
+	decode(getRaw(listPath), &have)
+	if len(have.Clips) > 0 {
+		fmt.Fprintf(os.Stderr, "  programme %d already has %d clip(s)\n", sid, len(have.Clips))
+		return
+	}
+	time.Sleep(time.Duration(c.AfterSeconds) * time.Second)
+	for i := 0; ; i++ {
+		code, out := send("POST", fmt.Sprintf("/clips?source=%d", sid), map[string]any{"seconds": c.CaptureSeconds})
+		if code < 300 {
+			var made struct {
+				Clip struct {
+					Name            string  `json:"name"`
+					Seconds         float64 `json:"seconds"`
+					KeyframeAligned bool    `json:"keyframeAligned"`
+				} `json:"clip"`
+			}
+			decode(out, &made)
+			// A clip taken before the buffer holds a keyframe is rough and
+			// reads as 0 s long. It is real, but it is not what the page is
+			// photographed for: delete it and take another a little later.
+			if made.Clip.KeyframeAligned && made.Clip.Seconds > 0 {
+				fmt.Fprintf(os.Stderr, "  captured a %.0f s clip\n", made.Clip.Seconds)
+				return
+			}
+			if i >= 12 {
+				die("capture clip: the buffer never produced a keyframe-aligned clip")
+			}
+			mustSend("DELETE", fmt.Sprintf("/clips/%s?source=%d", made.Clip.Name, sid), nil)
+		} else if code != http.StatusConflict || i >= 12 {
+			die("capture clip: HTTP %d (%d-byte body not shown)", code, len(out))
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// mustSend is send that dies on a refusal: the content above is what a page is
+// photographed for, so a refused row must stop the run, not scroll past.
+func mustSend(method, path string, body any) {
+	if code, out := send(method, path, body); code >= 300 {
+		die("%s %s: HTTP %d (%d-byte body not shown)", method, path, code, len(out))
+	}
+}
+
+// hasNamed reports whether the list at path already holds a row with this name.
+func hasNamed(path, name string) bool {
+	var rows []map[string]any
+	decode(getRaw(path), &rows)
+	for _, r := range rows {
+		if n, _ := r["name"].(string); n == name {
+			return true
+		}
+	}
+	return false
+}
+
+func destinationIDsByName() map[string]int64 {
+	var rows []struct {
+		Destination struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		} `json:"destination"`
+	}
+	decode(getRaw("/destinations"), &rows)
+	out := map[string]int64{}
+	for _, r := range rows {
+		out[r.Destination.Name] = r.Destination.ID
+	}
+	return out
+}
+
 func census(fx *fixture) {
 	var srcs []map[string]any
 	decode(getRaw("/sources"), &srcs)
@@ -551,6 +864,335 @@ func census(fx *fixture) {
 	fmt.Printf("renditions\t%d\t%d\n", len(rends), wantRend)
 	fmt.Printf("destinations\t%d\t%d\n", len(dsts), wantDest)
 	fmt.Printf("recordings\t%d\t%d\n", len(recs), len(fx.Recordings))
+	if len(fx.Automation.AlertRules) > 0 {
+		var rules []map[string]any
+		decode(getRaw("/alerts/rules"), &rules)
+		fmt.Printf("alert rules\t%d\t%d\n", len(rules), len(fx.Automation.AlertRules))
+		var scheds []map[string]any
+		decode(getRaw("/schedules"), &scheds)
+		fmt.Printf("schedules\t%d\t%d\n", len(scheds), len(fx.Automation.Schedules))
+	}
+	if c := fx.Clips; c != nil {
+		var have struct {
+			Clips []map[string]any `json:"clips"`
+		}
+		decode(getRaw(fmt.Sprintf("/clips?source=%d", clipSource(c))), &have)
+		fmt.Printf("clips\t%d\t%d\n", len(have.Clips), 1)
+	}
+}
+
+// --------------------------------------------------------- 6. the sports rig
+
+// The commands below drive the sports scene (one programme, five destinations
+// that publish only to a local receiver). They are small on purpose; the one
+// part that must be right, the host allow-list, is package demorig and is
+// unit-tested.
+
+func argOrDie(i int, usage string) string {
+	if len(os.Args) <= i || os.Args[i] == "" {
+		die("usage: demo_seed_driver.go <base> %s", usage)
+	}
+	return os.Args[i]
+}
+
+// fixtureDestRows maps every fixture destination to the row demorig decides on.
+func fixtureDestRows(fx *fixture) []demorig.DestRow {
+	var rows []demorig.DestRow
+	for _, s := range fx.Sources {
+		for _, d := range s.Destinations {
+			row := demorig.DestRow{Name: d.Name}
+			row.Kind, _ = d.Rest["kind"].(string)
+			row.StreamKey, _ = d.Rest["streamKey"].(string)
+			row.BackupStreamKey, _ = d.Rest["backupStreamKey"].(string)
+			row.Enabled, _ = d.Rest["enabled"].(bool)
+			row.URL, _ = d.Rest["url"].(string)
+			row.BackupURL, _ = d.Rest["backupUrl"].(string)
+			row.ExtraInputArgs, _ = d.Rest["extraInputArgs"].(string)
+			row.ExtraOutputArgs, _ = d.Rest["extraOutputArgs"].(string)
+			if _, set := d.Rest["accountId"]; set {
+				row.AccountID = new(int64)
+			}
+			row.Multitrack, _ = d.Rest["multitrack"].(bool)
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// guardFixture refuses a fixture whose destinations point anywhere but host.
+// Offline: runs before any container is started.
+func guardFixture(fx *fixture, host string) {
+	guardKeys(fx)
+	rows := fixtureDestRows(fx)
+	if len(rows) == 0 {
+		die("the fixture has no destinations to check")
+	}
+	// An enabled row starts as soon as it is created, before the stored-row
+	// check has run. The sports fixture creates every destination disabled and
+	// `start` enables them after that check.
+	for _, r := range rows {
+		if r.Enabled {
+			die("demo rig: destination %q is enabled in the fixture; it would start before the stored rows are checked", r.Name)
+		}
+	}
+	if err := demorig.CheckStored(rows, []string{host}); err != nil {
+		die("%v", err)
+	}
+	fmt.Fprintf(os.Stderr, "  fixture guard ok: %d destinations, every host is %s\n", len(rows), host)
+}
+
+// storedDest is one destination as the server holds it (the "destination" half
+// of a list or get response): the id, plus the fields demorig decides on.
+type storedDest struct {
+	ID int64 `json:"id"`
+	demorig.DestRow
+}
+
+// listStored reads GET /destinations, whose rows wrap each destination in
+// {"destination": ...}. Order is the server's list order.
+func listStored() []storedDest {
+	var rows []struct {
+		Destination storedDest `json:"destination"`
+	}
+	decode(getRaw("/destinations"), &rows)
+	out := make([]storedDest, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Destination)
+	}
+	return out
+}
+
+// guardLive is the second safety layer: it checks what the SERVER stored, not
+// what the fixture said, because those can differ (an edit in the console, a
+// reused data directory). It reads the list ONCE and returns exactly the rows
+// it checked, so a caller that starts them starts only what was guarded.
+//
+// It decides nothing itself: demorig.CheckStored refuses a host outside the
+// allow-list and any platform account, Enhanced Broadcasting flag or raw FFmpeg
+// argument, and is unit-tested.
+func guardLive(host string) []storedDest {
+	stored := listStored()
+	if len(stored) == 0 {
+		die("the server holds no destinations to check")
+	}
+	rows := make([]demorig.DestRow, 0, len(stored))
+	for _, d := range stored {
+		rows = append(rows, d.DestRow)
+	}
+	if err := demorig.CheckStored(rows, []string{host}); err != nil {
+		die("%v", err)
+	}
+	fmt.Fprintf(os.Stderr, "  guard ok: %d stored destinations, every host is %s\n", len(rows), host)
+	return stored
+}
+
+// routeAll sets every fixture destination's track selection. "initial": all
+// tracks at gain 1.0. "final": for the destination at position i, the i-th
+// commentary track plus every track that is not commentary (the crowd bed).
+// Only profile.tracks changes; the rest of what GET returned is sent back as it was.
+func routeAll(fx *fixture, state string) {
+	if state != "initial" && state != "final" {
+		die("routing: unknown state %q (want initial or final)", state)
+	}
+	ids := map[string]int64{}
+	for _, d := range listStored() {
+		ids[d.Name] = d.ID
+	}
+	for _, s := range fx.Sources {
+		var commentary []int
+		for i, a := range s.Audio {
+			if a.Role == "commentary" {
+				commentary = append(commentary, i)
+			}
+		}
+		for pos, d := range s.Destinations {
+			id, ok := ids[d.Name]
+			if !ok {
+				die("routing: destination %q is not on the server", d.Name)
+			}
+			on := map[int]bool{}
+			for i := range s.Audio {
+				on[i] = state == "initial"
+			}
+			if state == "final" {
+				if pos >= len(commentary) {
+					die("routing: destination %q is number %d but %q has only %d commentary tracks", d.Name, pos+1, s.Name, len(commentary))
+				}
+				for i, a := range s.Audio {
+					on[i] = a.Role != "commentary" || i == commentary[pos]
+				}
+			}
+			tracks := make([]map[string]any, 0, len(s.Audio))
+			for i := range s.Audio {
+				tracks = append(tracks, map[string]any{"track": i, "enabled": on[i], "gain": 1.0})
+			}
+			body, _ := get(fmt.Sprintf("/destinations/%d", id))["destination"].(map[string]any)
+			if body == nil {
+				die("routing: GET /destinations/%d returned no destination", id)
+			}
+			profile, _ := body["profile"].(map[string]any)
+			if profile == nil {
+				profile = map[string]any{}
+				body["profile"] = profile
+			}
+			profile["tracks"] = tracks
+			put(fmt.Sprintf("/destinations/%d", id), body)
+			fmt.Fprintf(os.Stderr, "  %s: routing %s\n", d.Name, state)
+		}
+	}
+}
+
+// startAll starts every destination, one at a time, after re-checking what the
+// server stored. Never the bulk route, which would skip the guard
+// between rows.
+//
+// The rows come from guardLive's single read. The destinations are left
+// enabled: a server restart would start them again WITHOUT this guard, and only
+// the internal Docker network (no route off the machine) covers that case. The
+// rig's --down removes everything.
+func startAll(host string) {
+	for _, d := range guardLive(host) {
+		path := fmt.Sprintf("/destinations/%d", d.ID) + "/start"
+		if code, out := send("POST", path, map[string]any{}); code >= 300 {
+			die("start %q: HTTP %d (%d-byte body not shown)", d.Name, code, len(out))
+		}
+		fmt.Fprintf(os.Stderr, "  started %s\n", d.Name)
+	}
+}
+
+// stopAll stops every destination. The confirmation is sent although the
+// per-destination route does not ask for it: stop-all does, and a caller that
+// always says it means it never trips either.
+func stopAll() {
+	for _, d := range listStored() {
+		path := fmt.Sprintf("/destinations/%d", d.ID) + "/stop"
+		if code, out := send("POST", path, map[string]any{"confirm": true}); code >= 300 {
+			die("stop %q: HTTP %d (%d-byte body not shown)", d.Name, code, len(out))
+		}
+		fmt.Fprintf(os.Stderr, "  stopped %s\n", d.Name)
+	}
+}
+
+// liveStatus is the part of GET /status the rig reads.
+type liveStatus struct {
+	Destinations []struct {
+		ID      int64  `json:"id"`
+		Name    string `json:"name"`
+		Enabled bool   `json:"enabled"`
+		Process *struct {
+			State    string `json:"state"`
+			Progress struct {
+				Frame int64   `json:"frame"`
+				FPS   float64 `json:"fps"`
+			} `json:"progress"`
+		} `json:"process"`
+	} `json:"destinations"`
+	Loudness []struct {
+		DestinationID int64   `json:"destinationId"`
+		Mix           string  `json:"mix"`
+		Seconds       float64 `json:"seconds"`
+		Momentary     float64 `json:"momentaryLufs"`
+		Verdict       string  `json:"verdict"`
+	} `json:"loudness"`
+}
+
+// readStatus reads GET /status, which answers for the DEFAULT engine only. The
+// sports scene has one programme, so that is the whole install; do not use it
+// for the multi-programme fixture.
+func readStatus() liveStatus {
+	var st liveStatus
+	decode(getRaw("/status"), &st)
+	return st
+}
+
+// liveLoudness picks each destination's live-mix report (a report with no mix is the live one).
+func (st liveStatus) liveLoudness(id int64) (seconds, momentary float64, verdict string, ok bool) {
+	for _, l := range st.Loudness {
+		if l.DestinationID == id && (l.Mix == "" || l.Mix == "live") {
+			return l.Seconds, l.Momentary, l.Verdict, true
+		}
+	}
+	return 0, 0, "", false
+}
+
+// statusAll prints one line per destination: name, enabled, state, fps,
+// momentary LUFS and the loudness verdict.
+func statusAll() {
+	st := readStatus()
+	for _, d := range st.Destinations {
+		state, fps := "off", 0.0
+		if d.Process != nil {
+			state, fps = d.Process.State, d.Process.Progress.FPS
+		}
+		lufs, verdict := "-", "-"
+		if sec, m, v, ok := st.liveLoudness(d.ID); ok && sec > 0 {
+			lufs, verdict = strconv.FormatFloat(m, 'f', 1, 64), v
+		}
+		fmt.Printf("%s\tenabled=%t\t%s\tfps=%.1f\tmomentary=%s\tverdict=%s\n", d.Name, d.Enabled, state, fps, lufs, verdict)
+	}
+}
+
+// waitLive blocks until every fixture destination is running, has output
+// frames and has a measured momentary loudness; it dies naming the laggards.
+// GET /status is the default engine's, which is every destination here.
+func waitLive(fx *fixture, timeout time.Duration) {
+	want := map[string]bool{}
+	for _, s := range fx.Sources {
+		for _, d := range s.Destinations {
+			want[d.Name] = true
+		}
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		st := readStatus()
+		ready := map[string]bool{}
+		for _, d := range st.Destinations {
+			sec, _, _, measured := st.liveLoudness(d.ID)
+			if d.Process != nil && d.Process.State == "running" && d.Process.Progress.Frame > 0 && measured && sec > 0 {
+				ready[d.Name] = true
+			}
+		}
+		var lag []string
+		for _, s := range fx.Sources {
+			for _, d := range s.Destinations {
+				if !ready[d.Name] {
+					lag = append(lag, d.Name)
+				}
+			}
+		}
+		if len(lag) == 0 {
+			fmt.Fprintf(os.Stderr, "  %d/%d destinations live with measured loudness\n", len(want), len(want))
+			return
+		}
+		if time.Now().After(deadline) {
+			die("not live with measured loudness after %s: %s", timeout, strings.Join(lag, ", "))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+// printSecrets writes "<kind>\t<value>" lines for the credentials the capture
+// must keep out of every screenshot: each programme's publish token (read from
+// the server) and each destination's stream key (from the fixture). It refuses
+// a terminal, so the values can only go to a file the caller chose.
+func printSecrets(fx *fixture) {
+	// A regular file only: not a terminal, and not a pipe either, because
+	// `| less` would show them.
+	if fi, err := os.Stdout.Stat(); err != nil || fi.Mode()&os.ModeCharDevice != 0 || !fi.Mode().IsRegular() {
+		die("secrets writes credentials; redirect stdout to a file (mode 600), not a terminal or a pipe")
+	}
+	ids := sourcesByName()
+	for _, s := range fx.Sources {
+		row := getSource(ids[s.Name])
+		if token, _ := row["token"].(string); token != "" {
+			fmt.Printf("token\t%s\n", token)
+		}
+		for _, d := range s.Destinations {
+			if key, _ := d.Rest["streamKey"].(string); key != "" {
+				fmt.Printf("streamkey\t%s\n", key)
+			}
+		}
+	}
 }
 
 // ----------------------------------------------------------------- inventory
@@ -632,18 +1274,19 @@ func waitUp() {
 // authenticate handles first run and returning user alike, because re-seeding a
 // still-running demo has to work: adjusting a shot is something you do twice.
 func authenticate() {
+	password = mustEnv("E2E_PASSWORD")
 	if setupNeeded() {
 		if code, out := send("POST", "/setup", map[string]any{
 			"username": "admin", "password": password,
 			"setupCode": os.Getenv("POLYEMESIS_SETUP_CODE"),
 		}); code >= 300 {
-			die("first-run setup: %d %s", code, out)
+			die("first-run setup: HTTP %d (%d-byte body not shown)", code, len(out))
 		}
 	} else if code, out := send("POST", "/auth/login", map[string]any{
 		"username": "admin", "password": password,
 	}); code >= 300 {
-		die("sign in: %d %s (a stale data directory from an earlier run has a "+
-			"different password; remove it, or pass --reset)", code, out)
+		die("sign in: HTTP %d, %d-byte body not shown (a stale data directory from an earlier run has a "+
+			"different password; remove it, or pass --reset)", code, len(out))
 	}
 	grabCSRF()
 }
@@ -674,7 +1317,12 @@ func grabCSRF() {
 	}
 }
 
+// lastRequest names the most recent request for failure messages that have
+// nothing else to say about where a response came from.
+var lastRequest string
+
 func getRaw(path string) []byte {
+	lastRequest = "GET " + path
 	r, err := client.Get(base + path)
 	if err != nil {
 		die("GET %s: %v", path, err)
@@ -682,7 +1330,7 @@ func getRaw(path string) []byte {
 	defer r.Body.Close()
 	b, _ := io.ReadAll(r.Body)
 	if r.StatusCode >= 300 {
-		die("GET %s: %d %s", path, r.StatusCode, strings.TrimSpace(string(b)))
+		die("GET %s: HTTP %d (%d-byte body not shown)", path, r.StatusCode, len(b))
 	}
 	return b
 }
@@ -694,21 +1342,16 @@ func get(path string) map[string]any {
 }
 
 func decode(b []byte, into any) {
-	if err := json.Unmarshal(b, into); err != nil {
-		die("decode response: %v (%s)", err, truncate(string(b)))
+	if json.Unmarshal(b, into) != nil {
+		// Neither the body nor the parser's message: either can quote content,
+		// and a destination list begins with a stream key.
+		die("decode response to %s: unexpected shape (%d bytes)", lastRequest, len(b))
 	}
-}
-
-func truncate(s string) string {
-	if len(s) > 200 {
-		return s[:200] + "…"
-	}
-	return s
 }
 
 func put(path string, body any) {
 	if code, out := send("PUT", path, body); code >= 300 {
-		die("PUT %s: %d %s", path, code, out)
+		die("PUT %s: HTTP %d (%d-byte body not shown)", path, code, len(out))
 	}
 }
 
@@ -716,6 +1359,7 @@ func put(path string, body any) {
 // callers differ: a duplicate name on a re-run is expected, a rejected profile
 // is fatal, and only the caller knows which it asked for.
 func send(method, path string, body any) (int, []byte) {
+	lastRequest = method + " " + path
 	b, err := json.Marshal(body)
 	if err != nil {
 		die("encode %s %s: %v", method, path, err)

@@ -68,6 +68,9 @@ presentation/
 # because that is where the harness writes — so it is one `git add -A` away
 # from history unless it is named here.
 docs/media/.playwright/
+docs/media/.playwright-lanes/
+# The compression step's temp files (a kill mid-save leaves one).
+docs/media/*.tmp
 
 # The built site. `/dist/` above is root-anchored and does not cover it, so
 # without this line web/dist ships a second copy of every screenshot and the
@@ -144,3 +147,24 @@ brag-output/
 
 # Python bytecode, e.g. from running integrations/obs/polyemesis_obs.py.
 __pycache__/
+
+# Stream Deck + model: Elgato's STP and the 14 MB intermediate deck.glb are not
+# ours to distribute (see web/scripts/stream-deck-model/README.md).
+/web/scripts/stream-deck-model/work/
+*.stp
+*.step
+/web/scripts/stream-deck-model/**/*.glb
+
+# The tour's source lives in scripts/tour/; what it records and renders does not
+# (raw captures are about 1.2 GB, the trimmed clips about 32 MB). HyperFrames
+# writes AGENTS.md and CLAUDE.md into its project folder; they are generated.
+/scripts/tour/raw/
+/scripts/tour/out/
+/scripts/tour/check/
+/scripts/tour/edit.json
+/scripts/tour/hf/assets/
+/scripts/tour/hf/node_modules/
+/scripts/tour/hf/AGENTS.md
+/scripts/tour/hf/CLAUDE.md
+/scripts/tour/hf/.hyperframes/
+/scripts/tour/__pycache__/

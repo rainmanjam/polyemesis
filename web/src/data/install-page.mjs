@@ -76,6 +76,6 @@ export const FIRST_RUN = [
   {
     title: "Go live",
     text: "With OBS recording, the dashboard shows the ingest live within a couple of seconds, with a meter per incoming track. Start your destination and the dashboard reads ON AIR. Video is copied, so each extra destination costs almost nothing.",
-    shot: { file: "01-dashboard.png", alt: "The dashboard on air, with the ingest live and a meter per track", chrome: "Dashboard: on air, ingest live" },
+    shot: { file: "01-dashboard.png", alt: "The dashboard on air: five destinations live, and the ingest live with its six audio tracks", chrome: "Dashboard: on air, ingest live" },
   },
 ];

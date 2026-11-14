@@ -1,11 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { titlesFor } from "./shotManifest";
+
+// "sports" or "full"; docs/media/shots.json says which tests belong to which.
+const scene = process.env.SHOT_SCENE === "sports" ? "sports" : "full";
+
 /* Media capture, not a test suite.
  *
  * Separate from playwright.config.ts on purpose. That config is a gate: it
  * fails builds, runs in CI, and its screenshots exist only to explain a
  * failure. This one produces artefacts a human puts in a README, so it wants
- * the opposite settings — a retina scale factor, video on for every run, a
+ * the opposite settings — a retina scale factor, a
  * generous timeout because it waits for real audio to move a real meter, and
  * no place in CI at all.
  *
@@ -27,10 +32,8 @@ export default defineConfig({
   timeout: 180_000,
   expect: { timeout: 20_000 },
   reporter: [["list"]],
-  // Beside the stills, wherever those are going. Playwright drops the tour
-  // video in here and the caller collects it from the same place it collects
-  // the PNGs; a fixed path would leave the video of one run sitting next to the
-  // screenshots of another.
+  // Beside the stills, wherever those are going, so one run's scratch files do
+  // not sit in another run's output.
   outputDir: `${process.env.SHOT_DIR ?? "../../docs/media"}/.playwright`,
   use: {
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:8099",
@@ -45,12 +48,13 @@ export default defineConfig({
     // ultrawide nobody has.
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
-    video: {
-      mode: "on",
-      // Video ignores deviceScaleFactor, so its size is set independently.
-      // 1280x800 keeps the 16:10 shape of the stills.
-      size: { width: 1280, height: 800 },
-    },
+    // The screenshots are dark: a capture on a light-mode machine must not
+    // photograph the other theme. System Chrome, not the bundled Chromium, so
+    // the fonts and rendering are those of the browser people actually use.
+    colorScheme: "dark",
+    channel: "chrome",
+    // No video: it existed only for the tour test, which is gone.
+    video: "off",
   },
   projects: [
     { name: "setup", testMatch: /auth\.setup\.ts/ },
@@ -58,6 +62,10 @@ export default defineConfig({
       name: "capture",
       dependencies: ["setup"],
       testMatch: /capture\.spec\.ts/,
+      // The scene filter belongs here, not at the top level: a top-level grep
+      // also filters the setup project's "authenticate" test out, so no session
+      // is written and every shot dies on a missing e2e/.auth/state.json.
+      grep: titlesFor(scene),
       use: { storageState: "e2e/.auth/state.json" },
     },
   ],

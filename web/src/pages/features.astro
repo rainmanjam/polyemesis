@@ -18,13 +18,10 @@ import { TRACK_LAYOUT } from "../data/tracks.mjs";
 import { SCREENS, LEAD, ROOMS, INPUTS, FAILOVER_FACTS, CHAT_FACTS, RECORDING_VERBS, DECK_FACTS, ALSO } from "../data/features.mjs";
 import { splitAccent } from "../lib/accent";
 
-/* "track 1 is the host mic, track 2 is the co-host mic, ... and track 4 is the
- * room." Built from the shared layout so the sentence cannot name a track the
- * capture does not have. */
+/* "1 English, 2 Español, ... and 6 Crowd." Built from the shared layout so the
+ * sentence cannot name a track the capture does not have. */
 const LAYOUT_SENTENCE =
-  TRACK_LAYOUT.map(
-    (t, i) => `${i === TRACK_LAYOUT.length - 1 ? "and " : ""}track ${t.id} is the ${t.name.toLowerCase()}`,
-  ).join(", ") + ".";
+  TRACK_LAYOUT.map((t, i) => `${i === TRACK_LAYOUT.length - 1 ? "and " : ""}${t.id} ${t.name}`).join(", ") + ".";
 
 const shot = (id: string) => SCREENS.find((s) => s.id === id)!;
 const [leadBefore, leadWord, leadAfter] = splitAccent(LEAD.heading, LEAD.accent);

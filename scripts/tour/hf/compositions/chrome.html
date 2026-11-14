@@ -1,0 +1,36 @@
+<template>
+  <style>
+    @font-face { font-family: "JetBrains Mono"; src: url("assets/fonts/jetbrains-mono.woff2") format("woff2"); font-weight: 100 800; }
+    #root { position: absolute; inset: 0; }
+    #hscrim { position: absolute; left: 250px; top: 0; width: 1000px; height: 78px; background: linear-gradient(90deg, rgba(7,8,10,0.62) 0%, rgba(7,8,10,0.62) 55%, rgba(7,8,10,0) 100%); }
+    .lab { position: absolute; left: 290px; top: 9px; transform-origin: 0 0; font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 22px;
+      line-height: 26px; letter-spacing: 0.04em; color: #ece9e2; white-space: nowrap; }
+    #prog { position: absolute; left: 290px; top: 42px; width: 408px; height: 3px; display: flex; gap: 8px; }
+    .seg { position: relative; flex: 1; height: 3px; background: rgba(236,233,226,0.22); border-radius: 2px; overflow: hidden; }
+    .fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #ece9e2; transform-origin: 0 0; transform: scaleX(0); }
+  </style>
+  <div id="root" data-composition-id="chrome" data-width="1920" data-height="1080">
+    <div id="hscrim" class="clip" data-start="0" data-duration="94.7"></div>
+    <div id="lab0" class="clip lab" data-start="0.15" data-duration="22.35">01 · ONE STREAM IN</div>
+    <div id="lab1" class="clip lab" data-start="22.25" data-duration="37.25">02 · SPLITTING THE AUDIO</div>
+    <div id="lab2" class="clip lab" data-start="59.25" data-duration="35.45">03 · GOING LIVE EVERYWHERE</div>
+    <div id="prog" class="clip" data-start="0" data-duration="94.7"><div class="seg"><div id="fill0" class="fill"></div></div><div class="seg"><div id="fill1" class="fill"></div></div><div class="seg"><div id="fill2" class="fill"></div></div></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const CS = [0.0, 22.2, 59.2], ENDS = [22.2, 59.2, 94.4];
+    gsap.set("#prog", { opacity: 0 });
+    CS.forEach((c, i) => {
+      const a = i === 0 ? 0.15 : c + 0.35;
+      gsap.set("#lab" + i, { opacity: 0, scale: 2.3 });
+      tl.fromTo("#lab" + i, { opacity: 0, scale: 2.3 }, { opacity: 1, scale: 2.3, duration: 0.3, ease: "power2.out", immediateRender: false }, a);
+      tl.fromTo("#lab" + i, { scale: 2.3 }, { scale: 1, duration: 0.7, ease: "power2.inOut", immediateRender: false }, a + 1.2);
+      tl.fromTo("#lab" + i, { opacity: 1 }, { opacity: 0, duration: 0.3, ease: "power2.in", immediateRender: false }, ENDS[i]);
+      tl.fromTo("#prog", { opacity: 1 }, { opacity: 0, duration: 0.15, immediateRender: false }, i === 0 ? 0.1 : c + 0.1);
+      tl.fromTo("#prog", { opacity: 0 }, { opacity: 1, duration: 0.3, immediateRender: false }, a + 1.9);
+      tl.fromTo("#fill" + i, { scaleX: 0 }, { scaleX: 1, duration: ENDS[i] - c, ease: "none", immediateRender: false }, c);
+    });
+    tl.fromTo("#prog", { opacity: 1 }, { opacity: 0, duration: 0.3, immediateRender: false }, ENDS[2]);
+    window.__timelines["chrome"] = tl;
+  </script>
+</template>
