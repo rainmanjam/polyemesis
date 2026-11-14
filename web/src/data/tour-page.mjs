@@ -21,12 +21,17 @@
  *    dropped and duplicated frames); the Routing page's output loudness
  *    "measured as it leaves" for each destination.
  *
+ * Each chapter has two kinds of text. `facts` are product statements, each tied
+ * to a doc. `film` sentences (P4-R15) describe only what the chapter's frames
+ * show and no doc states: each starts "On screen," or quotes a caption as
+ * `The caption reads "..."`, and claims no capability beyond what is on screen.
+ *
  * @typedef {import("../lib/facts").Fact} Fact */
 
 export const TOUR_ROUTE = "/tour";
 
 /** @type {{ title: string, description: string, heading: string, accent: string, lede: string,
- *   filmedVersion: string, notes: { facts: Fact[], docs: string[] }[] }} */
+ *   filmedVersion: string, notes: { film: string[], facts: Fact[], docs: string[] }[] }} */
 export const TOUR_PAGE = {
   title: "Video tour of the polyemesis console",
   description:
@@ -38,6 +43,10 @@ export const TOUR_PAGE = {
   filmedVersion: "0.18.0",
   notes: [
     {
+      film: [
+        "On screen, the Ingest panel reads Live with six audio tracks and an SRT address on the same machine, then the Routing page shows one meter for each track.",
+        'The caption reads "Five languages and the crowd. Each on its own track."',
+      ],
       facts: [
         {
           text: "The feed arrives as one SRT stream, which carries every audio track together.",
@@ -60,6 +69,10 @@ export const TOUR_PAGE = {
       docs: ["obs", "quickstart", "install"],
     },
     {
+      film: [
+        "On screen, every destination starts with every track ticked, the tracks for one destination are switched off, and the overview ends with one language per destination and the crowd on all five.",
+        'On screen, a bar under the routing reads "Nothing is applied until you save" while the change is unsaved.',
+      ],
       facts: [
         {
           text: "The tracks are labelled once, for the feed, so every destination sees the same names.",
@@ -82,6 +95,12 @@ export const TOUR_PAGE = {
       docs: ["audio-routing", "quickstart"],
     },
     {
+      film: [
+        "On screen, a Go live sheet lists the five destinations as Ready, each with the audio tracks it carries, and starts them together.",
+        "On screen, each row moves from Not started to Starting to Live, and the dashboard then reads On air with 5 live and all 5 running destinations healthy.",
+        'The caption reads "One click starts all five."',
+        "On screen, each destination's Routing page then shows the loudness of its output, with the caption \"Each channel's own mix, measured on the way out.\"",
+      ],
       facts: [
         {
           text: "Video is copied, not re-encoded: each destination's card reads source, copied for its video.",
@@ -102,7 +121,7 @@ export const TOUR_PAGE = {
           anchor: "7-watch-that-it-is-actually-right",
         },
       ],
-      docs: ["connecting-platforms", "platforms", "monitoring"],
+      docs: ["monitoring", "quickstart", "audio-routing"],
     },
   ],
 };

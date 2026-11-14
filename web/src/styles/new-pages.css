@@ -206,3 +206,17 @@
   line-height: 1.6;
   color: var(--color-muted);
 }
+
+/* The tour page: the player block sits in the page column, so the chapter list
+ * stacks under the video at every width (the homepage's side-by-side layout
+ * needs the full page width). */
+.inner-main .tour {
+  margin-top: 20px;
+}
+.inner-main .tour .tour-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+.inner-main .tour + .fact {
+  margin-top: 24px;
+}

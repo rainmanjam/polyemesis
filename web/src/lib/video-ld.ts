@@ -6,21 +6,10 @@
  * none of those. */
 import type { TOUR } from "../data/tour.mjs";
 
-/** Seconds as an ISO 8601 duration, fractions of a second dropped: 90 -> "PT1M30S", 0 -> "PT0S". */
-export function isoDuration(seconds: number): string {
-  const whole = Math.floor(seconds);
-  const h = Math.floor(whole / 3600);
-  const m = Math.floor((whole % 3600) / 60);
-  const s = whole % 60;
-  if (!h && !m && !s) return "PT0S";
-  return `PT${h ? `${h}H` : ""}${m ? `${m}M` : ""}${s ? `${s}S` : ""}`;
-}
-
-/** Seconds as m:ss, rounded down: 65 -> "1:05". */
-export function clock(seconds: number): string {
-  const whole = Math.floor(seconds);
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
-}
+/* One implementation of both formats, shared with the player block
+ * (data/tour.mjs), so the bar's "1:38" and the markup's PT1M38S cannot drift. */
+export { clock, isoDuration } from "../data/tour.mjs";
+import { isoDuration } from "../data/tour.mjs";
 
 export interface VideoLdInput {
   site: string;

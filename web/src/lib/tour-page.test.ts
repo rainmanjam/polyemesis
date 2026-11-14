@@ -14,7 +14,8 @@ const readDoc = (slug: string): string | undefined => {
   return doc ? readFileSync(here(`../../../docs/${doc.file}`), "utf8") : undefined;
 };
 const page = readFileSync(here("../pages/tour.astro"), "utf8");
-const notes = TOUR_PAGE.notes as { facts: Fact[]; docs: string[] }[];
+const notes = TOUR_PAGE.notes as { facts: Fact[]; film: string[]; docs: string[] }[];
+const tourBlock = readFileSync(here("../components/home/Tour.astro"), "utf8");
 
 describe("TOUR_PAGE", () => {
   it("is the /tour page, filmed on 0.18.0", () => {
@@ -44,6 +45,51 @@ describe("TOUR_PAGE", () => {
   it("does not say what the film cannot show", () => {
     const text = JSON.stringify(notes);
     expect(text).not.toMatch(/real (platform|channel)|connected a|goes? live on youtube/i);
+  });
+});
+
+describe("the film sentences (P4-R15)", () => {
+  it("every chapter has some, each saying it is what the film shows", () => {
+    for (const n of notes) {
+      expect(n.film.length).toBeGreaterThanOrEqual(1);
+      for (const f of n.film) expect(f, f).toMatch(/^(On screen,|The caption reads ")/);
+    }
+  });
+
+  it("link no doc and name no product capability by citing one", () => {
+    for (const n of notes) for (const f of n.film) expect(f).not.toMatch(/\/docs|https?:|\.md\b/);
+  });
+
+  it("say that chapter 3 goes live", () => {
+    expect(notes[2].film.some((f) => /live/i.test(f))).toBe(true);
+  });
+
+  it("quote a caption exactly as the film shows it", () => {
+    const captions = notes.flatMap((n) => n.film).filter((f) => f.startsWith("The caption reads"));
+    expect(captions).toContain('The caption reads "One click starts all five."');
+  });
+});
+
+describe("what the page says about the film", () => {
+  it("says the destinations are a demo, as docs/media/README.md describes the rig (P4-R16)", () => {
+    expect(page).toContain(
+      "The tour was filmed on a demo install: its five destinations are labelled as YouTube channels and publish to a local receiver, not to YouTube.",
+    );
+  });
+
+  it("does not claim the chapter text repeats the captions", () => {
+    expect(page).not.toContain("say the same in text");
+    expect(page).toContain("the sections below describe each chapter in text");
+  });
+
+  it("keeps the player's own attributes", () => {
+    for (const s of ["controls", 'preload="none"', "poster={TOUR.poster}"]) expect(tourBlock).toContain(s);
+  });
+
+  it("leaves the player's wrap out inside the page column, and keeps it by default", () => {
+    expect(tourBlock).toContain('wrap ? "wrap tour" : "tour"');
+    expect(tourBlock).toMatch(/wrap = true/);
+    expect(page).toContain("<Tour wrap={false} />");
   });
 });
 

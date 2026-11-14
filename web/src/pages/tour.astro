@@ -42,9 +42,10 @@ const ld = videoLd({
 
   <section id="watch">
     <h2>Watch</h2>
-    <Tour />
+    <Tour wrap={false} />
     <p class="fact">Filmed on v{filmed.version}, released {filmed.date}.</p>
-    <p class="fact">There is no voiceover. The captions on screen say what each step does, and the sections below say the same in text.</p>
+    <p class="fact">The tour was filmed on a demo install: its five destinations are labelled as YouTube channels and publish to a local receiver, not to YouTube.</p>
+    <p class="fact">There is no voiceover. The captions on screen say what each step does, and the sections below describe each chapter in text.</p>
     {/* VideoObject, holding only what this page shows: the video and its poster,
         the heading and lede above, the release date of the version filmed, the
         length in the player's bar and the chapters below (P4-R14). */}
@@ -56,6 +57,9 @@ const ld = videoLd({
       <section id={`chapter-${i + 1}`} class="chapter">
         <h2>{c.title}</h2>
         <span class="when">Starts at {clock(c.start)}</span>
+        {TOUR_PAGE.notes[i].film.map((t: string) => (
+          <p class="fact">{t}</p>
+        ))}
         {TOUR_PAGE.notes[i].facts.map((f: { text: string }) => (
           <p class="fact">{f.text}</p>
         ))}
