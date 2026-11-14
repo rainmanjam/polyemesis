@@ -462,3 +462,56 @@ func TestMeasuredIsTrueForACaptureAndItsListing(t *testing.T) {
 		t.Fatalf("captured %+v, listed %+v", got, list)
 	}
 }
+
+// The clips directory holds each clip's record and, mid-capture, temporary
+// files. A record is never listed, counted, sized, served or swept as a clip.
+func TestARecordIsNotAClipToAnyEnumerator(t *testing.T) {
+	dir := t.TempDir()
+	name := "clip-20260101-000000.ts"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMeta(filepath.Join(dir, name), clipMeta{Seconds: 5, KeyframeAligned: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, junk := range []string{name + ".partial", name + metaExt + ".partial"} {
+		if err := os.WriteFile(filepath.Join(dir, junk), []byte("zzzzzzzzzz"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list, err := List(dir)
+	if err != nil || len(list) != 1 || list[0].Name != name {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	u, err := UsageOf(Config{Dir: dir}.Normalized())
+	if err != nil || u.Count != 1 || u.UsedBytes != 5 {
+		t.Fatalf("Usage = %+v, %v; a record or temp file was counted", u, err)
+	}
+	for _, n := range []string{name + metaExt, name + ".partial", name + metaExt + ".partial"} {
+		if IsClip(n) {
+			t.Errorf("IsClip(%q) is true", n)
+		}
+		if _, err := Resolve(dir, n); err == nil {
+			t.Errorf("Resolve(%q) would serve it", n)
+		}
+		if err := Remove(dir, n); err == nil {
+			t.Errorf("Remove(%q) accepted a name that is not a clip", n)
+		}
+	}
+}
+
+func TestRetentionCountsClipsNotTheirRecords(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60, MaxClips: 2})
+	feed(send, 10, 3)
+	for i := 0; i < 2; i++ {
+		send(datagram(videoPacket(true), audioPacket()))
+		if _, err := c.Capture(3 * time.Second); err != nil {
+			t.Fatalf("Capture: %v", err)
+		}
+	}
+	// Two clips and two records on disk: a limit of two clips must not trim.
+	if list, _ := c.List(); len(list) != 2 {
+		t.Fatalf("retention counted records as clips: %d clips left, want 2", len(list))
+	}
+}

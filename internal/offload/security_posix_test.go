@@ -26,7 +26,7 @@ func TestABadFilePathFailsThatFileAndNotTheRest(t *testing.T) {
 	f.mems[id] = newMem()
 	_ = os.MkdirAll(filepath.Join(f.dir, "clips"), 0o755)
 	// A backslash is legal in a POSIX file name and never in an object key.
-	for i, name := range []string{`bad\name.ts`, "good.ts"} {
+	for i, name := range []string{`clip-bad\name.ts`, "clip-good.ts"} {
 		full := filepath.Join(f.dir, "clips", name)
 		if err := os.WriteFile(full, []byte(name), 0o644); err != nil {
 			t.Fatal(err)
@@ -35,11 +35,11 @@ func TestABadFilePathFailsThatFileAndNotTheRest(t *testing.T) {
 		_ = os.Chtimes(full, at, at)
 	}
 	f.svc.Pass(context.Background())
-	bad, ok := f.item(id, `clips/bad\name.ts`)
+	bad, ok := f.item(id, `clips/clip-bad\name.ts`)
 	if !ok || bad.State != db.OffloadStuck || !strings.Contains(bad.LastError, "invalid file path") {
 		t.Fatalf("bad file: %+v ok=%v", bad, ok)
 	}
-	good, ok := f.item(id, "clips/good.ts")
+	good, ok := f.item(id, "clips/clip-good.ts")
 	if !ok || good.State != db.OffloadVerified {
 		t.Fatalf("the good file after it was not uploaded: %+v ok=%v", good, ok)
 	}
