@@ -16,8 +16,8 @@ ffmpeg -version | head -1                          # must be 8.0 or later
 ffmpeg -protocols | tr ' ' '\n' | grep -x srt      # must print: srt
 ```
 
-- **Older than 6.0** → polyemesis refuses to start. Ubuntu 22.04 (4.4) and
-  Debian 12 (5.1) both ship too old.
+- **Older than 8.0** → polyemesis refuses to start. Ubuntu 22.04 (4.4),
+  Debian 12 (5.1), Ubuntu 24.04 (6.1.1) and Debian 13 (7.1.5) all ship too old.
 - **No `srt`** → it starts with a warning, but you are limited to RTMP, which
   carries one stereo pair, unless the encoder speaks Enhanced RTMP. Multitrack
   routing — the reason to use this — needs
