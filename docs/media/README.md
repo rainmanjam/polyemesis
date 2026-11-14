@@ -110,20 +110,6 @@ Plain statements, because a shot name promises more than some pages hold.
   page's own readings (up to 90 s), shoots, reads them again after the shutter,
   and fails naming the silent tracks if no such moment comes.
 
-### Two shots that show console defects as they are
-
-These two pictures are accurate and unflattering. Retake them when the defects
-are fixed; do not edit them.
-
-- `06-renditions.png` reads "NOT ENCODING" on every tier while the encodes run.
-  Any install with two or more programmes where only one has renditions shows
-  this. In `ui/src/components/LiveDataProvider.tsx`, the `status` case lets a
-  status frame from another programme replace the rendition list.
-- `14-clips.png` lists its clip as "ROUGH START, 0.0s" although the capture call
-  reported 16 s, keyframe-aligned. In `internal/clips/clips.go`, `List` builds
-  its rows from the directory only and never sets the length or the keyframe
-  flag.
-
 ## The theme
 
 Every shot is dark and is taken at 2x. All but three are taken from a window
