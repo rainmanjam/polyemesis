@@ -154,13 +154,17 @@ ENTRYPOINT ["/usr/local/bin/polyemesis"]
 DOCKERFILE
 
 echo "==> starting polyemesis (container) on :$PORT"
+# The seeder is built from the module (it imports internal/demorig); see
+# scripts/build-seeder.sh. Run from anywhere.
+SEEDER="$WORK/seed_demo"
+"$ROOT/scripts/build-seeder.sh" "$SEEDER" || { echo "could not build the seeder" >&2; exit 1; }
 docker network create "$NET" >/dev/null 2>&1 || true
 docker run -d --rm --name "$SRV_NAME" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "127.0.0.1:$PORT:$PORT" \
   "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null
 
 echo "==> seeding"
-SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT")"
+SEEDED="$("$SEEDER" "$PORT")"
 RELAY="$(printf '%s\n' "$SEEDED" | sed -n 1p)"
 TOKEN="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
 TOKEN2="$(printf '%s\n' "$SEEDED" | sed -n 3p)"
@@ -255,7 +259,7 @@ sleep 15
 # for '"live":true', from a stream that never arrived. That is exactly how an
 # earlier version of this guard declared a perfectly healthy ingest dead.
 echo "==> confirming the ingest is live before photographing it"
-if (cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" waitlive); then
+if ("$SEEDER" "$PORT" waitlive); then
   LIVE=yes
 else
   LIVE=no

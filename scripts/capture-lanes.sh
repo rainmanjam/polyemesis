@@ -136,6 +136,10 @@ ENTRYPOINT ["/usr/local/bin/polyemesis"]
 DOCKERFILE
 
 echo "==> starting polyemesis (container) on :$PORT"
+# The seeder is built from the module (it imports internal/demorig); see
+# scripts/build-seeder.sh. Run from anywhere.
+SEEDER="$WORK/seed_demo"
+"$ROOT/scripts/build-seeder.sh" "$SEEDER" || { echo "could not build the seeder" >&2; exit 1; }
 docker network create "$NET" >/dev/null 2>&1 || true
 docker run -d --rm --name "$SRV_NAME" -e POLYEMESIS_SETUP_CODE --network "$NET" \
   -p "127.0.0.1:$PORT:$PORT" \
@@ -184,7 +188,7 @@ publish() {
 shoot() {
   local n="$1" name="$2"
   echo "==> confirming $n programme(s) live"
-  ( cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" waitlive ) || {
+  ( "$SEEDER" "$PORT" waitlive ) || {
     echo "the ingest never went live at $n programme(s) -- refusing to capture."
     docker logs "$SRV_NAME" 2>&1 | tail -15 || true
     exit 1
@@ -202,7 +206,7 @@ shoot() {
 # a one-programme dashboard with no destinations photographs as an install that
 # does not work rather than as the shape below the threshold.
 echo "==> seeding one programme"
-SEEDED="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" solo)"
+SEEDED="$("$SEEDER" "$PORT" solo)"
 TOKEN1="$(printf '%s\n' "$SEEDED" | sed -n 2p)"
 [ -n "$TOKEN1" ] || { echo "no publish token for the first programme"; exit 1; }
 printf 'token\t%s\n' "$TOKEN1" >> "$SHOT_SECRETS_FILE"
@@ -214,7 +218,7 @@ shoot 1 "dashboard-1-programme.png"
 
 # ---------------------------------------------------------------- two
 echo "==> adding the second programme"
-TOKEN2="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" add b | sed -n 1p)"
+TOKEN2="$("$SEEDER" "$PORT" add b | sed -n 1p)"
 [ -n "$TOKEN2" ] || { echo "no publish token for the second programme"; exit 1; }
 printf 'token\t%s\n' "$TOKEN2" >> "$SHOT_SECRETS_FILE"
 echo "==> publishing programme 2, same port, different streamid"
@@ -224,7 +228,7 @@ shoot 2 "dashboard-2-programmes.png"
 
 # ---------------------------------------------------------------- three
 echo "==> adding the third programme"
-TOKEN3="$(cd "$WORK" && go run "$ROOT/scripts/seed_demo.go" "$PORT" add c | sed -n 1p)"
+TOKEN3="$("$SEEDER" "$PORT" add c | sed -n 1p)"
 [ -n "$TOKEN3" ] || { echo "no publish token for the third programme"; exit 1; }
 printf 'token\t%s\n' "$TOKEN3" >> "$SHOT_SECRETS_FILE"
 echo "==> publishing programme 3, same port, different streamid"
