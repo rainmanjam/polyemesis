@@ -47,12 +47,14 @@ destinations labelled YouTube (English, Español, Português, Français, Arabic)
 one commentary language each, with the crowd bed on every one. It owns the
 shots about live routing and live measurement: `01-dashboard.png`,
 `18-destinations.png`, `02-routing.png`, `03-routing-filtergraph.png`,
-`04-meters.png`, `05-sources.png` and `08-mix-matrix.png`.
+`04-meters.png` and `08-mix-matrix.png`.
 
 **full.** A fuller installation: three programmes, a rendition ladder, thirteen
 destinations (YouTube, Twitch, Facebook, Kick and custom destinations), a recording library,
 alert rules, schedules, automod pattern rules and a clip buffer. It owns every
-other shot except the lane pictures.
+other shot except the lane pictures, including `05-sources.png`: the features
+page captions that image "Three programmes on one SRT port", so it has to show
+three programmes, which the one-source sports scene cannot.
 
 The sports scene alone is not enough because it has no recordings, no
 renditions, no playout, no music track and no second programme. Those pages are
@@ -98,8 +100,14 @@ Plain statements, because a shot name promises more than some pages hold.
 - `20-automod.png`: a tall frame (2880x5902) from the pattern rules down to the
   grant matrix.
 - `02-routing.png` and `04-meters.png` are taller than 1440x900 at 2x.
-- `05-sources.png` shows a 172.x address on its PUBLISHING line. That is
-  Docker's private range and is the same on every machine.
+- `05-sources.png` is the full scene's Sources page, framed from the first
+  programme's "Signal detected" down to the third programme's header, with each
+  publish token masked. Its PUBLISHING lines show a 172.x address, which is
+  Docker's private range and the same on every machine.
+- `04-meters.png` is taken only at a moment when all six track cards read a
+  level. The synthetic commentary voices take turns, so the capture polls the
+  page's own readings (up to 90 s), shoots, reads them again after the shutter,
+  and fails naming the silent tracks if no such moment comes.
 
 ### Two shots that show console defects as they are
 
@@ -117,7 +125,12 @@ are fixed; do not edit them.
 
 ## The theme
 
-Every shot is dark, at 1440x900 and 2x. `capture.config.ts` and
+Every shot is dark and is taken at 2x. All but three are taken from a window
+1440 CSS pixels wide, so they are 2880 px wide; their height depends on the
+page (1800 px for most, up to 5902 px for `20-automod.png`). The three that are
+not: `08-mix-matrix.png` (a 1800 px window, 3600 px wide), `09-chat.png` (a
+950 px clip, 1900 px wide) and `02-routing-hero.png` (a 554 px clip at a
+1024 px window, 1108 px wide). `capture.config.ts` and
 `lanes.config.ts` (in `ui/e2e/`) set `colorScheme: "dark"`, and the capture
 reads `html[data-theme]` at every shutter and refuses a page that is not
 `dark`. A machine set to light mode therefore cannot photograph the other theme
@@ -138,8 +151,8 @@ looks broken. It refuses when:
   fixture, the admin password and the setup code. The capture is given them as
   a file (`SHOT_SECRETS_FILE`) and reports only the kind of secret it found,
   never its value;
-- the page shows a failed-state word (failed, crashed, unreachable, offline,
-  degraded, reconnecting, errors, stopped), counted after zero counts such as
+- the page shows a failed-state word (failed, fail, crashed, unreachable,
+  offline, degraded, reconnecting, errors, stopped), counted after zero counts such as
   "0 failed" are removed. Where a page carries one of these words as static
   text, that shot's `allowFailedWords` in `shots.json` lists it and a `caption`
   explains it. The rules are in `ui/src/lib/captureGuards.ts`, which has its own
@@ -149,7 +162,9 @@ looks broken. It refuses when:
   frames and a measured loudness verdict of pass. The speed window is the
   capture's own gate (`MIN_SETTLED_SPEED` and `MAX_SETTLED_SPEED` in
   `captureGuards.ts`); it is stricter than the console, whose destination card
-  turns its speed amber only below 0.95x;
+  turns its speed amber only below 0.95x. It is checked again at the shutter of
+  every sports shot, because a shot's own waits can put the shutter 90 s after
+  the check at the start of its test;
 - the feed cannot hold its frame rate: once the publisher has run 20 s, the
   script reads its last three speed readings and its dropped-frame count, and
   stops with a hint to rerun with `DEMO_FPS=30` unless all three readings are at
@@ -191,9 +206,11 @@ fields are empty. Nothing types into those fields.
 `22-platforms-connected.png` is the same real page after that one-time setup,
 and it is the second exception on the same terms as chat. Connecting needs live
 OAuth credentials for a real channel, so the capture serves fixture responses
-for `/platforms/credentials` and `/platforms/accounts`: a client id reading
-`demo-…-client-not-real`, and accounts named "Demo Studio". The viewer readout
-says Offline, because no platform is carrying the demo stream. The shot is the
+for `/platforms/credentials`, `/platforms/accounts` and each account's
+`/platforms/accounts/<id>/stats`: a client id reading `demo-…-client-not-real`,
+accounts named "Demo Studio", and a stats answer of `live: false`. That last
+stub is what makes the viewer readout say Offline, which is true, because no
+platform is carrying the demo stream. The shot is the
 Connected channels card, one row per connected platform with its Connected
 pill, above the platforms not yet set up. The page and its logic are genuine;
 whose channel it is, is not. The website's "Platform sign-in" section shows the
@@ -324,8 +341,13 @@ during the run; the warm figure has the image already present:
 None of this runs in CI. The host needs Docker, Go (the version in `go.mod`),
 Node and npm (to build the UI and run the capture), system Google Chrome and
 `openssl` (to generate a password when none is supplied). FFmpeg runs inside the
-containers, not on the host. Python 3 is needed only for the optional palette
-compression pass (with Pillow) and for `--proof` (with numpy).
+containers, not on the host. Python 3 is needed only for the palette
+compression pass (with Pillow) and for `--proof` (with numpy). The compression
+pass is required before committing: without Pillow `demo-seed.sh` prints one
+line to stderr ("skipped: python3 with Pillow not found") and exits 0, leaving
+the shots unquantised, about two to three times larger than the committed
+ones. Install Pillow (`pip install Pillow`) and re-run the scene before the images go
+into a commit.
 
 ## The tour
 
