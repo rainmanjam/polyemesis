@@ -433,38 +433,43 @@ test("sources — one port, many programmes", async ({ page }) => {
   // themselves are one per protocol and would reach two on a single source.
   const perSource = page.locator('[data-tour="source-publish-urls"]');
   await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
-  // FRAMED ON ALL THREE PROGRAMMES' PUBLISH URLS, because that is what the
-  // features page's caption says: "each publishes to port 6000 with its own
-  // token". A programme's card is about 1200 px tall (its caption track and
-  // caption words sit above the ingest fields) and its publish URLs and token are
-  // at the bottom of it, so the frame runs from the first programme's "Signal
-  // detected" down through the third programme's publish URLs. The window is
-  // sized to that rather than to a constant that the next card change outgrows;
-  // the page's width is unchanged, so nothing re-flows when only the height does.
+  // THE FRAME THE FEATURES PAGE WAS SIGNED OFF WITH, sized from the page. It
+  // starts at the first programme's "Signal detected" block (thumbnail, SRT
+  // address on port 6000, PUBLISHING line and masked token whole), runs through
+  // the whole of the second programme's card, and ends just below the third
+  // programme's header line: its name and RUNNING badge, and nothing of its
+  // form. (A frame down to the third programme's own publish URLs was 5704 px
+  // tall and rendered as a wall of caption-word forms.) The window height comes
+  // from where the third card's "Caption track" label sits, the first element of
+  // its form, rather than from a number that happens to fit today.
   const fullViewport = page.viewportSize()!;
   await page.setViewportSize({ width: fullViewport.width, height: 1500 });
   const names = page.locator("[data-slot=card-title]");
   await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
   await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBe(3);
-  const lastUrls = perSource.nth(2);
+  const formStarts = page.getByText("Caption track", { exact: true });
+  await expect.poll(() => formStarts.count(), { timeout: 30_000 }).toBe(3);
   await topOfFrame(page, page.getByText("Signal detected").first());
   // Clear of the sticky header, which would otherwise sit on the line framed.
   await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
   await settle(page);
-  const lastBox = (await lastUrls.boundingBox())!;
-  const needed = Math.ceil(lastBox.y + lastBox.height + 32);
+  const thirdForm = (await formStarts.nth(2).boundingBox())!;
+  const needed = Math.ceil(thirdForm.y - 8);
   await page.setViewportSize({ width: fullViewport.width, height: needed });
   await settle(page, 600);
-  // Asserted AFTER the resize, which can change how far `main` can scroll: every
-  // programme's publish URLs are in the frame, or this is fewer than three.
-  for (let i = 0; i < 3; i++) {
-    const box = (await perSource.nth(i).boundingBox())!;
-    expect(box.y, `programme ${i + 1}'s publish URLs start above the frame`).toBeGreaterThanOrEqual(0);
-    expect(
-      box.y + box.height,
-      `programme ${i + 1}'s publish URLs run below the frame`,
-    ).toBeLessThanOrEqual(needed);
+  // Asserted AFTER the resize, which can change how far `main` can scroll, and
+  // failing rather than skipping: the first two programmes' signal, publish line
+  // and masked token, and the third programme's header, are all in the frame.
+  for (let i = 0; i < 2; i++) {
+    await expect(page.getByText("Signal detected").nth(i), `programme ${i + 1}'s signal block is not whole in the frame`).toBeInViewport({ ratio: 1 });
+    await expect(perSource.nth(i), `programme ${i + 1}'s publish address is not whole in the frame`).toBeInViewport({ ratio: 1 });
+    await expect(page.getByText(/publishing/i).nth(i), `programme ${i + 1}'s PUBLISHING line is not in the frame`).toBeInViewport({ ratio: 1 });
+    await expect(page.getByText(/^token$/i).nth(i), `programme ${i + 1}'s masked token is not in the frame`).toBeInViewport({ ratio: 1 });
   }
+  await expect(names.nth(2), "the third programme's header is not whole in the frame").toBeInViewport({ ratio: 1 });
+  expect(thirdForm.y - 8, "the frame would include the third programme's form").toBeGreaterThan(
+    (await names.nth(2).boundingBox())!.y,
+  );
   // Masked last, right before the shutter: the resize and the scroll above
   // re-render the cards, and a re-render can put a token back.
   await maskPublishTokens(page);
