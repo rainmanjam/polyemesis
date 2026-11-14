@@ -88,6 +88,24 @@ describe("docs/media/shots.json", () => {
     }
   });
 
+  it("names the scene commands and the new homes", () => {
+    const readme = readFileSync(join(MEDIA, "README.md"), "utf8");
+    for (const needle of [
+      "--scene sports",
+      "capture-lanes.sh",
+      "shots.json",
+      "scripts/tour/",
+      "web/scripts/stream-deck-model/",
+      "gen-filter.py",
+      "--proof",
+    ]) {
+      expect([needle, readme.includes(needle)]).toEqual([needle, true]);
+    }
+    expect(readme).not.toContain("tour.webm");
+    // Built from two words so this file does not hold the banned phrase (a guard scans web/src for it).
+    expect(readme).not.toMatch(new RegExp(["one", "maintainer"].join(String.raw`[\s-]+`), "i"));
+  });
+
   it("requires a caption for any allowed failed word", () => {
     for (const s of manifest.shots) {
       if (s.allowFailedWords.length > 0) expect([s.file, (s.caption ?? "").trim().length > 0]).toEqual([s.file, true]);
