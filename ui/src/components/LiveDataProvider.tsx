@@ -8,13 +8,21 @@ import {
 } from "react";
 import { api } from "@/lib/api";
 import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/features/live/currentProgramme";
-import { mergeStatusDestinations, mergeStatusRenditions, programmeLevels } from "@/lib/dashboardFacts";
+import {
+  allRenditionRows,
+  foldRenditions,
+  mergeStatusDestinations,
+  programmeLevels,
+  pruneRenditions,
+  type RenditionsBySource,
+} from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
 import { LiveDataContext, type LiveData, type Programme } from "@/hooks/useLiveData";
 import type {
   BitrateSample,
   Levels,
   LogLine,
+  RenditionStatus,
   SourceInfo,
   Status,
   SystemStats,
@@ -46,6 +54,16 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [recordingsRevision, setRecordingsRevision] = useState(0);
   const [frameError, setFrameError] = useState(false);
+  // Every programme's renditions, held per programme. status.renditions is the
+  // last frame's own and the Pipeline card reads it as one programme's ladder;
+  // the Renditions page, which lists them all, reads this. See foldRenditions.
+  const [renditionsBySource, setRenditionsBySource] = useState<RenditionsBySource<RenditionStatus>>(
+    () => new Map(),
+  );
+  const foldRenditionFrame = useCallback((s: Status) => {
+    setRenditionsBySource((prev) => foldRenditions(prev, s.source?.id, s.renditions ?? [], Date.now()));
+  }, []);
+  const allRenditions = useMemo(() => allRenditionRows(renditionsBySource), [renditionsBySource]);
 
   // WHETHER THE FIRST STATUS SNAPSHOT HAS ARRIVED, derived rather than tracked.
   //
@@ -190,11 +208,9 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
                   prev,
                   incoming,
                 ) as Status["destinations"],
-                // The same fold, for the same install-wide socket: a frame
-                // carries only its own programme's encodes.
-                renditions: mergeStatusRenditions(prev, incoming),
               };
             });
+            foldRenditionFrame(msg.data as Status);
             break;
           case "source":
             setSource(msg.data as SourceInfo);
@@ -277,7 +293,7 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
     // Re-opened when the programme resolves: the first render has none, and a
     // socket opened without one would be answering for a programme the operator
     // is not looking at for the life of the session.
-  }, [programmeKnown, programme]);
+  }, [programmeKnown, programme, foldRenditionFrame]);
 
   // WHICH PROGRAMME, and BOTH extremes were tried and were wrong.
   //
@@ -318,6 +334,7 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
       resolvedOnce.current = true;
       setSourceCountKnown(true);
       knownIds.current = ids;
+      setRenditionsBySource((prev) => pruneRenditions(prev, ids));
       setSourceCount(ids.length);
       // Unchanged lists keep their identity: this runs on a timer, and a new
       // array every 10 s would re-render every consumer for nothing.
@@ -448,10 +465,10 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
     if (!programmeKnown) return;
     api
       .status(programme)
-      .then((s) =>
-        // Scoped to one programme, like a socket frame: fold, do not replace.
-        setStatus((prev) => ({ ...s, renditions: mergeStatusRenditions(prev, s) })),
-      )
+      .then((s) => {
+        setStatus(s);
+        foldRenditionFrame(s);
+      })
       .catch(() => {});
     api.source(programme).then(setSource).catch(() => {});
     api
@@ -461,7 +478,7 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
         setBitrate(s.bitrate ?? []);
       })
       .catch(() => {});
-  }, [programmeKnown, programme]);
+  }, [programmeKnown, programme, foldRenditionFrame]);
 
   // READ THROUGH THE SCOPE, not only written through it. `levels` is cleared
   // when the old programme's socket is torn down, but that is an effect, and
@@ -482,6 +499,7 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
       connected,
       snapshotKnown: status !== null,
       status,
+      allRenditions,
       source,
       levels: scopedLevels,
       system,
@@ -502,6 +520,7 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
       connected,
 
       status,
+      allRenditions,
       source,
       scopedLevels,
       system,

@@ -3,6 +3,7 @@ import type {
   BitrateSample,
   Levels,
   LogLine,
+  RenditionStatus,
   SourceInfo,
   SourceTrack,
   Status,
@@ -117,6 +118,13 @@ export interface LiveData {
   refreshSources: () => Promise<number | null>;
   connected: boolean;
   status: Status | null;
+  /** Every programme's renditions with their live state, folded per programme.
+   *
+   *  The status socket is install-wide and a frame carries only its own
+   *  programme's encodes, so `status.renditions` is ONE programme's ladder (the
+   *  Pipeline card relies on that). A page that lists renditions across the
+   *  install reads this instead. */
+  allRenditions: RenditionStatus[];
   source: SourceInfo | null;
   levels: Levels | null;
   system: SystemStats | null;

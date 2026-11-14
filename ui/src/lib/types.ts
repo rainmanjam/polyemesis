@@ -1165,9 +1165,6 @@ export interface RenditionStatus {
   relayPort?: number;
   error?: string;
   process?: ProcessStatus | null;
-  /** The programme that reported this row. Not on the wire: the console tags
-   *  it when it folds a frame in (mergeStatusRenditions). */
-  sourceId?: number;
 }
 
 export interface RelayStats {
