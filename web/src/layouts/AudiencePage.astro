@@ -9,25 +9,14 @@ import Steps from "../components/inner/Steps.astro";
 import FactList from "../components/inner/FactList.astro";
 import DocLinks from "../components/inner/DocLinks.astro";
 import { AUDIENCES } from "../data/audiences.mjs";
-import { CASES, mixLabel } from "../data/cases.mjs";
+import { CASES } from "../data/cases.mjs";
 import { fillCase } from "../lib/facts";
+import { destinationNotes, relatedRecipes } from "../lib/audience-next";
 
 type Audience = (typeof AUDIENCES)[keyof typeof AUDIENCES];
 interface Props {
   audience: Audience;
 }
-
-type Dest = Parameters<typeof mixLabel>[1];
-
-const RECIPES: Record<string, string> = {
-  "two-languages-one-broadcast": "Two languages, one broadcast",
-  "obs-to-five-platforms": "OBS to five platforms",
-  "streaming-from-a-backpack": "Streaming from a backpack",
-};
-
-// A recipe is linked once its page exists, so this layout can land before the recipes do.
-const recipePages = Object.keys(import.meta.glob("../pages/recipes/*.astro"));
-const recipes = (slugs: string[]) => slugs.filter((slug) => recipePages.includes(`../pages/recipes/${slug}.astro`));
 
 const { audience: a } = Astro.props;
 const c = CASES[a.key];
@@ -36,7 +25,7 @@ const needs = a.needs.map((f) => ({ ...f, text: fill(f.text) }));
 const steps = a.steps.map((s) => ({ ...s, title: fill(s.title), facts: s.facts.map((f) => ({ ...f, text: fill(f.text) })) }));
 
 // Sports and worship list what each destination hears under the destinations step.
-const notes = a.mixesAfterStep ? { [a.mixesAfterStep]: c.dests.map((d: Dest) => `${d.name}: ${mixLabel(c, d)}`) } : {};
+const notes = a.mixesAfterStep ? { [a.mixesAfterStep]: destinationNotes(c) } : {};
 
 const others = Object.values(AUDIENCES).filter((o) => o.key !== a.key);
 const index = [
@@ -87,7 +76,7 @@ const index = [
   <section id="next">
     <h2>Next</h2>
     <ul class="rows">
-      {recipes(a.related).map((slug) => <li><a href={`/recipes/${slug}`}>{RECIPES[slug]}</a></li>)}
+      {relatedRecipes(a.related).map((r) => <li><a href={r.href}>{r.title}</a></li>)}
       {others.map((o) => <li><a href={o.route}>{o.heading}</a></li>)}
       <li><a href="/docs/quickstart">The quickstart</a></li>
       <li><a href="/calculator">The bandwidth calculator</a></li>

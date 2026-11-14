@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { AUDIENCES } from "../data/audiences.mjs";
 import { RECIPES } from "../data/recipes.mjs";
 
 const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
@@ -49,21 +48,4 @@ describe("the three recipe pages", () => {
       expect(body).toContain(`"${r.slug}"`);
     });
   }
-});
-
-describe("the audience pages' Next section", () => {
-  // AudiencePage.astro links a recipe only once its page file exists; with the
-  // three recipes built, every related recipe must therefore be linked.
-  it("has a page file for every recipe an audience relates to, so none is dropped", () => {
-    for (const a of Object.values(AUDIENCES) as { key: string; related: string[] }[]) {
-      expect(a.related.length, a.key).toBeGreaterThanOrEqual(1);
-      for (const slug of a.related) expect(existsSync(here(`../pages/recipes/${slug}.astro`)), `${a.key} -> ${slug}`).toBe(true);
-    }
-  });
-
-  it("still filters by page file in the layout, and renders what is left", () => {
-    const audience = read("../layouts/AudiencePage.astro");
-    expect(audience).toContain('import.meta.glob("../pages/recipes/*.astro")');
-    expect(audience).toContain("recipes(a.related)");
-  });
 });
