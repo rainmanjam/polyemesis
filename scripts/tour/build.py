@@ -25,14 +25,16 @@ def Za(t, d, A, B, e=EASE): return dict(t=t, d=d, A=A, B=B, e=e)
 # dashboard shots: a constant 1.3x frame that keeps the right-hand column (Chat/Audience/Pipeline) out of shot
 DASH_TOP = (1.3, -3, 0)
 DASH_INGEST = (1.3, -3, -313)
-BASE = {"s1a": DASH_INGEST, "s3a": DASH_TOP, "s3b": DASH_TOP}
+# s3a is framed 117 px lower down: the console header and the foot of the empty "Stream info" card above Destinations stay out of shot
+DASH_DEST = (1.3, -3, -117)
+BASE = {"s1a": DASH_INGEST, "s3a": DASH_DEST, "s3b": DASH_TOP}
 ZOOM = {
     "s1a": [],
     "s1b": [Zs(1.0, 9.5, (1000, 500), 1, 1.12)],
     "s2a": [Zs(0.6, 7.0, (1400, 100), 1, 1.12)],
     "s2b": [],
     "s2c": [Zs(0.5, 8.5, (1400, 100), 1, 1.15)],
-    "s3a": [Za(3.7, 0.9, DASH_TOP, (1.4, -384, -326))],
+    "s3a": [Za(2.0, 0.9, DASH_DEST, (1.4, -384, -326))],
     "s3b": [],
     "s3c": [],
 }
@@ -49,6 +51,7 @@ def diag_rings():
     segs = [[(r[i][0] + 59, r[i][1] + 39), (r[i + 1][0] + 1, r[i + 1][1] + 3)] for i in range(4)]
     return r, segs
 
+S2B = 0.55   # in this take the s2b clicks land 0.55 s later than in the first cut
 dr, dsegs = diag_rings()
 CALLOUTS = [
     co("s1a", "a1", 3.6, 3.2, [[292, 775, 200, 26]], [[(492, 788), (610, 788)]], (610, 788), 610, 771, ["ONE FEED · SRT · 1080p60"]),
@@ -56,9 +59,9 @@ CALLOUTS = [
     co("s1b", "b1", 1.0, 4.6, [], [[(561, 418), (553, 418), (553, 766), (561, 766)], [(553, 592), (522, 592)]], (522, 592), 300, 561, ["FIVE COMMENTARY", "LANGUAGES"]),
     co("s1b", "b2", 6.2, 3.6, [[566, 774, 1221, 68]], [[(566, 808), (396, 808)]], (396, 808), 300, 791, ["CROWD"]),
     co("s2a", "c1", 0.9, 5.6, [[925, 207, 826, 250]], [[(1610, 207), (1610, 156)]], (1610, 156), 1340, 122, ["EVERY CHANNEL HEARS EVERYTHING"]),
-    co("s2b", "d1", 1.7, 3.6, [[298, 198, 236, 72]], [[(298, 224), (288, 224), (288, 522), (296, 522)]], (296, 522), 296, 505, ["YOUTUBE · ESPAÑOL"]),
-    co("s2b", "d2", 3.4, 5.8, [[571, 432, 32, 32], [571, 576, 32, 32], [571, 648, 32, 32], [571, 720, 32, 32]], [[(571, 592), (557, 592)]], (557, 592), 296, 561 + 8, ["SWITCHING OFF", "EN · PT · FR · AR"]),
-    co("s2b", "d3", 9.6, 4.0, [[566, 485, 1221, 70], [566, 773, 1221, 70]],
+    co("s2b", "d1", 1.7 + S2B, 3.6, [[298, 198, 236, 72]], [[(298, 224), (288, 224), (288, 522), (296, 522)]], (296, 522), 296, 505, ["YOUTUBE · ESPAÑOL"]),
+    co("s2b", "d2", 3.4 + S2B, 5.8, [[571, 432, 32, 32], [571, 576, 32, 32], [571, 648, 32, 32], [571, 720, 32, 32]], [[(571, 592), (557, 592)]], (557, 592), 296, 561 + 8, ["SWITCHING OFF", "EN · PT · FR · AR"]),
+    co("s2b", "d3", 9.6 + S2B, 4.0, [[566, 485, 1221, 70], [566, 773, 1221, 70]],
        [[(530, 652), (556, 652)], [(556, 520), (556, 808)], [(556, 520), (566, 520)], [(556, 808), (566, 808)]], (530, 652), 296, 620, ["KEEPS:", "ESPAÑOL + CROWD"]),
     co("s2c", "e1", 0.9, 4.0, dr, dsegs + [[(996, 233), (1039, 233), (1039, 156)]], (1039, 156), 870, 122, ["ONE LANGUAGE PER CHANNEL"]),
     co("s2c", "e2", 5.1, 3.8, [[1672, 183, 76, 274]], [[(1710, 183), (1710, 156)]], (1710, 156), 1540, 122, ["CROWD ON ALL FIVE"]),
@@ -74,7 +77,7 @@ CAPS = [  # shot, text, local start, duration
     ("s2a", "To start, every channel gets every track.", 0.5, 7.4),
     ("s2b", "Choose what each channel hears.", 0.6, 12.4),
     ("s2c", "Same picture. Five different soundtracks.", 0.5, 8.4),
-    ("s3a", "One click starts all five.", 0.6, 15.3),
+    ("s3a", "One click starts all five.", 0.6, 14.2),
     ("s3b", "Five channels live from one upload.", 0.5, 5.1),
     ("s3c", "Each channel's own mix, measured on the way out.", 0.6, 12.8),
 ]
@@ -159,7 +162,7 @@ def captions_html():
         s = G(shot, t0)
         els.append('<div id="cap%d" class="clip cap" data-start="%s" data-duration="%s">%s</div>' % (i, s, d, text.replace("'", "&#39;")))
         caps.append([s, d])
-    s2b = START["s2b"]
+    s2b = START["s2b"] + S2B   # the save click, scrim and patch follow the take
     return """<template>
   <style>
     @font-face { font-family: "Bricolage Grotesque"; src: url("assets/fonts/bricolage.woff2") format("woff2"); font-weight: 200 800; }
@@ -174,7 +177,6 @@ def captions_html():
     <div id="scrim" class="clip" data-start="0" data-duration="%s"></div>
     <div id="patch" class="clip" data-start="%s" data-duration="1.95"></div>
     <div id="hp1" class="clip hp" data-start="%s" data-duration="%s"></div>
-    <div id="hp2" class="clip hp" data-start="%s" data-duration="%s"></div>
     %s
   </div>
   <script>
@@ -194,7 +196,7 @@ def captions_html():
     window.__timelines["captions"] = tl;
   </script>
 </template>
-""" % (CONTENT_END + 0.3, f(s2b + 14.55), START["s3b"], ED["s3b"], START["s3a"], 4.3, "\n    ".join(els), json.dumps(caps), f(s2b + 14.55), f(s2b + 16.25), f(s2b + 13.1), f(s2b + 14.55), f(CONTENT_END))
+""" % (CONTENT_END + 0.3, f(s2b + 14.55), START["s3b"], ED["s3b"], "\n    ".join(els), json.dumps(caps), f(s2b + 14.55), f(s2b + 16.25), f(s2b + 13.1), f(s2b + 14.55), f(CONTENT_END))
 
 # ---------------- chapter label + progress ----------------
 def chrome_html():
@@ -282,6 +284,7 @@ def index_html():
         for z in ZOOM[s]:
             zl.append(dict(w="#z-" + s, t=G(s, z["t"]), d=z["d"], A=list(z["A"]), B=list(z["B"]), e=z["e"]))
     host = lambda i, src, st, du, kind, z: '<div id="%s" data-composition-id="%s" data-composition-src="compositions/%s.html" data-start="%s" data-duration="%s" data-track-index="%d" data-track-kind="%s" data-width="1920" data-height="1080" style="z-index:%d"></div>' % (i, i, src, st, du, {"callouts": 1, "captions": 2, "chrome": 3, "endcard": 4}[i], kind, z)
+    crop = '<div id="crop-s1a" class="clip crop" data-start="%s" data-duration="%s"></div>' % (START["s1a"], ED["s1a"])
     return """<!doctype html>
 <html lang="en">
   <head>
@@ -293,11 +296,13 @@ def index_html():
       html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
       #root { position: absolute; inset: 0; overflow: hidden; background: #000; }
       .zw { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+      .crop { position: absolute; left: 0; top: 822px; width: 1920px; height: 258px; background: #000; z-index: 20; }
       .console { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: contain; }
     </style>
   </head>
   <body>
     <div id="root" data-composition-id="main" data-start="0" data-duration="%s" data-width="1920" data-height="1080">
+      %s
       %s
       %s
       %s
@@ -319,7 +324,7 @@ def index_html():
     </script>
   </body>
 </html>
-""" % (TOTAL, "\n      ".join(wr),
+""" % (TOTAL, "\n      ".join(wr), crop,
        host("callouts", "callouts", 0, CONTENT_END + 0.3, "graphics", 30),
        host("captions", "captions", 0, CONTENT_END + 0.3, "captions", 31),
        host("chrome", "chrome", 0, CONTENT_END + 0.3, "graphics", 32),

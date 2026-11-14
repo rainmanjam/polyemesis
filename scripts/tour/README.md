@@ -4,7 +4,7 @@
 
 ## Poster
 
-The poster is the frame at 52.2 s of the render, written by `publish.sh` to `web/public/media/tour-poster.jpg`.
+The poster is the frame at 52.8 s of the render, written by `publish.sh` to `web/public/media/tour-poster.jpg`.
 
 ## Prerequisites
 

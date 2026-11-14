@@ -13,11 +13,11 @@ export const TOUR = {
   poster: "/media/tour-poster.jpg",
   width: 1920,
   height: 1080,
-  duration: 99.3,
+  duration: 98.2,
   chapters: [
     { title: "One stream in", start: 0 },
     { title: "Splitting the audio", start: 22.2 },
-    { title: "Going live everywhere", start: 58.6 },
+    { title: "Going live everywhere", start: 59.2 },
   ],
 };
 

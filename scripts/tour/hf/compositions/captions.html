@@ -9,33 +9,32 @@
       font-size: 58px; line-height: 66px; letter-spacing: -0.02em; white-space: nowrap; }
   </style>
   <div id="root" data-composition-id="captions" data-width="1920" data-height="1080">
-    <div id="scrim" class="clip" data-start="0" data-duration="95.8"></div>
-    <div id="patch" class="clip" data-start="45.15" data-duration="1.95"></div>
-    <div id="hp1" class="clip hp" data-start="75.4" data-duration="6.0"></div>
-    <div id="hp2" class="clip hp" data-start="58.6" data-duration="4.3"></div>
+    <div id="scrim" class="clip" data-start="0" data-duration="94.7"></div>
+    <div id="patch" class="clip" data-start="45.7" data-duration="1.95"></div>
+    <div id="hp1" class="clip hp" data-start="74.3" data-duration="6.0"></div>
     <div id="cap0" class="clip cap" data-start="0.6" data-duration="5.6">One match feed comes in.</div>
     <div id="cap1" class="clip cap" data-start="11.6" data-duration="10.2">Five languages and the crowd. Each on its own track.</div>
     <div id="cap2" class="clip cap" data-start="22.7" data-duration="7.4">To start, every channel gets every track.</div>
     <div id="cap3" class="clip cap" data-start="31.2" data-duration="12.4">Choose what each channel hears.</div>
-    <div id="cap4" class="clip cap" data-start="50.1" data-duration="8.4">Same picture. Five different soundtracks.</div>
-    <div id="cap5" class="clip cap" data-start="59.2" data-duration="15.3">One click starts all five.</div>
-    <div id="cap6" class="clip cap" data-start="75.9" data-duration="5.1">Five channels live from one upload.</div>
-    <div id="cap7" class="clip cap" data-start="82.0" data-duration="12.8">Each channel&#39;s own mix, measured on the way out.</div>
+    <div id="cap4" class="clip cap" data-start="50.7" data-duration="8.4">Same picture. Five different soundtracks.</div>
+    <div id="cap5" class="clip cap" data-start="59.8" data-duration="14.2">One click starts all five.</div>
+    <div id="cap6" class="clip cap" data-start="74.8" data-duration="5.1">Five channels live from one upload.</div>
+    <div id="cap7" class="clip cap" data-start="80.9" data-duration="12.8">Each channel&#39;s own mix, measured on the way out.</div>
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
-    const CAPS = [[0.6, 5.6], [11.6, 10.2], [22.7, 7.4], [31.2, 12.4], [50.1, 8.4], [59.2, 15.3], [75.9, 5.1], [82.0, 12.8]];
+    const CAPS = [[0.6, 5.6], [11.6, 10.2], [22.7, 7.4], [31.2, 12.4], [50.7, 8.4], [59.8, 14.2], [74.8, 5.1], [80.9, 12.8]];
     CAPS.forEach(([s, d], i) => {
       tl.fromTo("#cap" + i, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out", immediateRender: false }, s);
       tl.fromTo("#cap" + i, { opacity: 1, y: 0 }, { opacity: 0, y: -8, duration: 0.4, ease: "power2.in", immediateRender: false }, s + d - 0.45);
     });
     gsap.set("#patch", { opacity: 0 });
-    tl.fromTo("#patch", { opacity: 0 }, { opacity: 1, duration: 0.2, immediateRender: false }, 45.15);
-    tl.fromTo("#patch", { opacity: 1 }, { opacity: 0, duration: 0.2, immediateRender: false }, 46.85);
+    tl.fromTo("#patch", { opacity: 0 }, { opacity: 1, duration: 0.2, immediateRender: false }, 45.7);
+    tl.fromTo("#patch", { opacity: 1 }, { opacity: 0, duration: 0.2, immediateRender: false }, 47.4);
     // the Save button sits under the scrim: let the scrim step aside while it is clicked
-    tl.fromTo("#scrim", { opacity: 1 }, { opacity: 0, duration: 0.5, ease: "power2.inOut", immediateRender: false }, 43.7);
-    tl.fromTo("#scrim", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.inOut", immediateRender: false }, 45.15);
-    tl.fromTo("#scrim", { opacity: 1 }, { opacity: 0, duration: 0.3, immediateRender: false }, 95.5);
+    tl.fromTo("#scrim", { opacity: 1 }, { opacity: 0, duration: 0.5, ease: "power2.inOut", immediateRender: false }, 44.25);
+    tl.fromTo("#scrim", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.inOut", immediateRender: false }, 45.7);
+    tl.fromTo("#scrim", { opacity: 1 }, { opacity: 0, duration: 0.3, immediateRender: false }, 94.4);
     window.__timelines["captions"] = tl;
   </script>
 </template>

@@ -10,15 +10,15 @@
     .fill { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: #ece9e2; transform-origin: 0 0; transform: scaleX(0); }
   </style>
   <div id="root" data-composition-id="chrome" data-width="1920" data-height="1080">
-    <div id="hscrim" class="clip" data-start="0" data-duration="95.8"></div>
+    <div id="hscrim" class="clip" data-start="0" data-duration="94.7"></div>
     <div id="lab0" class="clip lab" data-start="0.15" data-duration="22.35">01 · ONE STREAM IN</div>
-    <div id="lab1" class="clip lab" data-start="22.25" data-duration="36.65">02 · SPLITTING THE AUDIO</div>
-    <div id="lab2" class="clip lab" data-start="58.65" data-duration="37.15">03 · GOING LIVE EVERYWHERE</div>
-    <div id="prog" class="clip" data-start="0" data-duration="95.8"><div class="seg"><div id="fill0" class="fill"></div></div><div class="seg"><div id="fill1" class="fill"></div></div><div class="seg"><div id="fill2" class="fill"></div></div></div>
+    <div id="lab1" class="clip lab" data-start="22.25" data-duration="37.25">02 · SPLITTING THE AUDIO</div>
+    <div id="lab2" class="clip lab" data-start="59.25" data-duration="35.45">03 · GOING LIVE EVERYWHERE</div>
+    <div id="prog" class="clip" data-start="0" data-duration="94.7"><div class="seg"><div id="fill0" class="fill"></div></div><div class="seg"><div id="fill1" class="fill"></div></div><div class="seg"><div id="fill2" class="fill"></div></div></div>
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
-    const CS = [0.0, 22.2, 58.6], ENDS = [22.2, 58.6, 95.5];
+    const CS = [0.0, 22.2, 59.2], ENDS = [22.2, 59.2, 94.4];
     gsap.set("#prog", { opacity: 0 });
     CS.forEach((c, i) => {
       const a = i === 0 ? 0.15 : c + 0.35;

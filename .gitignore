@@ -163,4 +163,5 @@ __pycache__/
 /scripts/tour/hf/node_modules/
 /scripts/tour/hf/AGENTS.md
 /scripts/tour/hf/CLAUDE.md
+/scripts/tour/hf/.hyperframes/
 /scripts/tour/__pycache__/

@@ -8,7 +8,7 @@ os.makedirs("check/frames", exist_ok=True)
 for f in glob.glob("check/frames/*.png"): os.remove(f)
 ED=json.load(open("edit.json"))
 ORDER=["s1a","s1b","s2a","s2b","s2c","s3a","s3b","s3c"]
-D=0.3; t=0; times=[]
+D=0.0; t=0; times=[]
 for s in ORDER:
     times += [(t+0.05, s+"_first"), (t+ED[s]-D-0.05, s+"_last")]
     t+=ED[s]-D

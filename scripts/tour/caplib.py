@@ -16,7 +16,7 @@ CURSOR_JS = """
   const mk = () => {
     if (document.getElementById('__cur')) return;
     const d = document.createElement('div'); d.id = '__cur';
-    d.style.cssText = 'position:fixed;left:0;top:0;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:#f4f1ea;' +
+    d.style.cssText = 'position:fixed;left:0;top:0;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#f4f1ea;' +
       'box-shadow:0 0 0 3px rgba(7,8,10,.55),0 3px 10px rgba(0,0,0,.55);pointer-events:none;z-index:2147483647;' +
       'transition:transform 90ms ease-out;will-change:transform;opacity:0';
     document.documentElement.appendChild(d);
