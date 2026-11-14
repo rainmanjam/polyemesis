@@ -231,3 +231,22 @@ export function loudnessRowsFromFeed(feed: LoudnessFeedLike): LoudnessRow[] {
     .filter((r) => r.mix !== "vod")
     .map((r) => ({ name: r.destination, integrated: r.integrated, verdict: r.verdict }));
 }
+
+/** Why the Meters page's per-track cards are not all reading a level, or null
+ *  when they are. `headers` is the text of each track card's header ("Track 3",
+ *  its layout, and the reading "-12.3 dBFS"; the console prints silence as
+ *  "-∞", see format.ts db()). The synthetic commentary voices take turns, so a
+ *  frame can catch some of them between bursts: such a frame shows a dead
+ *  track under "Meters on every track" and is never to be photographed. The
+ *  message names the tracks (1-based, as the page does), nothing else. */
+export function silentTrackProblem(headers: string[], expected: number): string | null {
+  if (headers.length !== expected) return `found ${headers.length} track cards, expected ${expected}`;
+  const silent: number[] = [];
+  headers.forEach((h, i) => {
+    const track = Number(/\bTrack (\d+)/.exec(h)?.[1] ?? i + 1);
+    const reading = /([-\u2212]\u221e|[-\u2212]?\d+(?:\.\d+)?)\s*dBFS/.exec(h)?.[1];
+    if (reading === undefined || /\u221e/.test(reading)) silent.push(track);
+  });
+  if (silent.length === 0) return null;
+  return `${silent.length === 1 ? "track" : "tracks"} ${silent.join(", ")} read${silent.length === 1 ? "s" : ""} minus infinity`;
+}

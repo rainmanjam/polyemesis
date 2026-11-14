@@ -70,17 +70,67 @@ export async function assertShootable(page: import("@playwright/test").Page, fil
 }
 
 /** A screenshot into OUT, after assertShootable. For the shots that are not
- *  taken through shoot() because they have no placeholder to wait out. */
+ *  taken through shoot() because they have no placeholder to wait out.
+ *
+ *  IN THE SPORTS SCENE the destinations are checked again here: waitSettled
+ *  runs once at the start of a test, and a shot's own waits (meters: 6 s, up to
+ *  90 s for the analyser and 60 s for every track) put the shutter up to a
+ *  minute and a half later. A destination that fell below 0.97x in that gap
+ *  would be photographed in amber. The check is before the shutter (waiting up
+ *  to 30 s for a reading that is only borderline, such as 0.969x, to come back)
+ *  and AFTER it, where a frame that is no longer settled is thrown away and
+ *  shot again, up to four times; past that the shot fails naming the
+ *  destination. No unsettled frame is ever written.
+ *
+ *  `opts.frameCheck` is for a property of the frame that comes and goes (a
+ *  commentary voice between bursts): it runs after the shutter, a problem
+ *  leaves no file, and the problem is returned so the caller can try again.
+ *  Returns null when the file was written. */
 export async function snap(
   page: import("@playwright/test").Page,
   file: string,
-  opts: { clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean } = {},
-) {
+  opts: {
+    clip?: { x: number; y: number; width: number; height: number };
+    fullPage?: boolean;
+    frameCheck?: () => Promise<string | null>;
+  } = {},
+): Promise<string | null> {
+  const { frameCheck, ...shotOpts } = opts;
   await assertShootable(page, file);
-  await shutter(page, `${OUT}/${file}`, opts, async () => {
-    await assertShootable(page, file);
-    return null;
-  });
+  let unsettled = "";
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await waitStillSettled(page, file);
+    unsettled = "";
+    const problem = await shutter(page, `${OUT}/${file}`, shotOpts, async () => {
+      await assertShootable(page, file);
+      if (SCENE === "sports") {
+        const verdict = await settledVerdict(page, SETTLED_UPTIME_SEC);
+        if (!verdict.ok) {
+          unsettled = verdict.why;
+          return `not settled: ${verdict.why}`;
+        }
+      }
+      return frameCheck ? frameCheck() : null;
+    });
+    if (unsettled === "") return problem;
+    console.warn(`re-shooting ${file}: the destinations were no longer settled at the shutter (${unsettled})`);
+  }
+  throw new Error(`${file}: the destinations were no longer settled at the shutter in 4 attempts: ${unsettled}`);
+}
+
+/** Sports scene only: waits up to 30 s for every destination to be settled
+ *  (the same verdict as waitSettled), then throws naming the reason. */
+async function waitStillSettled(page: import("@playwright/test").Page, file: string) {
+  if (SCENE !== "sports") return;
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    const verdict = await settledVerdict(page, SETTLED_UPTIME_SEC);
+    if (verdict.ok) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`${file}: the destinations are not settled at the shutter: ${verdict.why}`);
+    }
+    await page.waitForTimeout(1000);
+  }
 }
 
 /** Writes the PNG under a temporary name beside the target and renames it into
@@ -109,21 +159,28 @@ async function shutter(
  *  speed with nothing dropped and its loudness is integrated and passing. A
  *  shot taken earlier shows 0.84x in amber and no integrated loudness. Polls
  *  GET /api/v1/status and GET /api/v1/loudness every 2 s for up to 120 s. */
-export async function waitSettled(page: import("@playwright/test").Page, minUptimeSec = 30) {
+export async function waitSettled(page: import("@playwright/test").Page, minUptimeSec = SETTLED_UPTIME_SEC) {
   const deadline = Date.now() + 120_000;
   let why = "never polled";
   for (;;) {
-    const [status, loudness] = await Promise.all([
-      page.request.get("/api/v1/status").then((r) => r.json()),
-      page.request.get("/api/v1/loudness").then((r) => r.json()),
-    ]);
-    const verdict = destinationsSettled(progressFromStatus(status), loudnessRowsFromFeed(loudness), minUptimeSec);
+    const verdict = await settledVerdict(page, minUptimeSec);
     if (verdict.ok) return;
     why = verdict.why;
     if (Date.now() >= deadline) break;
     await page.waitForTimeout(2000);
   }
   throw new Error(`destinations did not settle within 120 s: ${why}`);
+}
+
+/** How long a destination must have run before a sports shot may show it. */
+const SETTLED_UPTIME_SEC = 30;
+
+async function settledVerdict(page: import("@playwright/test").Page, minUptimeSec: number) {
+  const [status, loudness] = await Promise.all([
+    page.request.get("/api/v1/status").then((r) => r.json()),
+    page.request.get("/api/v1/loudness").then((r) => r.json()),
+  ]);
+  return destinationsSettled(progressFromStatus(status), loudnessRowsFromFeed(loudness), minUptimeSec);
 }
 
 /* WAITING FOR REAL STATE, EXPRESSED AS THE ABSENCE OF THE EMPTY STATE.

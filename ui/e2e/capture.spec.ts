@@ -12,6 +12,7 @@ import { expect, test } from "@playwright/test";
  * indistinguishable from a broken one.
  */
 
+import { silentTrackProblem } from "../src/lib/captureGuards";
 import {
   EMPTY,
   OUT,
@@ -330,9 +331,57 @@ test("meters — loudness measured after routing", async ({ page }) => {
     await page.setViewportSize({ width: metersViewport.width, height: 1300 });
     await settle(page, 600);
   }
-  await snap(page, "04-meters.png");
+  await snapWithEveryTrackReading(page, "04-meters.png", 6);
   if (SCENE === "sports") await page.setViewportSize(metersViewport);
 });
+
+/** The six per-track cards' header readings, as the page prints them. */
+async function trackReadingProblem(page: import("@playwright/test").Page, expected: number): Promise<string | null> {
+  const headers = await page
+    .locator("[data-slot=card-title]")
+    .filter({ hasText: /^Track \d+/ })
+    .evaluateAll((els) => els.map((el) => el.parentElement?.innerText ?? ""));
+  return silentTrackProblem(headers, expected);
+}
+
+/** EVERY TRACK READS A LEVEL AT THE SHUTTER, or the shot is not taken.
+ *
+ *  The synthetic commentary voices take turns (scripts/demo-sports/voices.py:
+ *  each is a burst with its own period and duty), so a frame caught between
+ *  bursts shows a track at "-∞ dBFS" with no bar, under the homepage's "Meters
+ *  on every track". This polls the page's own readings for a moment when all of
+ *  them are finite, shoots at once, and reads them again after the shutter: a
+ *  frame whose readings went silent in between leaves no file and the wait
+ *  goes on. Bounded at 90 s; past that the test fails naming the silent
+ *  tracks. It never shoots a frame with a silent track and never skips one. */
+async function snapWithEveryTrackReading(page: import("@playwright/test").Page, file: string, expected: number) {
+  const deadline = Date.now() + 90_000;
+  let polls = 0;
+  let lit = 0;
+  let shots = 0;
+  let last = "never read";
+  while (Date.now() < deadline) {
+    const problem = await trackReadingProblem(page, expected);
+    polls++;
+    if (problem !== null) {
+      last = problem;
+      await page.waitForTimeout(40);
+      continue;
+    }
+    lit++;
+    shots++;
+    const broke = await snap(page, file, { frameCheck: () => trackReadingProblem(page, expected) });
+    if (broke === null) {
+      console.log(`capture: ${file}: every track read a level at the shutter (poll ${polls}, ${lit} lit polls, ${shots} shutter(s))`);
+      return;
+    }
+    last = `${broke} after the shutter`;
+  }
+  throw new Error(
+    `${file}: no moment in 90 s when all ${expected} tracks read a level (${polls} polls, ${lit} with every track lit): ` +
+      `last problem: ${last}. Refusing to photograph a track that reads silent.`,
+  );
+}
 
 /** THE CAPTION OF 05-sources' `degraded` ALLOWANCE. The shot's manifest entry lets
  *  the word "degraded" through the failed-state guard because the failover card
@@ -369,8 +418,10 @@ async function assertNoSourceDegraded(page: import("@playwright/test").Page) {
 }
 
 test("sources — one port, many programmes", async ({ page }) => {
-  // The sports scene is photographed only once every destination has settled.
-  if (SCENE === "sports") await waitSettled(page);
+  // THE FULL SCENE, NOT THE SPORTS ONE: the features page captions this image
+  // "Three programmes on one SRT port: each publishes to port 6000 with its own
+  // token". The sports scene has one source and would photograph the opposite
+  // claim; docs/media/shots.json gives this shot to the full scene.
   await page.goto("/sources");
   await populated(page, EMPTY.sources);
   // MORE THAN ONE, which is the entire claim of the page. One source renders
@@ -381,40 +432,38 @@ test("sources — one port, many programmes", async ({ page }) => {
   // one of those per source whatever state it is in, whereas the URL rows
   // themselves are one per protocol and would reach two on a single source.
   const perSource = page.locator('[data-tour="source-publish-urls"]');
-  // The sports scene is the opposite claim: one match feed, one source. Exactly
-  // one is expected there, so a stray second source is a failure too.
-  if (SCENE === "sports") {
-    await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBe(1);
-  } else {
-    await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
-  }
-  // RE-AIMED. Each programme's card now carries its caption track and caption
-  // words above the ingest fields, so a card is about a thousand pixels tall
-  // and the 900px frame at the top of the page held the first programme's
-  // caption-word boxes and nothing else -- under a caption about three
-  // programmes on one port. Taller, and framed from the first programme's
-  // "Signal detected" and publish URL down through the second programme's
-  // whole card to the third programme's header: three programmes, two of their
-  // per-programme publish URLs, one port.
+  await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBeGreaterThan(1);
+  // FRAMED ON ALL THREE PROGRAMMES' PUBLISH URLS, because that is what the
+  // features page's caption says: "each publishes to port 6000 with its own
+  // token". A programme's card is about 1200 px tall (its caption track and
+  // caption words sit above the ingest fields) and its publish URLs and token are
+  // at the bottom of it, so the frame runs from the first programme's "Signal
+  // detected" down through the third programme's publish URLs. The window is
+  // sized to that rather than to a constant that the next card change outgrows;
+  // the page's width is unchanged, so nothing re-flows when only the height does.
   const fullViewport = page.viewportSize()!;
-  if (SCENE === "sports") {
-    // One source: from the top of its card (name, DEFAULT, RUNNING) down through
-    // the ingest, "Signal detected", the publish URL and the PUBLISHING line.
-    await page.setViewportSize({ width: fullViewport.width, height: 1500 });
-    await expect(page.getByText("Signal detected").first()).toBeVisible({ timeout: 30_000 });
-    await page.locator("main").evaluate((m) => m.scrollTo(0, 0));
-    await settle(page);
-  } else {
-    await page.setViewportSize({ width: fullViewport.width, height: 1500 });
-    const names = page.locator("[data-slot=card-title]");
-    await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
-    await topOfFrame(page, page.getByText("Signal detected").first());
-    // Clear of the sticky header, which would otherwise sit on the line framed.
-    await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
-    await settle(page);
-    // The third programme's name has to be in the frame, or this is two.
-    const third = (await names.nth(2).boundingBox())!;
-    expect(third.y + third.height, "the third programme is below the frame").toBeLessThan(1500);
+  await page.setViewportSize({ width: fullViewport.width, height: 1500 });
+  const names = page.locator("[data-slot=card-title]");
+  await expect.poll(() => names.count(), { timeout: 30_000 }).toBeGreaterThan(2);
+  await expect.poll(() => perSource.count(), { timeout: 30_000 }).toBe(3);
+  const lastUrls = perSource.nth(2);
+  await topOfFrame(page, page.getByText("Signal detected").first());
+  // Clear of the sticky header, which would otherwise sit on the line framed.
+  await page.locator("main").evaluate((m) => m.scrollBy(0, -64));
+  await settle(page);
+  const lastBox = (await lastUrls.boundingBox())!;
+  const needed = Math.ceil(lastBox.y + lastBox.height + 32);
+  await page.setViewportSize({ width: fullViewport.width, height: needed });
+  await settle(page, 600);
+  // Asserted AFTER the resize, which can change how far `main` can scroll: every
+  // programme's publish URLs are in the frame, or this is fewer than three.
+  for (let i = 0; i < 3; i++) {
+    const box = (await perSource.nth(i).boundingBox())!;
+    expect(box.y, `programme ${i + 1}'s publish URLs start above the frame`).toBeGreaterThanOrEqual(0);
+    expect(
+      box.y + box.height,
+      `programme ${i + 1}'s publish URLs run below the frame`,
+    ).toBeLessThanOrEqual(needed);
   }
   // Masked last, right before the shutter: the resize and the scroll above
   // re-render the cards, and a re-render can put a token back.
@@ -899,6 +948,15 @@ test("chat — four platforms in one hub", async ({ page }) => {
 test("playout — serving a player from polyemesis itself", async ({ page }) => {
   await page.goto("/playout");
   await settle(page, 1500);
+  // THE COMPENSATING CHECK FOR THIS SHOT'S `offline` ALLOWANCE. The manifest lets
+  // the word through because "Offline card" names a settings card. A real
+  // offline state would print the same word, so the API the page reads says
+  // whether playout is serving: the manager is wired up and enabled.
+  const view = await page.request.get("/api/v1/playout");
+  expect(view.ok(), `GET /api/v1/playout answered ${view.status()}`).toBe(true);
+  const playout = (await view.json()) as { running?: boolean; status?: { enabled?: boolean } };
+  expect(playout.running, "the playout manager is not running, so `offline` on this page may be a real state").toBe(true);
+  expect(playout.status?.enabled, "playout is not enabled, so `offline` on this page may be a real state").toBe(true);
   await snap(page, "10-playout.png");
 });
 

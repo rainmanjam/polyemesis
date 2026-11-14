@@ -20,12 +20,15 @@ const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, String.raw`
 
 /** An anchored alternation of the test titles that shoot this scene's
  *  screenshots, for the capture config's `grep`. Several shots share a test, so
- *  titles are deduplicated. Playwright matches against "<project> <title>", so
- *  the pattern is not anchored at the front. */
+ *  titles are deduplicated. Playwright matches against the title path joined
+ *  with single spaces ("capture capture.spec.ts <title>", checked with
+ *  `playwright test --list --grep`), so the pattern starts at the spec file's
+ *  name: a test whose title merely ENDS with a manifest title does not also
+ *  run. */
 export function titlesFor(scene: "full" | "sports"): RegExp {
   const titles = new Set(readManifest().shots.filter((s) => s.scene === scene).map((s) => s.test));
   if (titles.size === 0) throw new Error(`docs/media/shots.json has no shots for the ${scene} scene`);
-  return new RegExp(`(?:${[...titles].map(escapeRegExp).join("|")})$`);
+  return new RegExp(String.raw`capture\.spec\.ts (?:${[...titles].map(escapeRegExp).join("|")})$`);
 }
 
 /** The failed-state words this shot declares as its subject. A shot with no

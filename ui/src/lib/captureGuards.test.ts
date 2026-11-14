@@ -9,6 +9,7 @@ import {
   progressFromStatus,
   secretsFromEnv,
   shootProblems,
+  silentTrackProblem,
   type DestProgress,
   type LoudnessRow,
 } from "./captureGuards";
@@ -401,5 +402,36 @@ describe("loudnessRowsFromFeed", () => {
   it("reads a feed with no reports as empty", () => {
     expect(loudnessRowsFromFeed({})).toEqual([]);
     expect(loudnessRowsFromFeed({ reports: null })).toEqual([]);
+  });
+});
+
+describe("silentTrackProblem", () => {
+  const card = (n: number, reading: string) => `Track ${n}\nstereo · aac\n${reading} dBFS`;
+  const six = (readings: string[]) => readings.map((r, i) => card(i + 1, r));
+
+  it("accepts six finite readings", () => {
+    expect(silentTrackProblem(six(["-12.3", "-30.0", "-8.1", "-20.5", "-40.2", "-18.0"]), 6)).toBeNull();
+  });
+
+  it("names every track that reads minus infinity, with either minus sign", () => {
+    expect(silentTrackProblem(six(["-∞", "-30.0", "-8.1", "-20.5", "−∞", "-18.0"]), 6)).toBe(
+      "tracks 1, 5 read minus infinity",
+    );
+  });
+
+  it("names a single silent track in the singular", () => {
+    expect(silentTrackProblem(six(["-12.3", "-30.0", "-8.1", "-20.5", "-40.2", "-∞"]), 6)).toBe(
+      "track 6 reads minus infinity",
+    );
+  });
+
+  it("refuses a card count other than the expected one", () => {
+    expect(silentTrackProblem(six(["-12.3", "-30.0"]), 6)).toBe("found 2 track cards, expected 6");
+    expect(silentTrackProblem([], 6)).toBe("found 0 track cards, expected 6");
+  });
+
+  it("treats a card with no reading as silent, and a card with no number by its position", () => {
+    expect(silentTrackProblem(["Track 1\nwaiting", "Track 2\n-9.0 dBFS"], 2)).toBe("track 1 reads minus infinity");
+    expect(silentTrackProblem(["stereo\n-9.0 dBFS", "no reading"], 2)).toBe("track 2 reads minus infinity");
   });
 });

@@ -65,7 +65,7 @@
     },
     {
       "file": "05-sources.png",
-      "scene": "sports",
+      "scene": "full",
       "test": "sources — one port, many programmes",
       "screen": "/sources",
       "site": true,
@@ -103,7 +103,7 @@
         "errors",
         "failed"
       ],
-      "caption": "The process table's Errors column header, the log's Errors filter and the verdict line (\"No errors\", \"none failed\") are static labels; every count beside them is zero."
+      "caption": "The process table's Errors column header is in the frame; the log's Errors filter and the verdict line (\"No errors\", \"none failed\") are on the page outside the frame. All are static labels, and every count beside them is zero."
     },
     {
       "file": "08-mix-matrix.png",
@@ -138,7 +138,7 @@
       "allowFailedWords": [
         "offline"
       ],
-      "caption": "\"Offline card\" is the name of the playout page's offline-slate card, not a state."
+      "caption": "\"Offline card\" is the name of the playout page's offline-slate card, not a state; the capture checks through GET /api/v1/playout that playout is running and enabled."
     },
     {
       "file": "11-library.png",
@@ -278,7 +278,7 @@
       "allowFailedWords": [
         "offline"
       ],
-      "caption": "The viewer readout reads Offline because the demo accounts are fixtures and are not streaming."
+      "caption": "The viewer readout reads Offline because the demo accounts are fixtures and are not streaming: the capture stubs each account's /platforms/accounts/<id>/stats with live: false."
     },
     {
       "file": "dashboard-1-programme.png",
