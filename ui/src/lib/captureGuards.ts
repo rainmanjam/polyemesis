@@ -148,26 +148,42 @@ export function destinationsSettled(
   loudness: LoudnessRow[],
   minUptimeSec: number,
 ): { ok: boolean; why: string } {
-  const no = (why: string) => ({ ok: false, why });
-  if (rows.length === 0) return no("no running destinations");
+  if (rows.length === 0) return { ok: false, why: "no running destinations" };
+  const why =
+    firstProblem(rows, (r) => processProblem(r, minUptimeSec)) ??
+    firstProblem(rows, (r) => loudnessProblem(r, loudness));
+  return why === undefined ? { ok: true, why: "" } : { ok: false, why };
+}
+
+function firstProblem(rows: DestProgress[], check: (r: DestProgress) => string | null): string | undefined {
   for (const r of rows) {
-    if (!processRunning({ state: r.state as ProcessState })) return no(`${r.name} is ${r.state}, not running`);
-    if (r.uptimeSec < minUptimeSec) return no(`${r.name} has run ${r.uptimeSec} s, under ${minUptimeSec} s`);
-    if (r.speed < MIN_SETTLED_SPEED || r.speed > MAX_SETTLED_SPEED) {
-      return no(`${r.name} speed is ${r.speed}x, outside ${MIN_SETTLED_SPEED} to ${MAX_SETTLED_SPEED}`);
-    }
-    if (r.dropped > 0) return no(`${r.name} has dropped ${r.dropped} frames`);
-    if (r.duplicated > 0) return no(`${r.name} has duplicated ${r.duplicated} frames`);
+    const why = check(r);
+    if (why !== null) return why;
   }
-  for (const r of rows) {
-    const mine = loudness.filter((l) => l.name === r.name);
-    if (mine.length === 0) return no(`${r.name} has no loudness row`);
-    for (const l of mine) {
-      if (!l.integrated) return no(`${r.name} loudness is not yet integrated`);
-      if (l.verdict !== "pass") return no(`${r.name} loudness verdict is ${l.verdict}, not pass`);
-    }
+  return undefined;
+}
+
+/** Why one destination's process is not settled, or null when it is. */
+function processProblem(r: DestProgress, minUptimeSec: number): string | null {
+  if (!processRunning({ state: r.state as ProcessState })) return `${r.name} is ${r.state}, not running`;
+  if (r.uptimeSec < minUptimeSec) return `${r.name} has run ${r.uptimeSec} s, under ${minUptimeSec} s`;
+  if (r.speed < MIN_SETTLED_SPEED || r.speed > MAX_SETTLED_SPEED) {
+    return `${r.name} speed is ${r.speed}x, outside ${MIN_SETTLED_SPEED} to ${MAX_SETTLED_SPEED}`;
   }
-  return { ok: true, why: "" };
+  if (r.dropped > 0) return `${r.name} has dropped ${r.dropped} frames`;
+  if (r.duplicated > 0) return `${r.name} has duplicated ${r.duplicated} frames`;
+  return null;
+}
+
+/** Why one destination's loudness rows are not settled, or null when they are. */
+function loudnessProblem(r: DestProgress, loudness: LoudnessRow[]): string | null {
+  const mine = loudness.filter((l) => l.name === r.name);
+  if (mine.length === 0) return `${r.name} has no loudness row`;
+  for (const l of mine) {
+    if (!l.integrated) return `${r.name} loudness is not yet integrated`;
+    if (l.verdict !== "pass") return `${r.name} loudness verdict is ${l.verdict}, not pass`;
+  }
+  return null;
 }
 
 /** What the page and the environment say about one frame, ready to judge. */
@@ -246,9 +262,26 @@ export function silentTrackProblem(headers: string[], expected: number): string 
   const silent: number[] = [];
   headers.forEach((h, i) => {
     const track = Number(/\bTrack (\d+)/.exec(h)?.[1] ?? i + 1);
-    const reading = /([-\u2212]\u221e|[-\u2212]?\d+(?:\.\d+)?)\s*dBFS/.exec(h)?.[1];
-    if (reading === undefined || /\u221e/.test(reading)) silent.push(track);
+    if (levelReading(h) !== "level") silent.push(track);
   });
   if (silent.length === 0) return null;
   return `${silent.length === 1 ? "track" : "tracks"} ${silent.join(", ")} read${silent.length === 1 ? "s" : ""} minus infinity`;
+}
+
+const INFINITY = "\u221e";
+const MINUS_SIGNS = "-\u2212";
+
+/** What the first "dBFS" in a card header that has a reading before it says:
+ *  "level" for a number, "silent" for a signed infinity, "none" when no dBFS has
+ *  a reading. Plain string handling, linear in the header: a regular expression
+ *  over a long run of digits or spaces backtracks super-linearly. */
+function levelReading(header: string): "level" | "silent" | "none" {
+  for (let at = header.indexOf("dBFS"); at >= 0; at = header.indexOf("dBFS", at + 1)) {
+    let end = at;
+    while (end > 0 && /\s/.test(header[end - 1])) end--;
+    const last = header[end - 1];
+    if (last >= "0" && last <= "9") return "level";
+    if (last === INFINITY && end >= 2 && MINUS_SIGNS.includes(header[end - 2])) return "silent";
+  }
+  return "none";
 }

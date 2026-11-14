@@ -435,3 +435,80 @@ describe("silentTrackProblem", () => {
     expect(silentTrackProblem(["stereo\n-9.0 dBFS", "no reading"], 2)).toBe("track 2 reads minus infinity");
   });
 });
+
+describe("destinationsSettled, exact refusals and their order", () => {
+  const one = (over: Partial<DestProgress> = {}) => [row({ name: "D", ...over })];
+  const ok = [loud({ name: "D" })];
+
+  it("words each refusal exactly", () => {
+    expect(destinationsSettled(one({ state: "failed" }), ok, 30).why).toBe("D is failed, not running");
+    expect(destinationsSettled(one({ uptimeSec: 5 }), ok, 30).why).toBe("D has run 5 s, under 30 s");
+    expect(destinationsSettled(one({ speed: 1.2 }), ok, 30).why).toBe("D speed is 1.2x, outside 0.97 to 1.03");
+    expect(destinationsSettled(one({ dropped: 3 }), ok, 30).why).toBe("D has dropped 3 frames");
+    expect(destinationsSettled(one({ duplicated: 2 }), ok, 30).why).toBe("D has duplicated 2 frames");
+    expect(destinationsSettled(one(), [], 30).why).toBe("D has no loudness row");
+    expect(destinationsSettled(one(), [loud({ name: "D", integrated: false })], 30).why).toBe(
+      "D loudness is not yet integrated",
+    );
+    expect(destinationsSettled(one(), [loud({ name: "D", verdict: "high" })], 30).why).toBe(
+      "D loudness verdict is high, not pass",
+    );
+  });
+
+  it("accepts the speed window's edges and an uptime exactly at the minimum", () => {
+    expect(destinationsSettled(one({ speed: 0.97, uptimeSec: 30 }), ok, 30).ok).toBe(true);
+    expect(destinationsSettled(one({ speed: 1.03 }), ok, 30).ok).toBe(true);
+    expect(destinationsSettled(one({ speed: 0.9699 }), ok, 30).ok).toBe(false);
+    expect(destinationsSettled(one({ speed: 1.0301 }), ok, 30).ok).toBe(false);
+  });
+
+  it("checks the process of every row before any loudness, and the first problem wins", () => {
+    const rows = [row({ name: "A" }), row({ name: "B", dropped: 1, duplicated: 1 })];
+    expect(destinationsSettled(rows, [], 30).why).toBe("B has dropped 1 frames");
+    const both = [row({ name: "A", dropped: 1, speed: 2 })];
+    expect(destinationsSettled(both, [], 30).why).toBe("A speed is 2x, outside 0.97 to 1.03");
+  });
+
+  it("checks every loudness row of a destination, not only the first", () => {
+    const rows = [row({ name: "D" })];
+    const l = [loud({ name: "D" }), loud({ name: "D", verdict: "low" })];
+    expect(destinationsSettled(rows, l, 30).why).toBe("D loudness verdict is low, not pass");
+  });
+});
+
+describe("silentTrackProblem reads a reading the way the page prints it", () => {
+  const one = (h: string) => silentTrackProblem([h], 1);
+  const SILENT = "track 1 reads minus infinity";
+
+  it("accepts a number with or without a sign, a fraction, and any whitespace before dBFS", () => {
+    for (const h of ["Track 1 -12.3 dBFS", "Track 1 12 dBFS", "Track 1 −12.5dBFS", "Track 1 -3\t\n dBFS", "Track 1 -3 dBFS"]) {
+      expect(one(h)).toBeNull();
+    }
+  });
+
+  it("calls a signed infinity silent and an unsigned one, a lone dBFS, or another case unreadable", () => {
+    for (const h of ["Track 1 -∞ dBFS", "Track 1 −∞ dBFS", "Track 1 ∞ dBFS", "Track a dBFS", "Track 1 -12.3 dbfs", "Track 1 12. dBFS"]) {
+      expect(one(h)).toBe(SILENT);
+    }
+  });
+
+  it("uses the first reading when a card has several", () => {
+    expect(one("Track 1 -∞ dBFS then -5 dBFS")).toBe(SILENT);
+    expect(one("Track 1 -5 dBFS then -∞ dBFS")).toBeNull();
+    expect(one("Track 1 oops dBFS -5 dBFS")).toBeNull();
+  });
+
+  it("takes the track number from the card, else its position", () => {
+    expect(silentTrackProblem(["Track 7 -∞ dBFS"], 1)).toBe("track 7 reads minus infinity");
+  });
+
+  it("finishes fast on a long adversarial header", () => {
+    const digits = "1".repeat(50_000);
+    const t0 = Date.now();
+    expect(one(`Track 1 ${digits}`)).toBe(SILENT);
+    expect(one(`Track 1 ${digits}.${digits} dBFS`)).toBeNull();
+    expect(one(`Track 1 ${"- ".repeat(100_000)}dBFS`)).toBe(SILENT);
+    expect(one(`Track a ${"dBFS ".repeat(50_000)}`)).toBe(SILENT);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+});
