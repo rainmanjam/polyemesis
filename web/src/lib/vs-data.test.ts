@@ -49,11 +49,6 @@ describe("the five /vs data files", () => {
     expect(have).toEqual(["restreamer", "streamelements", "streamlabs"]);
   });
 
-  it("has no use-the-other section on any page (removed on the owner's decision, 2026-11-14)", () => {
-    const have = ALL.filter((d) => d.useOther).map((d) => d.slug);
-    expect(have).toEqual([]);
-  });
-
   it("has each page's middle section", () => {
     const find = (d: VsData, kind: string, word: string) =>
       d.sections.some((s) => s.kind === kind && s.heading.toLowerCase().includes(word));
@@ -130,7 +125,6 @@ describe("the five /vs data files", () => {
       }
       for (const s of [...d.fits.poly, ...d.fits.other.items]) check("fits", s);
       for (const s of strings(d.merits?.items)) check("merits", s);
-      for (const s of strings(d.useOther?.items)) check("useOther", s);
       expect(unsupported).toEqual([]);
     });
 
@@ -225,12 +219,10 @@ describe("validateVs", () => {
     expect(problems(d)).toContain("which");
   });
 
-  it("rejects empty merits and an empty use-other list", () => {
+  it("rejects an empty merits list", () => {
     const d = clone();
     d.merits = { heading: "x", items: [] };
-    d.useOther = { heading: "x", items: [] };
     expect(problems(d)).toContain("merits");
-    expect(problems(d)).toContain("useOther");
   });
 
   it("rejects bad section ids", () => {
@@ -347,20 +339,6 @@ describe("validateVs hardening", () => {
     const d = full();
     d.sections[2] = { kind: "table", id: "t", heading: "h", caption: "c", head: [" capability ", "b"], rows: [["x", "y"]] };
     expect(problems(d)).toContain("Capability");
-  });
-
-  it("validates the href of every link the template renders", () => {
-    const bad = ["javascript:alert(1)", "data:text/html,x", "//evil.example/x", "http://example.com", "", " /x"];
-    for (const href of bad) {
-      const d = structuredClone(bySlug("streamlabs"));
-      d.useOther = { heading: "x", items: ["y"], links: [{ label: "x", href }] };
-      expect(problems(d), href).toContain("useOther.links[0].href");
-    }
-    for (const href of ["/docs/x", "https://example.com/x", "#glance"]) {
-      const d = structuredClone(bySlug("streamlabs"));
-      d.useOther = { heading: "x", items: ["y"], links: [{ label: "x", href }] };
-      expect(validateVs(d), href).toEqual([]);
-    }
   });
 });
 
