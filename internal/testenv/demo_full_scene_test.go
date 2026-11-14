@@ -111,3 +111,71 @@ func TestDemoDriverDoesNotFollowRedirects(t *testing.T) {
 		t.Errorf("the driver followed a redirect: %d request(s) reached the second server", n)
 	}
 }
+
+// The legacy seeder (scripts/seed_demo.go) POSTs the password to /setup and
+// /auth/login, so it must not follow a redirect either.
+func TestSeedDemoDoesNotFollowRedirects(t *testing.T) {
+	var elsewhere, first atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+	}))
+	defer target.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		first.Add(1)
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer redirector.Close()
+	port := redirector.URL[strings.LastIndex(redirector.URL, ":")+1:]
+
+	root := repoRootFromTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "run", filepath.Join(root, "scripts", "seed_demo.go"), port)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "E2E_PASSWORD=not-a-real-password", "POLYEMESIS_SETUP_CODE=")
+	_ = cmd.Run() // expected to fail: nothing answers as a polyemesis server
+	if first.Load() == 0 {
+		t.Fatal("the seeder never reached the redirecting server")
+	}
+	if n := elsewhere.Load(); n != 0 {
+		t.Errorf("the seeder followed a redirect: %d request(s) reached the second server", n)
+	}
+}
+
+// The legacy capture scripts keep their work directory in $TMPDIR, outside the
+// module, and seed_demo.go imports internal/demorig, so `cd $WORK && go run`
+// fails there with "go.mod file not found". The scripts build the seeder with
+// scripts/build-seeder.sh; this runs that step from a directory outside the
+// repository and expects a binary.
+func TestLegacyCaptureScriptsCanBuildTheSeederFromOutsideTheModule(t *testing.T) {
+	root := repoRootFromTest(t)
+	outside := t.TempDir()
+	if strings.HasPrefix(outside, root) {
+		t.Skipf("the temp directory %s is inside the repository", outside)
+	}
+	bin := filepath.Join(outside, "seed_demo")
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "bash", filepath.Join(root, "scripts", "build-seeder.sh"), bin)
+	cmd.Dir = outside
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("building the seeder from outside the module failed: %v\n%s", err, out)
+	}
+	if st, err := os.Stat(bin); err != nil || st.Size() == 0 {
+		t.Fatalf("no seeder binary at %s: %v", bin, err)
+	}
+	// And the scripts use that step, not the old invocation.
+	for _, name := range []string{"capture-lanes.sh", "capture-media.sh"} {
+		raw, err := os.ReadFile(filepath.Join(root, "scripts", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		txt := string(raw)
+		if !strings.Contains(txt, "build-seeder.sh") {
+			t.Errorf("%s does not build the seeder with build-seeder.sh", name)
+		}
+		if regexp.MustCompile(`(?m)^[^#\n]*go run [^\n]*seed_demo\.go`).MatchString(txt) {
+			t.Errorf("%s still runs the seeder with go run from the work directory", name)
+		}
+	}
+}

@@ -69,7 +69,13 @@ func main() {
 	base = "http://127.0.0.1:" + port + "/api/v1"
 
 	jar, _ := cookiejar.New(nil)
-	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	// Never follows a redirect: Go re-sends a POST body on a 307 or 308, and
+	// /setup and /auth/login carry the password.
+	client = &http.Client{
+		Jar:           jar,
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 
 	waitUp()
 

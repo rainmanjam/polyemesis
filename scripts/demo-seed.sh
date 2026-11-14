@@ -31,13 +31,22 @@
 #
 # WHAT IT WILL NOT DO.
 #
-#   NOTHING REACHES A REAL PLATFORM. Every destination URL in the fixture is
-#   under .invalid, which RFC 2606 reserves so it can never be delegated, and
-#   the platform destinations are created DISABLED. That is enforced, not
-#   assumed: internal/demorig refuses the fixture before anything starts, and
-#   the server runs on an --internal Docker network with no route off the
-#   machine, reached only through a relay bound to 127.0.0.1. A demo seed that
-#   publishes to a real ingest is a broadcast nobody meant to make.
+#   NOTHING REACHES A REAL PLATFORM. Three layers, each checked by code:
+#     1. Before anything starts, internal/demorig refuses the fixture unless
+#        every network destination (rtmp, rtmps, srt) is on a .invalid host
+#        (RFC 2606 reserves it, so it can never be delegated), is not enabled,
+#        and has no backup on a real host, platform account, extra FFmpeg
+#        argument or multitrack; every alert URL is https on a .invalid host;
+#        every "start" schedule names file destinations; and every key in what
+#        is sent to the server is spelled exactly as an allow-list has it (the
+#        server matches keys ignoring case, so a variant would slip past).
+#     2. The sports scene checks the rows the server stored before every start.
+#     3. The server runs on an --internal Docker network (asked of Docker, not
+#        assumed; engines older than 26.0.0 are refused) with no route off the
+#        machine and no published port, reached through a relay bound to
+#        127.0.0.1.
+#   Network destinations are created disabled. A demo seed that publishes to a
+#   real ingest is a broadcast nobody meant to make.
 #
 #   NOTHING RUNS AGAINST YOUR DATA. The server this starts uses a data
 #   directory THIS SCRIPT CREATES, under $TMPDIR, and refuses to reuse one it
@@ -389,7 +398,7 @@ sports_start_relay
 # exactly the same numbers on the page.
 if [ "$SCENE" = full ]; then
 echo "==> rendering the recording library"
-docker run --rm -v "$DATA:/data" --entrypoint ffmpeg "$IMAGE" \
+docker run --rm --network none -v "$DATA:/data" --entrypoint ffmpeg "$IMAGE" \
   -hide_banner -loglevel error -y \
   -f lavfi -i "testsrc2=size=1280x720:rate=30" \
   -f lavfi -i "sine=frequency=180:sample_rate=48000" \
@@ -412,7 +421,7 @@ while IFS=$'\t' read -r NAME SECONDS_LONG; do
   # ingest audio track preserved", reports TRACKS 1 for every segment. The
   # numbers on that page are ffprobe measurements, so this is not cosmetic: the
   # page would be telling the truth about a file the seed got wrong.
-  docker run --rm -v "$DATA:/data" --entrypoint ffmpeg "$IMAGE" \
+  docker run --rm --network none -v "$DATA:/data" --entrypoint ffmpeg "$IMAGE" \
     -hide_banner -loglevel error -y \
     -f concat -safe 0 -i /data/.demo-seed/concat.txt \
     -map 0 -c copy -t "$SECONDS_LONG" "/data/recordings/$NAME"

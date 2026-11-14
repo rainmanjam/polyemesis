@@ -69,6 +69,8 @@ presentation/
 # from history unless it is named here.
 docs/media/.playwright/
 docs/media/.playwright-lanes/
+# The compression step's temp files (a kill mid-save leaves one).
+docs/media/*.tmp
 
 # The built site. `/dist/` above is root-anchored and does not cover it, so
 # without this line web/dist ships a second copy of every screenshot and the

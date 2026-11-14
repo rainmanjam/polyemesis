@@ -268,6 +268,7 @@ func readFixture(path string) *fixture {
 // ------------------------------------------------------------------- 1. setup
 
 func setup(fx *fixture) {
+	guardKeys(fx)
 	refuseIfOccupied(fx)
 	applySettings(fx)
 
@@ -518,6 +519,7 @@ func waitProbed(fx *fixture) []string {
 // actually arrived — so both are written once there is a layout to write them
 // against, rather than hopefully before there is one.
 func finish(fx *fixture) {
+	guardKeys(fx)
 	sources := sourcesByName()
 	rends := renditionsByName()
 	dests := destinationsByName()
@@ -669,6 +671,34 @@ func content(fx *fixture) {
 	}
 }
 
+// guardKeys refuses any key, in any object this driver sends to the server
+// from a fixture, that is not spelled exactly as demorig lists it. The server
+// matches keys ignoring case, so a guard that reads exact spellings is blind to
+// "backupurl" or "Enabled"; see demorig/keys.go. The objects taken raw from a
+// fixture are: settings (merged into PUT /settings), renditions, destinations,
+// alert rules and schedules. Sources, the rolling buffer, clips and the sign-in
+// are built from typed fields.
+func guardKeys(fx *fixture) {
+	objs := demorig.FixtureObjects{
+		Settings:   fx.Settings,
+		AlertRules: fx.Automation.AlertRules,
+		Schedules:  fx.Automation.Schedules,
+	}
+	for _, s := range fx.Sources {
+		objs.Renditions = append(objs.Renditions, s.Renditions...)
+		for _, d := range s.Destinations {
+			o := cloneMap(d.Rest)
+			if d.Rendition != "" {
+				o["rendition"] = d.Rendition
+			}
+			objs.Destinations = append(objs.Destinations, o)
+		}
+	}
+	if err := demorig.CheckFixtureObjects(objs); err != nil {
+		die("%v", err)
+	}
+}
+
 // guardContent is the full scene's first safety layer: it refuses a fixture
 // whose alert rules or destinations could reach anybody. Every alert URL must
 // pass demorig.CheckWebhookURLs and every destination demorig.CheckInvalidDestinations,
@@ -676,6 +706,7 @@ func content(fx *fixture) {
 // empty list means every destination). Run before any container exists, again
 // before the rules are sent, and again before the destinations are created.
 func guardContent(fx *fixture) {
+	guardKeys(fx)
 	var urls []demorig.WebhookRule
 	for _, r := range fx.Automation.AlertRules {
 		name, _ := r["name"].(string)
@@ -866,6 +897,7 @@ func fixtureDestRows(fx *fixture) []demorig.DestRow {
 		for _, d := range s.Destinations {
 			row := demorig.DestRow{Name: d.Name}
 			row.Kind, _ = d.Rest["kind"].(string)
+			row.Enabled, _ = d.Rest["enabled"].(bool)
 			row.URL, _ = d.Rest["url"].(string)
 			row.BackupURL, _ = d.Rest["backupUrl"].(string)
 			row.ExtraInputArgs, _ = d.Rest["extraInputArgs"].(string)
@@ -883,6 +915,7 @@ func fixtureDestRows(fx *fixture) []demorig.DestRow {
 // guardFixture refuses a fixture whose destinations point anywhere but host.
 // Offline: runs before any container is started.
 func guardFixture(fx *fixture, host string) {
+	guardKeys(fx)
 	rows := fixtureDestRows(fx)
 	if len(rows) == 0 {
 		die("the fixture has no destinations to check")
@@ -890,11 +923,9 @@ func guardFixture(fx *fixture, host string) {
 	// An enabled row starts as soon as it is created, before the stored-row
 	// check has run. The sports fixture creates every destination disabled and
 	// `start` enables them after that check.
-	for _, src := range fx.Sources {
-		for _, d := range src.Destinations {
-			if on, _ := d.Rest["enabled"].(bool); on {
-				die("demo rig: destination %q is enabled in the fixture; it would start before the stored rows are checked", d.Name)
-			}
+	for _, r := range rows {
+		if r.Enabled {
+			die("demo rig: destination %q is enabled in the fixture; it would start before the stored rows are checked", r.Name)
 		}
 	}
 	if err := demorig.CheckStored(rows, []string{host}); err != nil {

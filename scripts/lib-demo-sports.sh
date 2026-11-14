@@ -46,6 +46,19 @@ sports_configure() {
 # must be internal. Used after creating it, and before anything acts on a rig
 # that is already running (--state start and routing, --proof).
 sports_require_internal_network() {
+  # Docker Engine before 26.0.0 forwarded DNS queries from an internal network to
+  # the host's resolver (CVE-2024-29018), so an --internal network was not quite
+  # closed. Refuse an older (or unreadable) engine rather than trust the flag.
+  local ver major
+  ver="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+  major="${ver%%.*}"
+  case "$major" in
+    ''|*[!0-9]*) echo "REFUSING: cannot read the Docker Engine version; engines older than 26.0.0 forward DNS from internal networks." >&2; exit 1 ;;
+  esac
+  if [ "$major" -lt 26 ]; then
+    echo "REFUSING: Docker Engine $ver is older than 26.0.0, which forwarded DNS from internal networks to the host's resolver; update Docker." >&2
+    exit 1
+  fi
   [ "$(docker network inspect -f '{{.Internal}}' "$NET" 2>/dev/null)" = true ] \
     || { echo "REFUSING: network $NET is not internal (or cannot be inspected); it could route off this machine." >&2; exit 1; }
 }

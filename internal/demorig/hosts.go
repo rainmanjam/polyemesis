@@ -20,6 +20,7 @@ import (
 type DestRow struct {
 	Name            string `json:"name"`
 	Kind            string `json:"kind"`
+	Enabled         bool   `json:"enabled"`
 	URL             string `json:"url"`
 	BackupURL       string `json:"backupUrl"`
 	ExtraInputArgs  string `json:"extraInputArgs"`
@@ -221,6 +222,9 @@ func CheckInvalidDestinations(rows []DestRow) error {
 	var bad []string
 	for _, r := range rows {
 		var msgs []string
+		if r.Kind != "file" && r.Enabled {
+			msgs = append(msgs, "a network destination is enabled in the fixture (it would start the moment it is created)")
+		}
 		if r.Kind == "file" {
 			if msg := fileProblem(r.URL, true); msg != "" {
 				msgs = append(msgs, msg)

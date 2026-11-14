@@ -35,6 +35,7 @@ cat > "$TMP/bin/docker" <<'STUB'
 echo "$*" >> "$STUB_LOG"
 case "$1" in
   info) [ "${STUB_DOCKER_UP:-1}" = 1 ]; exit $? ;;
+  version) echo "${STUB_DOCKER_VERSION:-27.0.1}"; exit 0 ;;
   ps) exit 0 ;;
   network) [ "$2" = inspect ] && echo "${STUB_NET_INTERNAL:-true}"; exit 0 ;;
   port) [ -n "${STUB_PORT_LINE:-}" ] && echo "$STUB_PORT_LINE"; exit 0 ;;
@@ -425,4 +426,59 @@ STUB_SERVER_OK=1 STUB_PORT_LINE="8097/tcp -> 0.0.0.0:8097" run_script --scene sp
 expect_rc 1
 expect_err "REFUSING"
 expect_no_call "socat"
+pass
+
+# 27
+begin full-case-variant-keys-refused
+# The server matches JSON keys ignoring case, so a variant is a real field to it.
+mutate_full 'd0["backupurl"] = "rtmp://b.rtmp.youtube.com/live2"'
+mutate_full 'd0["Multitrack"] = True'
+mutate_full 'd0["multitracK"] = True'
+mutate_full 'd0["Enabled"] = True'
+mutate_full 's = f["automation"]["schedules"][3]; del s["action"]; s["Action"] = "start"; s["destinations"] = []; s["enabled"] = True'
+pass
+
+# 28
+begin sports-case-variant-enabled-refused
+python3 - "$ROOT/scripts/demo-seed.sports.fixture.json" "$TMP/sports-variant.json" <<'PY'
+import json, sys
+fx = json.load(open(sys.argv[1]))
+d = fx["sources"][0]["destinations"][0]
+del d["enabled"]
+d["Enabled"] = True
+json.dump(fx, open(sys.argv[2], "w"))
+PY
+DEMO_FIXTURE="$TMP/sports-variant.json" run_script --scene sports --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "network create"
+expect_no_call "run"
+pass
+
+# 29
+begin full-enabled-network-destination-refused
+mutate_full 'd0["enabled"] = True'
+pass
+
+# 30
+begin full-settings-host-refused
+mutate_full 'f["settings"]["mqtt"] = {"brokerUrl": "tcp://broker.example.com:1883"}'
+mutate_full 'f["settings"]["recording"]["Enabled"] = True'
+pass
+
+# 31
+begin docker-engine-too-old-refused
+# Engines before 26.0.0 forward DNS from an internal network to the host.
+STUB_DOCKER_VERSION=25.0.5 run_script --scene sports --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_err "26"
+expect_no_call "run"
+STUB_DOCKER_VERSION=25.0.5 run_script --no-capture --reset
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "run"
+: > "$STUB_LOG"
+STUB_DOCKER_VERSION=26.0.0 run_script --scene sports --no-capture --reset
+! grep -q "older than 26" "$ERR" || fail "26.0.0 was refused as too old"
 pass

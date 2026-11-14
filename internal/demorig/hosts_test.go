@@ -423,7 +423,7 @@ func TestCheckInvalidDestinationsRefusesRealHostsAndOddShapes(t *testing.T) {
 			if !strings.Contains(err.Error(), "Spanish") {
 				t.Errorf("error lacks the name: %v", err)
 			}
-			if strings.Contains(err.Error(), "evil.com") && strings.Contains(u, "pw@") {
+			if strings.Contains(err.Error(), "pw") {
 				t.Errorf("error leaked userinfo: %v", err)
 			}
 		}
