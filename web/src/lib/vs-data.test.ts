@@ -49,9 +49,9 @@ describe("the five /vs data files", () => {
     expect(have).toEqual(["restreamer", "streamelements", "streamlabs"]);
   });
 
-  it("has a use-the-other list exactly on aitum, obs-multi-rtmp, streamelements and streamlabs", () => {
-    const have = ALL.filter((d) => d.useOther).map((d) => d.slug).sort((a, b) => a.localeCompare(b));
-    expect(have).toEqual(["aitum-multistream", "obs-multi-rtmp", "streamelements", "streamlabs"]);
+  it("has no use-the-other section on any page (removed on the owner's decision, 2026-11-14)", () => {
+    const have = ALL.filter((d) => d.useOther).map((d) => d.slug);
+    expect(have).toEqual([]);
   });
 
   it("has each page's middle section", () => {
@@ -353,12 +353,12 @@ describe("validateVs hardening", () => {
     const bad = ["javascript:alert(1)", "data:text/html,x", "//evil.example/x", "http://example.com", "", " /x"];
     for (const href of bad) {
       const d = structuredClone(bySlug("streamlabs"));
-      (d.useOther as NonNullable<VsData["useOther"]>).links = [{ label: "x", href }];
+      d.useOther = { heading: "x", items: ["y"], links: [{ label: "x", href }] };
       expect(problems(d), href).toContain("useOther.links[0].href");
     }
     for (const href of ["/docs/x", "https://example.com/x", "#glance"]) {
       const d = structuredClone(bySlug("streamlabs"));
-      (d.useOther as NonNullable<VsData["useOther"]>).links = [{ label: "x", href }];
+      d.useOther = { heading: "x", items: ["y"], links: [{ label: "x", href }] };
       expect(validateVs(d), href).toEqual([]);
     }
   });

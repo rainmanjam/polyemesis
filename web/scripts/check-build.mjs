@@ -1341,6 +1341,14 @@ const CRUMB_EYEBROW =
   "Not copy: the breadcrumb trail and eyebrow word the old markup ran straight into the h1. The shell draws the trail (its separators are CSS) and the eyebrow is gone; the h1 is on the page word for word.";
 const CLOSING_RUN =
   "Not copy: the closing buttons and the 'Also compared' link list the old markup ran together with the note after them. Rebuilt, the buttons are in the closing band and the list is above it (with 'Also compared' as its heading); every label is still on the page, and the note is checked whole.";
+const REMOVED_AITUM_MULTISTREAM =
+  "Removed whole on the owner's decision of 2026-11-14 (asked what the section 'Use Aitum, not this' should say, answered 'Remove the sections'). The section is gone: its heading, its list and the paragraph after it.";
+const REMOVED_OBS_MULTI_RTMP =
+  "Removed whole on the owner's decision of 2026-11-14 (asked what the section 'Use the plugin, not this' should say, answered 'Remove the sections'). The section is gone: its heading and its list.";
+const REMOVED_STREAMELEMENTS =
+  "Removed whole on the owner's decision of 2026-11-14 (asked what the section 'Use SE.Live, not this' should say, answered 'Remove the sections'). The section is gone: its heading, its list and the paragraph after it.";
+const REMOVED_STREAMLABS =
+  "Removed whole on the owner's decision of 2026-11-14 (asked what the section 'Use Streamlabs, not this' should say, answered 'Remove the sections'). The section is gone: its heading, its list, the paragraph after it and its three links.";
 const DROPPED = {
   "/calculator": [
     {
@@ -1376,12 +1384,64 @@ const DROPPED = {
       cut: "all five compared install polyemesis also compared: obs-multi-rtmp · streamelements · streamlabs · restreamer and restream.io",
       why: CLOSING_RUN,
     },
+    {
+      cut: "use aitum, not this one mix suits every platform.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
+    {
+      cut: "this is most broadcasts, and adding a server to serve it is a worse setup, not a better one.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
+    {
+      cut: "your track layout is settled and you are not editing it under load.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
+    {
+      cut: "you want a destination at a different resolution or bitrate and your pc has the headroom to encode it.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
+    {
+      cut: "you do not want to run, patch or pay for a server.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
+    {
+      cut: "that is a legitimate position and there is no answer to it here.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
+    {
+      cut: "polyemesis is worth the server when the mixes outnumber the tracks, when the stream pc has no headroom left to encode with, or when the upload is the ceiling: one stream out instead of one per platform.",
+      why: REMOVED_AITUM_MULTISTREAM,
+    },
   ],
   "/vs/obs-multi-rtmp": [
     { cut: "polyemesis / comparison / obs-multi-rtmp compared", why: CRUMB_EYEBROW },
     {
       cut: "all five compared install polyemesis also compared: aitum multistream · streamelements · streamlabs · restreamer and restream.io",
       why: CLOSING_RUN,
+    },
+    {
+      cut: "use the plugin, not this your upload comfortably carries every destination at once.",
+      why: REMOVED_OBS_MULTI_RTMP,
+    },
+    {
+      cut: "if it does, the main reason to move the fan-out off your machine has already been answered.",
+      why: REMOVED_OBS_MULTI_RTMP,
+    },
+    {
+      cut: "the per-destination mixes you want are ones you can lay out across obs's six tracks.",
+      why: REMOVED_OBS_MULTI_RTMP,
+    },
+    {
+      cut: "selecting one of those per output is exactly what this plugin does, at zero cost.",
+      why: REMOVED_OBS_MULTI_RTMP,
+    },
+    {
+      cut: "a plugin that ships with your broadcast software is one fewer thing to keep alive.",
+      why: REMOVED_OBS_MULTI_RTMP,
+    },
+    {
+      cut: "you are already running it and it works.",
+      why: REMOVED_OBS_MULTI_RTMP,
     },
   ],
   "/vs/restreamer": [
@@ -1397,12 +1457,56 @@ const DROPPED = {
       cut: "all five compared install polyemesis also compared: streamlabs · restreamer and restream.io",
       why: CLOSING_RUN,
     },
+    {
+      cut: "use se.live, not this you broadcast from windows and one of the six obs tracks already carries the right sound for each platform.",
+      why: REMOVED_STREAMELEMENTS,
+    },
+    {
+      cut: "you want the vertical cut composed as its own scene rather than reframed from the horizontal one.",
+      why: REMOVED_STREAMELEMENTS,
+    },
+    {
+      cut: "canvas does that in a single obs session; a polyemesis rendition can only crop, letterbox or blur-fill the frame it received.",
+      why: REMOVED_STREAMELEMENTS,
+    },
+    {
+      cut: "you are already inside the streamelements ecosystem for overlays, tips and chat, and adding a separate server to the setup buys you nothing you asked for.",
+      why: REMOVED_STREAMELEMENTS,
+    },
+    {
+      cut: "you are on windows and do not want to run a server.",
+      why: REMOVED_STREAMELEMENTS,
+    },
+    {
+      cut: "se.live needs no host, no port and no certificate; polyemesis needs all three before it sends a byte.",
+      why: REMOVED_STREAMELEMENTS,
+    },
+    {
+      cut: "polyemesis is the answer to a narrower question: you are not on windows, or you want a mix assembled per platform rather than chosen from what obs prepared, or you want the fan-out to leave a server instead of your own connection.",
+      why: REMOVED_STREAMELEMENTS,
+    },
   ],
   "/vs/streamlabs": [
     { cut: "polyemesis / comparison / streamlabs compared", why: CRUMB_EYEBROW },
     {
       cut: "the three ways to multistream the full comparison how the mix works",
-      why: "The old page ran its three footer links into the checked-and-recorded note. They are kept as the links under 'Use Streamlabs', no longer next to the note, which is the last paragraph of the page body and is checked whole.",
+      why: "The old page ran its three footer links into the checked-and-recorded note. The three links were under the 'Use Streamlabs, not this' section, which was removed on the owner's decision of 2026-11-14, so they are gone with it; the note after them is the last paragraph of the page body and is checked whole.",
+    },
+    {
+      cut: "use streamlabs, not this if you want multistreaming without running a server, streamlabs is the easier answer and this project is not competing for that.",
+      why: REMOVED_STREAMLABS,
+    },
+    {
+      cut: "their relay costs you one upload and no hardware, their desktop app and obs plugin are built for the job, and multichat reads and posts across youtube, twitch and facebook pages from one place.",
+      why: REMOVED_STREAMLABS,
+    },
+    {
+      cut: "if one mix suits every platform you send to, you are already done.",
+      why: REMOVED_STREAMLABS,
+    },
+    {
+      cut: "polyemesis is for the case where that is the thing that does not work: where the archive needs a different mix from the broadcast, where the stream must not pass through a third party, or where a subscription per month for a fan-out you could run yourself is the wrong shape.",
+      why: REMOVED_STREAMLABS,
     },
   ],
   "/docs": [
@@ -1541,6 +1645,16 @@ const cutsFor = (route, sentences, built) => {
   }
 }
 
+/* HEADINGS DROPPED. A heading the owner removed on purpose: route -> { heading: why }.
+ * It is checked like a DROPPED cut: the why must be written, and the entry fails when
+ * the heading is on the page after all. */
+const DROPPED_HEADINGS = {
+  "/vs/aitum-multistream": { "Use Aitum, not this": REMOVED_AITUM_MULTISTREAM },
+  "/vs/obs-multi-rtmp": { "Use the plugin, not this": REMOVED_OBS_MULTI_RTMP },
+  "/vs/streamelements": { "Use SE.Live, not this": REMOVED_STREAMELEMENTS },
+  "/vs/streamlabs": { "Use Streamlabs, not this": REMOVED_STREAMLABS },
+};
+
 /* HEADINGS KEPT. The h1 of each of those pages and every h2 in the fixture
  * must still be an h1 or h2 of the rebuilt page (tags stripped, whitespace
  * collapsed, same case-insensitive typography as the copy check). */
@@ -1554,8 +1668,17 @@ const cutsFor = (route, sentences, built) => {
   for (const [route, legacy] of Object.entries(LEGACY)) {
     const main = legacyMain(route);
     const have = new Set([...headings(main, "h1"), ...headings(main, "h2")]);
+    const gone = DROPPED_HEADINGS[route] ?? {};
     for (const wanted of [legacy.h1, ...legacy.h2]) {
-      if (!have.has(key(wanted))) fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
+      const removed = typeof gone[wanted] === "string" && gone[wanted].trim() !== "";
+      if (removed && have.has(key(wanted))) {
+        fail.push(`${route} has a DROPPED_HEADINGS entry for "${wanted}", but the heading is on the page. Delete the entry.`);
+      } else if (!removed && !have.has(key(wanted))) {
+        fail.push(`${route} lost the heading "${wanted}" (it must stay an h1 or h2).`);
+      }
+    }
+    for (const h of Object.keys(gone)) {
+      if (![legacy.h1, ...legacy.h2].includes(h)) fail.push(`${route} has a DROPPED_HEADINGS entry "${h}" that is not a heading in the legacy fixture (typo?).`);
     }
   }
 }
