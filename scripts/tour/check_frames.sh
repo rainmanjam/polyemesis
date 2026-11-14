@@ -12,7 +12,8 @@ command -v ffmpeg >/dev/null 2>&1 || { echo "ffmpeg is not installed" >&2; exit 
 [ -s "$VIDEO" ] || { echo "check_frames.sh: $VIDEO is missing or empty" >&2; exit 2; }
 
 # Fixed phrases, then one pattern (ERE, case-insensitive): OCR reads the middle dot of
-# "YouTube · YouTube" as ".", "-", ":" or nothing.
+# "YouTube · YouTube" as ".", "-", ":" or nothing. The fixed phrases are matched with a frame's
+# lines joined (they wrap); the pattern is matched within one line.
 FORBIDDEN=("Nothing is live" "No chat account" "not connected" "No platform accounts connected")
 DOUBLE='youtube[^[:alnum:]]{1,3}youtube'
 
@@ -52,7 +53,10 @@ for png in "${frames[@]}"; do
       hits=$((hits+1))
     fi
   done
-  if grep -qiE -- "$DOUBLE" <<<"$txt"; then
+  # One label on one line, so this one is matched line by line. With the lines joined, a
+  # platform chip ("YouTube") on one row followed by a destination name ("YouTube · Español")
+  # on the next reads as the forbidden label.
+  if grep -qiE -- "$DOUBLE" "${png%.png}.txt"; then
     echo "$t s: \"YouTube · YouTube\""
     hits=$((hits+1))
   fi
