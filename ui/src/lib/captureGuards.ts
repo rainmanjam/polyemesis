@@ -9,6 +9,8 @@
  * NOTHING HERE RETURNS OR THROWS A SECRET'S VALUE. A refusal message is read in
  * a terminal and pasted into a report; it carries kinds, file names and words.
  */
+import { processRunning } from "./liveness";
+import type { ProcessState } from "./types";
 
 export interface SecretEntry {
   kind: string;
@@ -149,7 +151,7 @@ export function destinationsSettled(
   const no = (why: string) => ({ ok: false, why });
   if (rows.length === 0) return no("no running destinations");
   for (const r of rows) {
-    if (r.state !== "running") return no(`${r.name} is ${r.state}, not running`);
+    if (!processRunning({ state: r.state as ProcessState })) return no(`${r.name} is ${r.state}, not running`);
     if (r.uptimeSec < minUptimeSec) return no(`${r.name} has run ${r.uptimeSec} s, under ${minUptimeSec} s`);
     if (r.speed < MIN_SETTLED_SPEED || r.speed > MAX_SETTLED_SPEED) {
       return no(`${r.name} speed is ${r.speed}x, outside ${MIN_SETTLED_SPEED} to ${MAX_SETTLED_SPEED}`);
