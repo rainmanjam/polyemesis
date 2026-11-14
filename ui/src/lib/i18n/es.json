@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "Ahora mismo lo limita el techo de memoria, no la ventana.",
   "clips.noKeyframeYet": "Todavía no se ha visto ningún fotograma clave, así que un clip puede empezar con un fallo.",
   "clips.roughStart": "inicio irregular",
+  "clips.startNotChecked": "Inicio sin comprobar",
+  "clips.startNotCheckedBody": "No hay ninguna medición guardada de cómo empieza este clip ni de cuánto dura.",
   "media.uploadAria": "Subir un archivo multimedia",
   "media.dropOrChoose": "Suelta un archivo aquí o {choose}",
   "media.chooseOne": "elige uno",

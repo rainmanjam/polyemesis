@@ -418,7 +418,7 @@ function renditionSignal(
 
 export function RenditionsPage() {
   const t = useT();
-  const { status, system } = useLiveData();
+  const { status, system, allRenditions } = useLiveData();
   const [views, setViews] = useState<RenditionView[]>([]);
   const [caps, setCaps] = useState<EncoderList | null>(null);
   const [redetecting, setRedetecting] = useState(false);
@@ -472,16 +472,16 @@ export function RenditionsPage() {
   // Reload the rows whenever the live snapshot shows a different set of
   // renditions or a different ref count — that is what a destination being
   // enabled in another tab looks like from here.
-  const liveSig = (status?.renditions ?? []).map((r) => `${r.id}:${r.consumers}`).join(",");
+  const liveSig = allRenditions.map((r) => `${r.id}:${r.consumers}`).join(",");
   useEffect(() => {
     void loadRenditions();
   }, [loadRenditions, liveSig]);
 
   const liveById = useMemo(() => {
     const m = new Map<number, RenditionStatus>();
-    for (const r of status?.renditions ?? []) m.set(r.id, r);
+    for (const r of allRenditions) m.set(r.id, r);
     return m;
-  }, [status]);
+  }, [allRenditions]);
 
   // Which destinations feed off what. The socket carries names as well as
   // counts, so the chips on a card and the number beside them can never
@@ -506,7 +506,9 @@ export function RenditionsPage() {
   };
 
   const passthrough = (status?.destinations ?? []).filter((d) => d.renditionId == null);
-  const running = (status?.renditions ?? []).filter((r) => processRunning(r.process)).length;
+  // Counted over the cards, not over the live list: the two can differ for a few
+  // seconds after a programme is deleted, and a count has to be of what is drawn.
+  const running = views.filter((v) => processRunning(liveById.get(v.rendition.id)?.process)).length;
   const sourceVideo = status?.source.video ?? null;
 
   const encoders = caps?.encoders ?? [];

@@ -507,7 +507,12 @@ func (s *Service) candidates() ([]candidate, error) {
 	})
 	anySettled := func(string) (*db.Recording, bool) { return nil, true }
 	out = dirCandidates(out, dir, transcribe.TranscriptsSubdir, db.OffloadKindTranscript, settled, anySettled)
-	out = dirCandidates(out, dir, clips.Subdir, db.OffloadKindClip, settled, anySettled)
+	// Only clips. The directory also holds each clip's record (….ts.meta.json) and
+	// any half-written file; neither is a clip, and clips.IsClip is the one
+	// definition of what is.
+	out = dirCandidates(out, dir, clips.Subdir, db.OffloadKindClip, settled, func(name string) (*db.Recording, bool) {
+		return nil, clips.IsClip(name)
+	})
 	out = dirCandidates(out, dir, clipper.ExportSubdir, db.OffloadKindClip, settled, anySettled)
 	sort.Slice(out, func(i, j int) bool { return out[i].at.Before(out[j].at) })
 	return out, nil

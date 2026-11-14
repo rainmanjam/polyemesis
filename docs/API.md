@@ -1893,6 +1893,14 @@ the buffer as it was; only a window outside the bounds answers `400`. The
 `buffer` object in `GET /clips` carries `windowSeconds` (the configured window)
 even while the buffer is off.
 
+Each clip in `GET /clips` carries `seconds` (what it spans), `keyframeAligned`
+and `note` (why a start is rough). They are what the capture measured and are
+kept in a small record beside the clip, so they are only meaningful when
+`measured` is `true`. A clip with no record (captured before records were kept,
+or one whose record could not be written) has `measured: false`, `seconds: 0`
+and `keyframeAligned: false`: its start was never checked, which is not the same
+as a rough one.
+
 `GET /clips`, `POST /clips` and `PUT /clips/buffer` are programme-scoped — the
 buffer belongs to one source — so on an install with more than one they need
 `?source=<id>`. See [Conventions](#conventions). `DELETE /clips/{name}` and

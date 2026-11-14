@@ -101,7 +101,7 @@ test("dashboard — the hero shot", async ({ page }) => {
  * was invisible in every image on the site.
  *
  * Both lanes are genuinely live: seed_demo.go creates the second programme
- * with its own destinations and capture-media.sh publishes a second stream to
+ * with its own destinations and its rig publishes a second stream to
  * it, on the SAME SRT port with a different streamid -- the one-port design
  * demonstrated rather than described. A second lane reading "Offline" beside a
  * live one would argue that multi-source does not work.
@@ -117,7 +117,7 @@ test("dashboard — two programmes, and the lanes that divide them", async ({ pa
   //
   // Matched on "Studio B", not on a full name, because two seeders feed this
   // spec and they name the second programme differently: seed_demo.go
-  // (capture-media.sh) says "Studio B — panel show", demo-seed.fixture.json
+  // (capture-lanes.sh) says "Studio B — panel show", demo-seed.fixture.json
   // (demo-seed.sh) says "Commentary Booth — Studio B". The full-name match made
   // this shot fail on every demo-seed run, so the site's capture set was always
   // one short. Visible-only, so the closed programme picker cannot satisfy it.
@@ -212,7 +212,7 @@ test("routing — the clip for narrow columns", async ({ page }) => {
   // photographing a destination that DOES carry the music would argue against
   // the sentence beside it.
   //
-  // A SKIP, NOT A FAILURE, when it is missing. capture-media.sh runs this same
+  // A SKIP, NOT A FAILURE, when it is missing. capture-lanes.sh runs this same
   // spec against seed_demo.go's install, whose first destination carries the
   // music; failing here would stop that script before it compresses or copies
   // anything, over a frame it was never going to use. demo-seed.sh's fixture

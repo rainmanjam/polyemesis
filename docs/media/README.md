@@ -23,13 +23,10 @@ make build                                  # compiles the UI and embeds it in t
 ```
 
 Each command builds what it needs, photographs, compresses and tears down or
-leaves the rig running as described below. `./scripts/capture-media.sh` is the
-older single-programme arrangement and is not used for any committed shot. Its
-capture step no longer completes: four of its sixteen capture tests fail against
-the current spec (monitoring, clips, automod and automation), so committed shots
-come only from `demo-seed.sh` and `capture-lanes.sh`. It and `capture-lanes.sh`
-build their seeder with `scripts/build-seeder.sh`, and each removes its work
-directory, which holds credentials, on every exit.
+leaves the rig running as described below. Committed shots come only from
+`demo-seed.sh` and `capture-lanes.sh`. `capture-lanes.sh` builds its seeder with
+`scripts/build-seeder.sh`, and each removes its work directory, which holds
+credentials, on every exit.
 
 The binary is stamped with the latest release tag, so the header reads a release,
 not `dev`. `demo-seed.sh` reads the override from `DEMO_VERSION` and
@@ -112,20 +109,6 @@ Plain statements, because a shot name promises more than some pages hold.
   level. The synthetic commentary voices take turns, so the capture polls the
   page's own readings (up to 90 s), shoots, reads them again after the shutter,
   and fails naming the silent tracks if no such moment comes.
-
-### Two shots that show console defects as they are
-
-These two pictures are accurate and unflattering. Retake them when the defects
-are fixed; do not edit them.
-
-- `06-renditions.png` reads "NOT ENCODING" on every tier while the encodes run.
-  Any install with two or more programmes where only one has renditions shows
-  this. In `ui/src/components/LiveDataProvider.tsx`, the `status` case lets a
-  status frame from another programme replace the rendition list.
-- `14-clips.png` lists its clip as "ROUGH START, 0.0s" although the capture call
-  reported 16 s, keyframe-aligned. In `internal/clips/clips.go`, `List` builds
-  its rows from the directory only and never sets the length or the keyframe
-  flag.
 
 ## The theme
 

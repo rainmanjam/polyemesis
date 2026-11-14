@@ -91,7 +91,7 @@ describe("the features page's screenshots", () => {
  * web/ keeps its own copies because Astro's image pipeline needs them under
  * src/assets to hash and optimise them; a path outside the project root cannot
  * be globbed, so a shared directory is not on offer. That left a manual copy as
- * the only link to docs/media, which scripts/capture-media.sh writes -- and a
+ * the only link to docs/media, which the demo rigs write -- and a
  * manual copy is a step people forget.
  *
  * It was forgotten. The site shipped screenshots EIGHT DAYS OLDER than the
@@ -99,7 +99,7 @@ describe("the features page's screenshots", () => {
  * files had drifted. Nothing said so: both sets existed, both looked plausible,
  * and the only way to notice was to compare them by hand.
  *
- * capture-media.sh now refreshes both. This is what catches the cases it
+ * The rigs (demo-seed.sh, capture-lanes.sh) now refresh both. This is what catches the cases it
  * cannot: an image edited in place, a copy done for some files and not others,
  * a capture interrupted between the two writes.
  *
@@ -141,7 +141,7 @@ describe("the site's screenshots match the capture output", () => {
       `src/assets/shots/${name} differs from docs/media/${name}. The capture ` +
         `writes docs/media and copies to the site; a difference means the copy ` +
         `did not happen, or one of them was edited in place. Re-run ` +
-        `scripts/capture-media.sh rather than copying by hand — the two have ` +
+        `scripts/demo-seed.sh or scripts/capture-lanes.sh rather than copying by hand — the two have ` +
         `already drifted eight days apart once.`,
     ).toBe(true);
   });

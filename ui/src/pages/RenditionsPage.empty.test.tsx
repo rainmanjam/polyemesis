@@ -10,7 +10,7 @@ import { MemoryRouter } from "react-router";
  * action. */
 
 vi.mock("@/hooks/useLiveData", () => ({
-  useLiveData: () => ({ status: null, system: null }),
+  useLiveData: () => ({ status: null, system: null, allRenditions: [] }),
 }));
 
 vi.mock("@/lib/api", async () => {
