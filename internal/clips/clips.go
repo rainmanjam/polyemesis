@@ -9,6 +9,7 @@
 package clips
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
@@ -135,6 +136,74 @@ type Clip struct {
 	CreatedAt       time.Time `json:"createdAt"`
 	KeyframeAligned bool      `json:"keyframeAligned"`
 	Note            string    `json:"note,omitempty"`
+}
+
+// metaExt is the record kept beside each clip: clip-….ts.meta.json. A clip is
+// a bare TS file, so what Capture measured -- how long it spans, whether it
+// starts at a keyframe, why not -- would otherwise exist only in the response
+// to the request that made it, and List could not give it back. It is not Ext,
+// so IsClip, List and retention never mistake it for a clip; Remove deletes the
+// two together.
+const metaExt = ".meta.json"
+
+// clipMeta is what Capture measured and the file cannot say: the span comes
+// from datagram arrival times, which TS does not carry.
+type clipMeta struct {
+	Seconds         float64 `json:"seconds"`
+	KeyframeAligned bool    `json:"keyframeAligned"`
+	Note            string  `json:"note,omitempty"`
+}
+
+func metaPath(clipPath string) string { return clipPath + metaExt }
+
+// writeMeta records a clip's measurements. Best effort by the caller's choice:
+// losing the record costs the listing a duration, never the clip.
+func writeMeta(clipPath string, m clipMeta) error {
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	tmp := metaPath(clipPath) + ".partial"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, metaPath(clipPath)); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// readMeta returns a clip's record. A clip written before records existed has
+// none: its duration is unknown (Seconds 0) and it is not claimed to start
+// roughly, because nothing says it does. ok is false for that case.
+func readMeta(clipPath string) (clipMeta, bool) {
+	data, err := os.ReadFile(metaPath(clipPath))
+	if err != nil {
+		return clipMeta{KeyframeAligned: true}, false
+	}
+	var m clipMeta
+	if json.Unmarshal(data, &m) != nil {
+		return clipMeta{KeyframeAligned: true}, false
+	}
+	return m, true
+}
+
+// Remove deletes a clip and its record. The one way a clip leaves the disk, so
+// no caller can strand a record or forget one.
+func Remove(dir, name string) error {
+	path, err := Resolve(dir, name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if err := os.Remove(metaPath(path)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // datagramSize matches the relay's: 1316 bytes of TS payload plus slack.
@@ -304,8 +373,14 @@ func (c *Capturer) Capture(d time.Duration) (Clip, error) {
 		_ = os.Remove(tmp)
 		return Clip{}, fmt.Errorf("clips: write %s: %w", name, err)
 	}
+	// The record goes down BEFORE the clip appears, so a listing never sees a
+	// clip whose numbers are still on their way.
+	if err := writeMeta(path, clipMeta{Seconds: cut.Seconds, KeyframeAligned: cut.KeyframeAligned, Note: cut.Note}); err != nil {
+		c.log.Warn("clip record not written; the listing will not know this clip's length", "name", name, "err", err)
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
+		_ = os.Remove(metaPath(path))
 		return Clip{}, fmt.Errorf("clips: publish %s: %w", name, err)
 	}
 
@@ -405,11 +480,15 @@ func List(dir string) ([]Clip, error) {
 		if err != nil {
 			continue
 		}
+		m, _ := readMeta(filepath.Join(dir, e.Name()))
 		out = append(out, Clip{
-			Name:      e.Name(),
-			Bytes:     info.Size(),
-			StartedAt: startTimeFromName(e.Name(), info.ModTime()),
-			CreatedAt: info.ModTime(),
+			Name:            e.Name(),
+			Bytes:           info.Size(),
+			Seconds:         m.Seconds,
+			StartedAt:       startTimeFromName(e.Name(), info.ModTime()),
+			CreatedAt:       info.ModTime(),
+			KeyframeAligned: m.KeyframeAligned,
+			Note:            m.Note,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -437,13 +516,9 @@ func startTimeFromName(name string, fallback time.Time) time.Time {
 }
 
 func (c *Capturer) Delete(name string) error {
-	path, err := c.Resolve(name)
-	if err != nil {
-		return err
-	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if err := os.Remove(path); err != nil {
+	if err := Remove(c.cfg.Dir, name); err != nil {
 		return err
 	}
 	c.log.Info("clip deleted", "name", name)
@@ -510,12 +585,11 @@ func (c *Capturer) sweepLocked() (int, error) {
 }
 
 func (c *Capturer) remove(cl Clip, reason string) bool {
-	path, err := Resolve(c.cfg.Dir, cl.Name)
-	if err != nil {
+	if _, err := Resolve(c.cfg.Dir, cl.Name); err != nil {
 		c.log.Warn("clip retention skipped a name it could not resolve", "name", cl.Name, "err", err)
 		return false
 	}
-	if err := os.Remove(path); err != nil {
+	if err := Remove(c.cfg.Dir, cl.Name); err != nil {
 		c.log.Warn("delete clip", "name", cl.Name, "err", err)
 		return false
 	}

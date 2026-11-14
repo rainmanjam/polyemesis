@@ -945,10 +945,7 @@ func (s *Server) handleDeleteClip(w http.ResponseWriter, r *http.Request) {
 	if e := s.engOrNil(); e != nil {
 		err = e.DeleteClip(name)
 	} else {
-		var path string
-		if path, err = clips.Resolve(s.clipDir(), name); err == nil {
-			err = os.Remove(path)
-		}
+		err = clips.Remove(s.clipDir(), name)
 	}
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

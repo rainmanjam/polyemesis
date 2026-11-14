@@ -344,3 +344,77 @@ func TestCloseGivesTheMemoryBack(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 }
+
+// List used to rebuild a Clip from the filename and the file's mtime alone, so
+// every clip it returned had Seconds 0 and KeyframeAligned false: the console
+// read "ROUGH START, 0.0s" on every row. Only Capture's own return value had
+// the real numbers, and nothing was written down for List to read back.
+func TestListReturnsWhatCaptureMeasured(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60})
+	feed(send, 20, 5)
+
+	got, err := c.Capture(10 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if !got.KeyframeAligned || got.Seconds <= 0 {
+		t.Fatalf("test needs an aligned, non-empty capture, got %+v", got)
+	}
+
+	list, err := c.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	if list[0].Seconds != got.Seconds {
+		t.Errorf("listed Seconds = %v, captured %v", list[0].Seconds, got.Seconds)
+	}
+	if list[0].KeyframeAligned != got.KeyframeAligned {
+		t.Errorf("listed KeyframeAligned = %v, captured %v", list[0].KeyframeAligned, got.KeyframeAligned)
+	}
+	if list[0].Note != got.Note {
+		t.Errorf("listed Note = %q, captured %q", list[0].Note, got.Note)
+	}
+}
+
+func TestListKeepsTheRoughStartOfAClipThatHadOne(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60})
+	send(datagram(patPacket(), pmtPacket()))
+	for i := 0; i < 5; i++ {
+		send(datagram(videoPacket(false), audioPacket()))
+	}
+	got, err := c.Capture(3 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if got.KeyframeAligned || got.Note == "" {
+		t.Fatalf("test needs a rough capture with a note, got %+v", got)
+	}
+	list, _ := c.List()
+	if len(list) != 1 || list[0].KeyframeAligned || list[0].Note != got.Note {
+		t.Fatalf("List = %+v, captured %+v", list, got)
+	}
+}
+
+func TestDeleteAndRetentionTakeTheClipsRecordWithIt(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60, MaxClips: 1})
+	feed(send, 10, 3)
+	first, _ := c.Capture(3 * time.Second)
+	send(datagram(videoPacket(true), audioPacket()))
+	second, err := c.Capture(3 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	// Retention (MaxClips 1) removed the first; its record must be gone too.
+	entries, _ := os.ReadDir(c.Dir())
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), first.Name) {
+			t.Fatalf("%q outlived the clip retention removed", e.Name())
+		}
+	}
+	if err := c.Delete(second.Name); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if entries, _ = os.ReadDir(c.Dir()); len(entries) != 0 {
+		t.Fatalf("directory not empty after delete: %v", entries)
+	}
+}

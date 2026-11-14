@@ -387,7 +387,7 @@ export function ClipsPage() {
                           {timestamp(c.startedAt)}
                         </TableCell>
                         <TableCell className="tnum text-right font-mono text-tiny">
-                          {c.seconds.toFixed(1)}s
+                          {c.seconds > 0 ? `${c.seconds.toFixed(1)}s` : "—"}
                         </TableCell>
                         <TableCell className="tnum text-right font-mono text-tiny">
                           {bytes(c.bytes)}

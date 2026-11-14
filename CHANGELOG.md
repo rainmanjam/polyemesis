@@ -14,6 +14,11 @@ its first tagged release.
   the Renditions page showed only the programme that had reported last, so renditions belonging to the others read "Not
   encoding" (and the running count dropped) until their programme reported again. Every programme's renditions now stay on
   screen. The encodes themselves were never affected, and nothing else changed.
+- **Clips: every clip listed as "Rough start, 0.0s".** The clip list rebuilt each row from the file name alone, so a clip
+  that began at a keyframe and ran 30 seconds still read as a rough start of zero length once it was in the list (the
+  capture confirmation was right, the list was not). The length, keyframe start and note are now saved beside each new
+  clip and read back, and deleting or expiring a clip removes them too. Clips captured before this release have no
+  saved length: they show a dash instead of 0.0s and no longer carry a rough-start badge. Nothing else changed.
 
 ## [0.18.0] — 2026-11-11
 
