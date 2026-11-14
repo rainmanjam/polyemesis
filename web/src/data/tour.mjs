@@ -1,7 +1,6 @@
-/* The homepage video tour. The file and its chapters come from the tour's
- * tour-chapters.json; plan 3 Task 13 moves the tour's source into the repo with
- * the script that regenerates them, and from then on that script is the one
- * producer of /media/tour.mp4, its poster and these numbers.
+/* The homepage video tour. The file and its chapters come from scripts/tour:
+ * publish.sh writes /media/tour.mp4 and its poster, chapters.json holds the
+ * chapters, and `publish.sh --check` verifies them against these numbers.
  *
  * The video is silent (the tour carries captions instead), 1920x1080 H.264.
  *
