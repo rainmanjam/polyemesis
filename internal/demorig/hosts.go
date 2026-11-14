@@ -269,6 +269,7 @@ func srtOptionOK(k, v string) bool {
 	}
 }
 
+// allDigits reports whether v is made only of ASCII digits (true for "").
 func allDigits(v string) bool {
 	for i := 0; i < len(v); i++ {
 		if v[i] < '0' || v[i] > '9' {

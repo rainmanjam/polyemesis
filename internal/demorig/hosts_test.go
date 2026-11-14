@@ -545,3 +545,30 @@ func TestSRTQueryOptionsArePinned(t *testing.T) {
 		}
 	}
 }
+
+// One row with several problems names each, in order, then the stored-field
+// refusals, all in one message.
+func TestCheckInvalidDestinationsCombinesEveryProblemInOneMessage(t *testing.T) {
+	err := CheckInvalidDestinations([]DestRow{{
+		Name: "a", Kind: "rtmp", Enabled: true,
+		URL: "rtmps://real.example/x", BackupURL: "rtmps://real2.example/x",
+		ExtraInputArgs: "x", StreamKey: "bad key",
+	}})
+	const want = "demo rig: destinations that could reach a real host: " +
+		"a: a network destination is enabled in the fixture (it would start the moment it is created); " +
+		"a: host is not under .invalid; a: backup: host is not under .invalid; " +
+		"destinations that could reach a real platform without their URL: " +
+		"a: extraInputArgs, streamKey (characters outside A-Z a-z 0-9 . _ ~ -) set"
+	if err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+}
+
+// CheckHosts never allows the srt call options: only the invalid-host check does.
+func TestCheckHostsRefusesAnSRTURLEvenWithAValidQuery(t *testing.T) {
+	err := CheckHosts(row("s", "srt://polyemesis-demo-recv:9000?mode=caller"), recv)
+	const want = "demo rig: destinations outside the allow-list: s: URL has a query or fragment"
+	if err == nil || err.Error() != want {
+		t.Errorf("got %v, want %q", err, want)
+	}
+}

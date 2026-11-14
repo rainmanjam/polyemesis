@@ -278,6 +278,7 @@ const MINUS_SIGNS = "-\u2212";
 function levelReading(header: string): "level" | "silent" | "none" {
   for (let at = header.indexOf("dBFS"); at >= 0; at = header.indexOf("dBFS", at + 1)) {
     let end = at;
+    // \s is deliberate: it is the same whitespace class the old /\s*dBFS/ pattern skipped (space, tab, newline, NBSP and other Unicode spaces).
     while (end > 0 && /\s/.test(header[end - 1])) end--;
     const last = header[end - 1];
     if (last >= "0" && last <= "9") return "level";
