@@ -51,6 +51,15 @@ describe("links to the new pages", () => {
     for (const h of hrefs) expect(hasPage(h), h).toBe(true);
   });
 
+  it("pairs each homepage recipe block with the recipe at the same index (Use.astro reads RECIPES[i].route)", () => {
+    const use = src("components/home/Use.astro");
+    const guides = use.slice(use.indexOf("const GUIDES = ["), use.indexOf("const DOORS"));
+    const titles = [...guides.matchAll(/^ {4}title: "([^"]+)",$/gm)].map((m) => m[1]);
+    expect(titles).toHaveLength(RECIPES.length);
+    titles.forEach((t, i) => expect(t, `block ${i + 1}`).toBe(RECIPES[i].heading.replace(/\.$/, "")));
+    expect(use).toContain("RECIPES[i].route");
+  });
+
   it("each recipe block on the homepage has its four step titles once", () => {
     const use = src("components/home/Use.astro");
     for (const r of RECIPES) {

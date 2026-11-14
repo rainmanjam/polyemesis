@@ -79,52 +79,81 @@ const HEADING_LINE = /^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*$/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 const ITEM_OR_QUOTE = /^ {0,3}(?:[-*+]|\d+[.)]|>)[ \t]+/;
 
+interface Heading {
+  line: number;
+  level: number;
+}
+
+/** What blocksOf carries from line to line: the blocks so far, the section starts, the fence that is open (its
+ *  opening run of ` or ~) and the block still being built. */
+interface Scan {
+  blocks: Block[];
+  headings: Heading[];
+  fence: string | null;
+  open: Block | null;
+}
+
+/** Ends the block being built, if any. */
+function closeBlock(st: Scan): void {
+  if (st.open) st.blocks.push(st.open);
+  st.open = null;
+}
+
+/** A line inside a fence is a block of its own, unless it closes the fence: the same character, at least as
+ *  long as the opening run, and nothing else on the line. */
+function scanFenced(st: Scan, line: number, raw: string, fence: string): void {
+  const f = FENCE.exec(raw);
+  const closes = f !== null && f[1][0] === fence[0] && f[1].length >= fence.length && raw.trim() === f[1];
+  if (closes) st.fence = null;
+  else st.blocks.push({ line, text: raw });
+}
+
+function scanHeading(st: Scan, line: number, level: number, text: string): void {
+  closeBlock(st);
+  st.headings.push({ line, level });
+  st.blocks.push({ line, text });
+}
+
+/** A table row is a block of its own; a list item or a quote line starts one (its text without the marker). */
+function scanRowOrItem(st: Scan, line: number, raw: string): void {
+  closeBlock(st);
+  if (raw.trimStart().startsWith("|")) st.blocks.push({ line, text: raw });
+  else st.open = { line, text: raw.replace(ITEM_OR_QUOTE, "") };
+}
+
+/** A wrapped line joins the block being built; otherwise it starts a paragraph. */
+function scanText(st: Scan, line: number, raw: string): void {
+  if (st.open) st.open.text += `\n${raw}`;
+  else st.open = { line, text: raw };
+}
+
+function startsRowOrItem(raw: string): boolean {
+  return raw.trimStart().startsWith("|") || ITEM_OR_QUOTE.test(raw);
+}
+
+function scanLine(st: Scan, line: number, raw: string): void {
+  if (st.fence !== null) return scanFenced(st, line, raw, st.fence);
+  const f = FENCE.exec(raw);
+  if (f) {
+    closeBlock(st);
+    st.fence = f[1];
+    return;
+  }
+  if (raw.trim() === "") return closeBlock(st);
+  const h = HEADING_LINE.exec(raw);
+  if (h) return scanHeading(st, line, h[1].length, h[2]);
+  if (startsRowOrItem(raw)) return scanRowOrItem(st, line, raw);
+  scanText(st, line, raw);
+}
+
 /** The doc as the blocks a phrase may sit in: a heading, a paragraph (its wrapped
  *  lines joined), a list item, a table row or a code line. `headings` are the
  *  lines that start a section, with their level. */
-function blocksOf(md: string): { blocks: Block[]; headings: { line: number; level: number }[] } {
-  const blocks: Block[] = [];
-  const headings: { line: number; level: number }[] = [];
-  let fence: string | null = null;
-  let open: Block | null = null;
-  const close = () => {
-    if (open) blocks.push(open);
-    open = null;
-  };
-  for (const [line, raw] of md.split(/\r?\n/).entries()) {
-    const f = FENCE.exec(raw);
-    if (fence) {
-      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && raw.trim() === f[1]) fence = null;
-      else blocks.push({ line, text: raw });
-      continue;
-    }
-    if (f) {
-      close();
-      fence = f[1];
-      continue;
-    }
-    if (raw.trim() === "") {
-      close();
-      continue;
-    }
-    const h = HEADING_LINE.exec(raw);
-    if (h) {
-      close();
-      headings.push({ line, level: h[1].length });
-      blocks.push({ line, text: h[2] });
-      continue;
-    }
-    if (raw.trimStart().startsWith("|") || ITEM_OR_QUOTE.test(raw)) {
-      close();
-      if (raw.trimStart().startsWith("|")) blocks.push({ line, text: raw });
-      else open = { line, text: raw.replace(ITEM_OR_QUOTE, "") };
-      continue;
-    }
-    if (open) open.text += `\n${raw}`;
-    else open = { line, text: raw };
-  }
-  close();
-  return { blocks, headings };
+function blocksOf(md: string): { blocks: Block[]; headings: Heading[] } {
+  const st: Scan = { blocks: [], headings: [], fence: null, open: null };
+  for (const [line, raw] of md.split(/\r?\n/).entries()) scanLine(st, line, raw);
+  closeBlock(st);
+  return { blocks: st.blocks, headings: st.headings };
 }
 
 const isWordChar = (c: string | undefined) => c !== undefined && /[\p{L}\p{N}]/u.test(c);
@@ -139,46 +168,54 @@ function occursIn(block: string, phrase: string): boolean {
   return false;
 }
 
+/** The blocks of the section that starts at `anchor`: from its heading to the next heading of the same or a
+ *  higher level. Without an anchor, the whole doc. */
+function sectionBlocks(blocks: Block[], headings: Heading[], anchor: { line: number; depth: number } | undefined): Block[] {
+  if (!anchor) return blocks;
+  const end = headings.find((h) => h.line > anchor.line && h.level <= anchor.depth)?.line ?? Infinity;
+  return blocks.filter((b) => b.line >= anchor.line && b.line < end);
+}
+
+/** The problem with one evidence phrase against the texts it may sit in, or undefined when it is there. */
+function phraseProblem(f: Fact, label: string, texts: string[], phrase: string, inSection: boolean): string | undefined {
+  const want = normalise(phrase);
+  if (want === "") return `${label}: evidence phrase ${JSON.stringify(phrase)} is empty`;
+  if (texts.some((t) => occursIn(t, want))) return undefined;
+  return inSection
+    ? `${label}: evidence "${phrase}" is not in the section "${f.anchor}" of doc "${f.doc}"`
+    : `${label}: evidence "${phrase}" is not in doc "${f.doc}"`;
+}
+
+/** The problems of a fact whose doc is published and was read: its anchor, then each evidence phrase. */
+function docProblems(f: Fact, label: string, md: string): string[] {
+  const { blocks, headings } = blocksOf(md);
+  const anchorHeading = f.anchor === undefined ? undefined : extractHeadingsAt(md).find((h) => h.slug === f.anchor);
+  const problems: string[] = [];
+  if (f.anchor !== undefined && !anchorHeading) problems.push(`${label}: anchor "${f.anchor}" is not a heading of doc "${f.doc}"`);
+  const texts = sectionBlocks(blocks, headings, anchorHeading).map((b) => normalise(b.text));
+  for (const phrase of f.evidence) {
+    const problem = phraseProblem(f, label, texts, phrase, anchorHeading !== undefined);
+    if (problem) problems.push(problem);
+  }
+  return problems;
+}
+
+/** The problems of one fact: no evidence, a doc that is not published or cannot be read, or what docProblems finds. */
+function factProblemsOf(f: Fact, readDoc: (slug: string) => string | undefined): string[] {
+  const label = `"${f.text}"`;
+  const problems = f.evidence.length === 0 ? [`${label}: no evidence phrases`] : [];
+  if (!BY_SLUG.has(f.doc)) return [...problems, `${label}: doc "${f.doc}" is not a published doc slug`];
+  const md = readDoc(f.doc);
+  if (md === undefined) return [...problems, `${label}: doc "${f.doc}" could not be read`];
+  return [...problems, ...docProblems(f, label, md)];
+}
+
 /** One message per problem; [] when every fact is traceable.
  *
  *  A phrase must sit inside ONE block of the doc (never across two), on word
  *  boundaries, and, when the fact has an anchor, inside that section: from the
- *  anchor's heading to the next heading of the same or a higher level. */
+ *  anchor's heading to the next heading of the same or a higher level. It proves
+ *  the phrase is in that section, not that the sentence is true. */
 export function factProblems(facts: Fact[], readDoc: (slug: string) => string | undefined): string[] {
-  const problems: string[] = [];
-  for (const f of facts) {
-    const label = `"${f.text}"`;
-    if (f.evidence.length === 0) problems.push(`${label}: no evidence phrases`);
-    if (!BY_SLUG.has(f.doc)) {
-      problems.push(`${label}: doc "${f.doc}" is not a published doc slug`);
-      continue;
-    }
-    const md = readDoc(f.doc);
-    if (md === undefined) {
-      problems.push(`${label}: doc "${f.doc}" could not be read`);
-      continue;
-    }
-    const { blocks, headings } = blocksOf(md);
-    const anchorHeading = f.anchor === undefined ? undefined : extractHeadingsAt(md).find((h) => h.slug === f.anchor);
-    if (f.anchor !== undefined && !anchorHeading) problems.push(`${label}: anchor "${f.anchor}" is not a heading of doc "${f.doc}"`);
-
-    let scope = blocks;
-    if (anchorHeading) {
-      const end = headings.find((h) => h.line > anchorHeading.line && h.level <= anchorHeading.depth)?.line ?? Infinity;
-      scope = blocks.filter((b) => b.line >= anchorHeading.line && b.line < end);
-    }
-    const texts = scope.map((b) => normalise(b.text));
-    for (const phrase of f.evidence) {
-      const want = normalise(phrase);
-      if (want === "") problems.push(`${label}: evidence phrase ${JSON.stringify(phrase)} is empty`);
-      else if (!texts.some((t) => occursIn(t, want))) {
-        problems.push(
-          anchorHeading
-            ? `${label}: evidence "${phrase}" is not in the section "${f.anchor}" of doc "${f.doc}"`
-            : `${label}: evidence "${phrase}" is not in doc "${f.doc}"`,
-        );
-      }
-    }
-  }
-  return problems;
+  return facts.flatMap((f) => factProblemsOf(f, readDoc));
 }

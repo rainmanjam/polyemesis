@@ -182,3 +182,84 @@ describe("docLinksOf", () => {
     expect(docLinksOf([f("nope")])).toEqual([{ href: "/docs/nope", text: "nope" }]);
   });
 });
+
+/* How the doc is cut into blocks (facts.ts blocksOf). Each of these held before the function was split into
+ * helpers and pins what the split must keep. */
+describe("factProblems: how a doc is cut into blocks", () => {
+  const find = (doc: string, evidence: string[], anchor?: string) => factProblems([{ text: "t", doc: "obs", evidence, anchor }], () => doc);
+
+  it("keeps a fenced block's lines apart, and does not read a heading inside a fence as a heading", () => {
+    const doc = "# T\n\n## One\n\n```\n# not a heading\nsecond fenced line\n```\n\nAfter the fence.\n\n## Two\n\nTwo text.";
+    expect(find(doc, ["not a heading", "second fenced line"], "one")).toEqual([]);
+    expect(find(doc, ["not a heading second fenced line"], "one")).toHaveLength(1);
+    // "# not a heading" did not start a section, so the paragraph after the fence is still in "One".
+    expect(find(doc, ["After the fence"], "one")).toEqual([]);
+    expect(find(doc, ["Two text"], "one")).toHaveLength(1);
+  });
+
+  it("closes a fence only with the same fence character, at least as long, and nothing else on the line", () => {
+    const tilde = "# T\n\n```\nline a\n~~~\nline b\n```\n\nafter.";
+    expect(find(tilde, ["line b"])).toEqual([]);
+    expect(find(tilde, ["after"])).toEqual([]);
+    const withInfo = "# T\n\n````\ninside\n``` js\nstill inside\n````\n\nafter.";
+    expect(find(withInfo, ["still inside"])).toEqual([]);
+    const short = "# T\n\n````\ninside\n```\nstill inside\n````\n\nafter.";
+    expect(find(short, ["still inside", "after"])).toEqual([]);
+  });
+
+  it("ends a paragraph at a heading, a list item, a quote and a table row without a blank line", () => {
+    const doc = "# T\n\nparagraph text\n- item text\n> quote text\n| cell text |\ntrailing text\n";
+    expect(find(doc, ["paragraph text", "item text", "quote text", "cell text", "trailing text"])).toEqual([]);
+    expect(find(doc, ["paragraph text item text"])).toHaveLength(1);
+    expect(find(doc, ["quote text cell text"])).toHaveLength(1);
+  });
+
+  it("joins an item's wrapped line to the item, and reads numbered items, tilde fences and quotes", () => {
+    const doc = "# T\n\n1. numbered item that\n   wraps here\n2) second one\n\n~~~\ntilde line\n~~~\n";
+    expect(find(doc, ["numbered item that wraps here", "second one", "tilde line"])).toEqual([]);
+  });
+
+  it("treats a line indented four spaces as text, and an h1-h6 line as a heading block of its own", () => {
+    const doc = "# T\n\n## Sec\n\n    # indented text\nwrapped on.\n\n###### Deep heading\n\nbody.";
+    // Four spaces is not a heading: the line is a paragraph, joined to the line that follows it.
+    expect(find(doc, ["indented text wrapped on"])).toEqual([]);
+    // A level-6 heading is its own block, and (below level 2) does not end the h2 section.
+    expect(find(doc, ["Deep heading"], "sec")).toEqual([]);
+    expect(find(doc, ["Deep heading body"])).toHaveLength(1);
+  });
+
+  it("does not read a doc whose slug is not published", () => {
+    let reads = 0;
+    const p = factProblems([{ text: "t", doc: "nope", evidence: ["x"] }], () => (reads++, "# T"));
+    expect(p).toHaveLength(1);
+    expect(reads).toBe(0);
+  });
+
+  it("reports an unpublished slug and an empty evidence list together", () => {
+    const p = factProblems([{ text: "t", doc: "nope", evidence: [] }], () => undefined);
+    expect(p).toHaveLength(2);
+    expect(p[0]).toMatch(/no evidence/);
+    expect(p[1]).toMatch(/not a published doc slug/);
+  });
+
+  it("names the section in the message, or the doc when there is no anchor", () => {
+    const doc = "# T\n\n## One\n\nOne text.\n\n## Two\n\nTwo text.";
+    expect(find(doc, ["Two text"], "one")[0]).toMatch(/is not in the section "one" of doc "obs"/);
+    expect(find(doc, ["nowhere"])[0]).toMatch(/is not in doc "obs"/);
+  });
+
+  it("checks facts independently, in order", () => {
+    const doc = "# T\n\nonly this.";
+    const p = factProblems(
+      [
+        { text: "a", doc: "obs", evidence: ["only this"] },
+        { text: "b", doc: "obs", evidence: ["missing b"] },
+        { text: "c", doc: "obs", evidence: ["missing c"] },
+      ],
+      () => doc,
+    );
+    expect(p).toHaveLength(2);
+    expect(p[0]).toContain('"b"');
+    expect(p[1]).toContain('"c"');
+  });
+});

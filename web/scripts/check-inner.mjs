@@ -42,16 +42,20 @@
  *                  child paragraph of article.doc-prose, and of a long-form page's
  *                  sections), and doc body text is 17px
  *   task-list      a docs task list stays inside the phone's width
- *   new-diagram-wide   audience pages, 1440 and 1024: the routing drawing shows and every
- *                  text in it is at least 12px at its on-screen scale
- *   new-diagram-phone  audience pages at 390: the drawing is hidden, the list shows and
- *                  every row (the longest destination label wraps) stays inside the screen
+ *   new-diagram-wide   audience pages, 1440 and 1024, scripts on and off: the routing drawing
+ *                  shows and every text in it is at least 12px at its on-screen scale
+ *   new-diagram-phone  audience pages at 390, scripts on and off: the drawing is hidden, the
+ *                  list shows and every row (the longest destination label wraps) stays
+ *                  inside the screen
  *   new-fine       audience pages: p[data-fine] is the case's fine print, once
- *   new-steps-no-js  scripts off: one step per step in the data, one list row per destination
+ *   new-steps-no-js  audience and recipe pages, scripts off at 390 and 1440: one step per
+ *                  step in the data with its facts, and (audience) one list row per destination
  *   new-captions   audience pages: each shot with a caption in the data shows it, and no
  *                  shot is without one where the data gives none
  *   new-howto      recipe pages: one HowTo block with four steps that match the visible
  *                  steps (name, id, url fragment), the h1 as its name, no totalTime/tool/supply
+ *   new-tour-motion  /tour, scripts on, motion allowed: scrolled to the middle of the screen
+ *                  the video starts by itself (the positive control for new-tour-reduced)
  *   new-tour       /tour: VideoObject matches the page (date, chapters), the demo-install
  *                  sentence, the video plays under the policy and every chapter reads in full
  *   new-tour-width the video is at least 320px wide at 390 and 600px at 1024 and 1440
@@ -118,6 +122,10 @@ const AUDIENCE_KEYS = Object.fromEntries(Object.entries(AUDIENCE_ROUTES).map(([k
 const isAudience = (r) => r in AUDIENCE_KEYS;
 const isRecipe = (r) => RECIPE_ROUTES_LIST.includes(r);
 const NEW_ROUTE_CONTEXTS = [...PHONE_ONLY, "1440 js"];
+// The audience and recipe pages are also read with scripts off at 1440: the routing drawing and the steps list are
+// markup and CSS, and a container query decides which of the drawing and its list shows, so scripts off is where a
+// page that quietly needed script would show.
+const NEW_PAGE_CONTEXTS = [...NEW_ROUTE_CONTEXTS, "1440 no-js"];
 const ROUTE_SPECS = [
   { path: "/download" },
   { path: "/features" },
@@ -143,12 +151,12 @@ const ROUTE_SPECS = [
   { path: "/vs/obs-multi-rtmp", in: PHONE_ONLY },
   { path: "/vs/streamelements", in: PHONE_ONLY },
   { path: "/vs/streamlabs", in: PHONE_ONLY },
-  { path: "/for/sports-clubs", in: NEW_ROUTE_CONTEXTS },
-  { path: "/for/churches-and-events", in: NEW_ROUTE_CONTEXTS },
-  { path: "/for/streamers", in: NEW_ROUTE_CONTEXTS },
-  { path: "/recipes/two-languages-one-broadcast", in: NEW_ROUTE_CONTEXTS },
-  { path: "/recipes/obs-to-five-platforms", in: NEW_ROUTE_CONTEXTS },
-  { path: "/recipes/streaming-from-a-backpack", in: NEW_ROUTE_CONTEXTS },
+  { path: "/for/sports-clubs", in: NEW_PAGE_CONTEXTS },
+  { path: "/for/churches-and-events", in: NEW_PAGE_CONTEXTS },
+  { path: "/for/streamers", in: NEW_PAGE_CONTEXTS },
+  { path: "/recipes/two-languages-one-broadcast", in: NEW_PAGE_CONTEXTS },
+  { path: "/recipes/obs-to-five-platforms", in: NEW_PAGE_CONTEXTS },
+  { path: "/recipes/streaming-from-a-backpack", in: NEW_PAGE_CONTEXTS },
   { path: "/tour", in: [...NEW_ROUTE_CONTEXTS, "1440 reduced"] },
 ];
 // The seven routes are typed above so the registry test can see them; this keeps them equal to the data.
@@ -230,6 +238,7 @@ const ran = new Set();
 
 const JS = (c) => c.js;
 const phone = (c) => c.phone === true;
+const desktop = (c) => !c.phone && !c.reduced;
 
 /* Every check: where it runs. The table is the single source for what runs and for what the run must
  * have covered, so a renamed route, a skipped branch or a mistyped CHECK_INNER_ONLY cannot end in a
@@ -251,12 +260,13 @@ const CHECKS = [
   { id: "doc-index", where: (c, r) => c.js && !c.reduced && !phone(c) && r === "/docs/audio-routing", run: checkDocIndex },
   { id: "measure", where: (c, r) => c.js && !c.reduced && !phone(c) && (r === "/docs/audio-routing" || r === LONGFORM_ROUTE), run: checkMeasure },
   { id: "task-list", where: (c, r) => c.js && !c.reduced && r === "/docs/meta-app-review", run: checkTaskList },
-  { id: "new-diagram-wide", where: (c, r) => c.name === "1440 js" && isAudience(r), run: checkDiagramWide },
-  { id: "new-diagram-phone", where: (c, r) => JS(c) && phone(c) && isAudience(r), run: checkDiagramPhone },
-  { id: "new-fine", where: (c, r) => c.name === "1440 js" && isAudience(r), run: checkFine },
-  { id: "new-steps-no-js", where: (c, r) => !c.js && phone(c) && isAudience(r), run: checkAudienceNoJs },
-  { id: "new-captions", where: (c, r) => c.name === "1440 js" && isAudience(r), run: checkCaptions },
-  { id: "new-howto", where: (c, r) => c.name === "1440 js" && isRecipe(r), run: checkHowTo },
+  { id: "new-diagram-wide", where: (c, r) => desktop(c) && isAudience(r), run: checkDiagramWide },
+  { id: "new-diagram-phone", where: (c, r) => phone(c) && !c.reduced && isAudience(r), run: checkDiagramPhone },
+  { id: "new-fine", where: (c, r) => desktop(c) && isAudience(r), run: checkFine },
+  { id: "new-steps-no-js", where: (c, r) => !c.js && (isAudience(r) || isRecipe(r)), run: checkStepsNoJs },
+  { id: "new-captions", where: (c, r) => desktop(c) && isAudience(r), run: checkCaptions },
+  { id: "new-howto", where: (c, r) => desktop(c) && isRecipe(r), run: checkHowTo },
+  { id: "new-tour-motion", where: (c, r) => c.name === "1440 js" && r === TOUR_ROUTE, run: checkTourMotion },
   { id: "new-tour", where: (c, r) => c.name === "1440 js" && r === TOUR_ROUTE, run: checkTour },
   { id: "new-tour-width", where: (c, r) => JS(c) && !c.reduced && r === TOUR_ROUTE, run: checkTourWidth },
   { id: "new-tour-no-js", where: (c, r) => !c.js && phone(c) && r === TOUR_ROUTE, run: checkTourNoJs },
@@ -778,8 +788,8 @@ const MIN_DIAGRAM_PX = 12;
 const TOUR_MIN_WIDTH = { 390: 320, 1024: 600, 1440: 600 };
 const frames2 = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
-async function resize(page, width) {
-  await page.setViewportSize({ width, height: 900 });
+async function resize(page, width, height = 900) {
+  await page.setViewportSize({ width, height });
   await frames2(page);
 }
 
@@ -793,15 +803,19 @@ function diagramTextSizes() {
   return { scale, sizes };
 }
 
-async function checkDiagramWide({ page, route, where }) {
-  for (const width of [1440, 1024]) {
-    await resize(page, width);
-    const m = await page.evaluate(diagramTextSizes);
-    if (m.missing) return bad("new-diagram-wide", where, `${route} has no svg.diag-svg`);
-    if (m.hidden) return bad("new-diagram-wide", where, `${route}: the routing drawing is hidden at ${width}`);
-    if (!m.sizes.length) return bad("new-diagram-wide", where, `${route}: the drawing has no text`);
-    const min = Math.min(...m.sizes);
-    if (min < MIN_DIAGRAM_PX) bad("new-diagram-wide", where, `${route} at ${width}: drawing text is ${min.toFixed(1)}px on screen, under ${MIN_DIAGRAM_PX}px`);
+async function checkDiagramWide({ page, c, route, where }) {
+  try {
+    for (const width of [1440, 1024]) {
+      await resize(page, width, c.height);
+      const m = await page.evaluate(diagramTextSizes);
+      if (m.missing) return bad("new-diagram-wide", where, `${route} has no svg.diag-svg`);
+      if (m.hidden) return bad("new-diagram-wide", where, `${route}: the routing drawing is hidden at ${width}`);
+      if (!m.sizes.length) return bad("new-diagram-wide", where, `${route}: the drawing has no text`);
+      const min = Math.min(...m.sizes);
+      if (min < MIN_DIAGRAM_PX) bad("new-diagram-wide", where, `${route} at ${width}: drawing text is ${min.toFixed(1)}px on screen, under ${MIN_DIAGRAM_PX}px`);
+    }
+  } finally {
+    await resize(page, c.width, c.height); // what a check that runs after this one sees is the context's own width
   }
 }
 
@@ -832,14 +846,21 @@ async function checkFine({ page, route, where }) {
   if (squash(texts[0]) !== want) bad("new-fine", where, `${route}: the fine print is not the case's: "${squash(texts[0]).slice(0, 60)}"`);
 }
 
-async function checkAudienceNoJs({ page, route, where }) {
-  const key = AUDIENCE_KEYS[route];
+/** Scripts off: the steps are a plain ordered list, one item per step of the data, each with a paragraph per fact. */
+async function checkStepsNoJs({ page, route, where }) {
+  const audience = isAudience(route);
+  const want = audience ? AUDIENCES[AUDIENCE_KEYS[route]].steps : RECIPES.find((r) => r.route === route).steps;
   const m = await page.evaluate(() => ({
-    steps: document.querySelectorAll("ol.steps > li").length,
+    facts: [...document.querySelectorAll("ol.steps > li")].map((li) => li.querySelectorAll("p.fact").length),
     rows: document.querySelectorAll("ol.diag-list > li").length,
   }));
-  if (m.steps !== AUDIENCES[key].steps.length) bad("new-steps-no-js", where, `${route}: ${m.steps} steps, the data has ${AUDIENCES[key].steps.length}`);
-  if (m.rows !== CASES[key].dests.length) bad("new-steps-no-js", where, `${route}: ${m.rows} routing rows, the case has ${CASES[key].dests.length} destinations`);
+  if (m.facts.length !== want.length) return bad("new-steps-no-js", where, `${route}: ${m.facts.length} steps, the data has ${want.length}`);
+  want.forEach((s, i) => {
+    if (m.facts[i] !== s.facts.length) bad("new-steps-no-js", where, `${route}: step ${i + 1} shows ${m.facts[i]} facts, the data has ${s.facts.length}`);
+  });
+  if (audience && m.rows !== CASES[AUDIENCE_KEYS[route]].dests.length) {
+    bad("new-steps-no-js", where, `${route}: ${m.rows} routing rows, the case has ${CASES[AUDIENCE_KEYS[route]].dests.length} destinations`);
+  }
 }
 
 async function checkCaptions({ page, route, where }) {
@@ -933,10 +954,14 @@ async function checkTour({ page, route, where }) {
 
 async function checkTourWidth({ page, c, route, where }) {
   const widths = c.phone ? [390] : [1440, 1024];
-  for (const w of widths) {
-    if (!c.phone) await resize(page, w);
-    const got = await page.evaluate(() => document.querySelector("video").getBoundingClientRect().width);
-    if (got < TOUR_MIN_WIDTH[w]) bad("new-tour-width", where, `${route} at ${w}: the video is ${got.toFixed(0)}px wide, under ${TOUR_MIN_WIDTH[w]}px`);
+  try {
+    for (const w of widths) {
+      if (!c.phone) await resize(page, w, c.height);
+      const got = await page.evaluate(() => document.querySelector("video").getBoundingClientRect().width);
+      if (got < TOUR_MIN_WIDTH[w]) bad("new-tour-width", where, `${route} at ${w}: the video is ${got.toFixed(0)}px wide, under ${TOUR_MIN_WIDTH[w]}px`);
+    }
+  } finally {
+    if (!c.phone) await resize(page, c.width, c.height);
   }
 }
 
@@ -946,6 +971,19 @@ async function checkTourNoJs({ page, route, where }) {
   // A blocked media request is also a console error, which the page's own listener fails on.
   await page.evaluate(() => document.querySelector("video").play());
   await page.waitForFunction(() => document.querySelector("video").readyState >= 1);
+}
+
+/** The positive control for checkTourReduced: with motion allowed, the same probe (the video scrolled to the middle of
+ *  the screen) reads the other way, so "paused under reduced motion" cannot be "never plays here at all". Waits on the
+ *  condition, not on a delay. */
+async function checkTourMotion({ page, route, where }) {
+  await page.evaluate(() => document.querySelector("video").scrollIntoView({ block: "center" }));
+  try {
+    await page.waitForFunction(() => !document.querySelector("video").paused);
+  } catch {
+    bad("new-tour-motion", where, `${route}: the video does not start by itself with motion allowed, so the reduced-motion check proves nothing`);
+  }
+  await page.evaluate(() => document.querySelector("video").pause());
 }
 
 async function checkTourReduced({ page, route, where }) {
