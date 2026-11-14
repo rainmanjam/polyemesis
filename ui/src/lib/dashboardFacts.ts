@@ -168,6 +168,33 @@ export function mergeStatusDestinations(
   return [...kept, ...incoming];
 }
 
+/** The renditions of every programme, folded the way the destinations are.
+ *
+ * The same install-wide socket, the same failure: Engine.Renditions is scoped
+ * to the engine that publishes, so a frame carries only ITS programme's
+ * encodes. Replacing the list wholesale made the Renditions page describe
+ * whichever programme spoke last, and every encode belonging to another one
+ * read "Not encoding" while it was running -- on an install with more than
+ * one programme, which is when the page is busiest.
+ *
+ * A rendition row carries no programme on the wire, so the fold tags the rows
+ * of the frame it is folding (`sourceId`, client-side only) and drops the held
+ * rows carrying the tag of the programme the frame describes. An empty list
+ * therefore clears that programme's rows, and no other programme's. A frame
+ * that names no programme replaces the lot, as it did before. */
+export function mergeStatusRenditions<R extends { id: number; sourceId?: number }>(
+  prev: { renditions?: R[] } | null,
+  next: { source?: { id?: number }; renditions?: R[] },
+): R[] {
+  const incoming = next.renditions ?? [];
+  const describes = next.source?.id;
+  if (describes === undefined) return incoming;
+  const kept = (prev?.renditions ?? []).filter(
+    (r) => r.sourceId !== describes && !incoming.some((i) => i.id === r.id),
+  );
+  return [...kept, ...incoming.map((r) => ({ ...r, sourceId: describes }))];
+}
+
 /** The shape mergeStatusDestinations needs. Deliberately minimal: this fold is
  *  about which programme a row belongs to and nothing else. */
 export interface DestStatusLike {

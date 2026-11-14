@@ -8,7 +8,7 @@ import {
 } from "react";
 import { api } from "@/lib/api";
 import { rememberProgramme, rememberedProgramme, resolveProgramme } from "@/features/live/currentProgramme";
-import { mergeStatusDestinations, programmeLevels } from "@/lib/dashboardFacts";
+import { mergeStatusDestinations, mergeStatusRenditions, programmeLevels } from "@/lib/dashboardFacts";
 import { liveSocketUrl } from "@/lib/liveSocket";
 import { LiveDataContext, type LiveData, type Programme } from "@/hooks/useLiveData";
 import type {
@@ -190,6 +190,9 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
                   prev,
                   incoming,
                 ) as Status["destinations"],
+                // The same fold, for the same install-wide socket: a frame
+                // carries only its own programme's encodes.
+                renditions: mergeStatusRenditions(prev, incoming),
               };
             });
             break;
@@ -443,7 +446,13 @@ export function LiveDataProvider({ children }: Readonly<{ children: ReactNode }>
   // and so a browser that cannot open a WebSocket still shows something real.
   useEffect(() => {
     if (!programmeKnown) return;
-    api.status(programme).then(setStatus).catch(() => {});
+    api
+      .status(programme)
+      .then((s) =>
+        // Scoped to one programme, like a socket frame: fold, do not replace.
+        setStatus((prev) => ({ ...s, renditions: mergeStatusRenditions(prev, s) })),
+      )
+      .catch(() => {});
     api.source(programme).then(setSource).catch(() => {});
     api
       .stats()

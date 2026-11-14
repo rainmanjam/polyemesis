@@ -8,7 +8,12 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Renditions: "Not encoding" while a programme's renditions were encoding.** On a server with more than one programme,
+  the Renditions page showed only the programme that had reported last, so renditions belonging to the others read "Not
+  encoding" (and the running count dropped) until their programme reported again. Every programme's renditions now stay on
+  screen. The encodes themselves were never affected, and nothing else changed.
 
 ## [0.18.0] — 2026-11-11
 
