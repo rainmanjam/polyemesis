@@ -37,9 +37,10 @@ case "$1" in
   info) [ "${STUB_DOCKER_UP:-1}" = 1 ]; exit $? ;;
   ps) exit 0 ;;
   network) [ "$2" = inspect ] && echo "${STUB_NET_INTERNAL:-true}"; exit 0 ;;
+  port) [ -n "${STUB_PORT_LINE:-}" ] && echo "$STUB_PORT_LINE"; exit 0 ;;
 esac
 case "$*" in
-  *run*polyemesis-demo-sports-server*) exit 1 ;;
+  *run*polyemesis-demo-sports-server*) [ "${STUB_SERVER_OK:-0}" = 1 ] || exit 1 ;;
 esac
 exit 0
 STUB
@@ -270,6 +271,12 @@ for st in routing-final routing-initial; do
   STUB_NET_INTERNAL=false run_script --scene sports --state "$st"
   expect_rc 1
 done
+# So is --proof (U4): it reads from inside the network.
+: > "$STUB_LOG"
+STUB_NET_INTERNAL=false run_script --scene sports --proof
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "run"
 pass
 
 # 14
@@ -308,4 +315,114 @@ expect_rc 1
 expect_err "REFUSING"
 expect_no_call "network create"
 expect_no_call "run"
+pass
+
+# mutate_full <name> <python statement on f>: a copy of the full fixture with
+# one change, run through the full scene. It must refuse before any container
+# or network exists.
+mutate_full() {
+  python3 - "$ROOT/scripts/demo-seed.fixture.json" "$TMP/mutant.$N.json" "$1" <<'PY'
+import json, sys
+f = json.load(open(sys.argv[1]))
+d0 = f["sources"][0]["destinations"][0]
+exec(sys.argv[3])
+json.dump(f, open(sys.argv[2], "w"))
+PY
+  DEMO_FIXTURE="$TMP/mutant.$N.json" run_script --no-capture
+  expect_rc 1
+  expect_err "REFUSING"
+  expect_no_call "network create"
+  expect_no_call "run"
+}
+
+# 17
+begin full-real-destination-refused-before-anything-starts
+mutate_full 'd0["url"] = "rtmp://a.rtmp.youtube.com/live2"; d0["enabled"] = True'
+pass
+
+# 18
+begin full-real-backup-url-refused
+mutate_full 'd0["backupUrl"] = "rtmp://b.rtmp.youtube.com/live2"'
+pass
+
+# 19
+begin full-start-schedule-with-no-targets-refused
+mutate_full 'f["automation"]["schedules"][3]["destinations"] = []; f["automation"]["schedules"][3]["enabled"] = True'
+pass
+
+# 20
+begin full-start-schedule-on-a-network-destination-refused
+mutate_full 'f["automation"]["schedules"][3]["destinations"] = [d0["name"]]'
+pass
+
+# 21
+begin full-destination-with-platform-fields-refused
+mutate_full 'd0["extraOutputArgs"] = "-f flv x"'
+mutate_full 'd0["accountId"] = 3'
+mutate_full 'd0["multitrack"] = True'
+pass
+
+# 22
+begin full-fixture-destinations-pass
+go run "$ROOT/scripts/demo_seed_driver.go" - guardcontent "$ROOT/scripts/demo-seed.fixture.json" > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 0
+pass
+
+# 23
+begin full-network-not-internal-refused
+STUB_NET_INTERNAL=false run_script --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "run"
+# Nothing created before the check that the full scene's network is internal.
+grep -q 'network create --internal' "$STUB_LOG" || fail "the full scene did not create an --internal network"
+pass
+
+# 24
+begin sports-fixture-platform-fields-refused
+# One change per run, each on a copy of the sports fixture (U3): a real-host
+# backupUrl, extra output args, extra input args, an account id, multitrack.
+for change in \
+  'd["backupUrl"] = "rtmp://b.rtmp.youtube.com/live2"' \
+  'd["extraOutputArgs"] = "-f flv x"' \
+  'd["extraInputArgs"] = "-re"' \
+  'd["accountId"] = 3' \
+  'd["multitrack"] = True'; do
+  python3 - "$ROOT/scripts/demo-seed.sports.fixture.json" "$TMP/sports-mutant.json" "$change" <<'PY'
+import json, sys
+fx = json.load(open(sys.argv[1]))
+d = fx["sources"][0]["destinations"][0]
+exec(sys.argv[3])
+json.dump(fx, open(sys.argv[2], "w"))
+PY
+  DEMO_FIXTURE="$TMP/sports-mutant.json" run_script --scene sports --no-capture
+  expect_rc 1
+  expect_err "REFUSING"
+  expect_no_call "network create"
+  expect_no_call "run"
+done
+pass
+
+# 25
+begin sports-enabled-destination-refused
+python3 - "$ROOT/scripts/demo-seed.sports.fixture.json" "$TMP/sports-enabled.json" <<'PY'
+import json, sys
+fx = json.load(open(sys.argv[1]))
+fx["sources"][0]["destinations"][0]["enabled"] = True
+json.dump(fx, open(sys.argv[2], "w"))
+PY
+DEMO_FIXTURE="$TMP/sports-enabled.json" run_script --scene sports --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "network create"
+pass
+
+# 26
+begin server-publishing-a-port-refused
+# The server container answers `docker port` with a line: the relay is not
+# started, because only the relay may publish (U5).
+STUB_SERVER_OK=1 STUB_PORT_LINE="8097/tcp -> 0.0.0.0:8097" run_script --scene sports --no-capture
+expect_rc 1
+expect_err "REFUSING"
+expect_no_call "socat"
 pass

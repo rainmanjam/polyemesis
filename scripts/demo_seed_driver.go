@@ -153,6 +153,19 @@ type fixRecording struct {
 
 // ---------------------------------------------------------------------- main
 
+// newClient builds the HTTP client. It never follows a redirect: on a 307 or
+// 308 Go would send the same POST body (the password, on /setup and
+// /auth/login) to wherever the response points.
+func newClient(jar http.CookieJar) *http.Client {
+	return &http.Client{
+		Jar:     jar,
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 var (
 	base   string
 	client *http.Client
@@ -188,7 +201,7 @@ func main() {
 	}
 
 	jar, _ := cookiejar.New(nil)
-	client = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	client = newClient(jar)
 	waitUp()
 	authenticate()
 
@@ -198,6 +211,11 @@ func main() {
 	case "wait":
 		waitPublishing(fx)
 	case "finish":
+		// "invalid" is the full scene: its destinations must all be on .invalid
+		// hosts (or files), checked again here before any row is created.
+		if len(os.Args) > 4 && os.Args[4] == "invalid" {
+			guardContent(fx)
+		}
 		finish(fx)
 	case "content":
 		content(fx)
@@ -651,9 +669,12 @@ func content(fx *fixture) {
 	}
 }
 
-// guardContent refuses a fixture whose alert rules could reach anybody: every
-// URL must pass demorig.CheckWebhookURLs. Run before any container exists, and
-// again before the rules are sent.
+// guardContent is the full scene's first safety layer: it refuses a fixture
+// whose alert rules or destinations could reach anybody. Every alert URL must
+// pass demorig.CheckWebhookURLs and every destination demorig.CheckInvalidDestinations,
+// and a "start" schedule must name its targets, each a file destination (an
+// empty list means every destination). Run before any container exists, again
+// before the rules are sent, and again before the destinations are created.
 func guardContent(fx *fixture) {
 	var urls []demorig.WebhookRule
 	for _, r := range fx.Automation.AlertRules {
@@ -663,6 +684,35 @@ func guardContent(fx *fixture) {
 	}
 	if err := demorig.CheckWebhookURLs(urls); err != nil {
 		die("%v", err)
+	}
+	rows := fixtureDestRows(fx)
+	if err := demorig.CheckInvalidDestinations(rows); err != nil {
+		die("%v", err)
+	}
+	kinds := map[string]string{}
+	for _, r := range rows {
+		kinds[r.Name] = r.Kind
+	}
+	var bad []string
+	for _, sc := range fx.Automation.Schedules {
+		if action, _ := sc["action"].(string); action != "start" {
+			continue
+		}
+		name, _ := sc["name"].(string)
+		targets, _ := sc["destinations"].([]any)
+		if len(targets) == 0 {
+			bad = append(bad, name+": a start schedule with no targets starts every destination")
+		}
+		for _, t := range targets {
+			tn, _ := t.(string)
+			if kinds[tn] != "file" {
+				bad = append(bad, name+": a start schedule may target file destinations only")
+				break
+			}
+		}
+	}
+	if len(bad) > 0 {
+		die("demo rig: schedules that could start a network destination: %s", strings.Join(bad, "; "))
 	}
 }
 
@@ -809,13 +859,13 @@ func argOrDie(i int, usage string) string {
 	return os.Args[i]
 }
 
-// guardFixture refuses a fixture whose destinations point anywhere but host.
-// Offline: runs before any container is started.
-func guardFixture(fx *fixture, host string) {
+// fixtureDestRows maps every fixture destination to the row demorig decides on.
+func fixtureDestRows(fx *fixture) []demorig.DestRow {
 	var rows []demorig.DestRow
 	for _, s := range fx.Sources {
 		for _, d := range s.Destinations {
 			row := demorig.DestRow{Name: d.Name}
+			row.Kind, _ = d.Rest["kind"].(string)
 			row.URL, _ = d.Rest["url"].(string)
 			row.BackupURL, _ = d.Rest["backupUrl"].(string)
 			row.ExtraInputArgs, _ = d.Rest["extraInputArgs"].(string)
@@ -827,8 +877,25 @@ func guardFixture(fx *fixture, host string) {
 			rows = append(rows, row)
 		}
 	}
+	return rows
+}
+
+// guardFixture refuses a fixture whose destinations point anywhere but host.
+// Offline: runs before any container is started.
+func guardFixture(fx *fixture, host string) {
+	rows := fixtureDestRows(fx)
 	if len(rows) == 0 {
 		die("the fixture has no destinations to check")
+	}
+	// An enabled row starts as soon as it is created, before the stored-row
+	// check has run. The sports fixture creates every destination disabled and
+	// `start` enables them after that check.
+	for _, src := range fx.Sources {
+		for _, d := range src.Destinations {
+			if on, _ := d.Rest["enabled"].(bool); on {
+				die("demo rig: destination %q is enabled in the fixture; it would start before the stored rows are checked", d.Name)
+			}
+		}
 	}
 	if err := demorig.CheckStored(rows, []string{host}); err != nil {
 		die("%v", err)

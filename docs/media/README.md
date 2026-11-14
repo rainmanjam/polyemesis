@@ -24,7 +24,8 @@ make build                                  # compiles the UI and embeds it in t
 
 Each command builds what it needs, photographs, compresses and tears down or
 leaves the rig running as described below. `./scripts/capture-media.sh` is the
-older single-programme arrangement and is not used for any committed shot.
+older single-programme arrangement and is not used for any committed shot. It
+removes its work directory, which holds credentials, on every exit.
 
 The binary is stamped with the latest release tag, so the header reads a release,
 not `dev`. `demo-seed.sh` reads the override from `DEMO_VERSION` and
@@ -221,7 +222,12 @@ the window (see above). The capture asserts no per-process error chip and no
 On the full scene the server and one publisher container per programme (three)
 run on one Docker network, dialling each other by name. That sidesteps
 [#28](https://github.com/rainmanjam/polyemesis/issues/28), where an SRT
-publisher on the host could not reach a listener bound IPv6-only.
+publisher on the host could not reach a listener bound IPv6-only. The network is
+created with `--internal` (the script asks Docker whether it is), the server
+publishes no port, and the console is reached through a relay container bound to
+`127.0.0.1`, as on the sports rig. Every destination in the fixture is checked
+before anything starts: a network destination must be on a `.invalid` host, and
+a "start" schedule may name file destinations only.
 
 ## The sports rig
 

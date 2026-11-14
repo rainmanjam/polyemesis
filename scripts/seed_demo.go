@@ -29,6 +29,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rainmanjam/polyemesis/internal/demorig"
 )
 
 // Must match what Playwright's auth.setup.ts will sign in with. Both read
@@ -184,6 +186,7 @@ func main() {
 	// Every destination has to name the programme it belongs to; the server no
 	// longer picks one. Read back rather than assumed to be 1.
 	sid := onlySourceID()
+	guardDestinations(demoDestinations)
 	for _, d := range demoDestinations {
 		post("/destinations", d.body(sid))
 	}
@@ -362,10 +365,24 @@ func seedProgramme(p demoProgramme) int64 {
 		die("could not create the programme %q, so a shot meant to show its "+
 			"lane would photograph a dashboard one programme short", p.name)
 	}
+	guardDestinations(p.destinations)
 	for _, d := range p.destinations {
 		post("/destinations", d.body(id))
 	}
 	return id
+}
+
+// guardDestinations refuses to send a destination that is not a plain file:
+// every demo destination writes a recording and none may dial anywhere. The
+// check is demorig's, shared with the full demo scene (kind "file", no scheme).
+func guardDestinations(ds []demoDest) {
+	rows := make([]demorig.DestRow, 0, len(ds))
+	for _, d := range ds {
+		rows = append(rows, demorig.DestRow{Name: d.name, Kind: "file", URL: d.file})
+	}
+	if err := demorig.CheckInvalidDestinations(rows); err != nil {
+		die("%v", err)
+	}
 }
 
 type demoDest struct {
@@ -434,14 +451,27 @@ func (d demoDest) profile(rows []map[string]any) map[string]any {
 // in each panel is switched OFF, because disabled is a state the page draws
 // differently and a screenshot of nothing but enabled rows never shows it.
 //
-// EVERY ENDPOINT IS example.com AND HAS TO BE. A seeder carrying a
+// EVERY ENDPOINT IS UNDER .invalid AND HAS TO BE. A seeder carrying a
 // plausible-looking discord.com/api/webhooks/... is a string somebody pastes
 // into their own install, and the very first thing this software does with an
 // alert rule is POST to it -- a "demo" that fires real traffic at a stranger's
-// channel. An obviously fake host is the only honest choice, and it is also
-// what keeps the screenshot from advertising a URL that will 404 by the time
-// anybody reads it.
+// channel. example.com is no better: it resolves and answers HTTPS, so the
+// go-live hook would deliver a signed payload to a real host on every run.
+// RFC 2606 reserves .invalid so it can never be delegated; a rule that fires
+// fails to resolve on every install. seedAutomation checks every URL with
+// demorig.CheckWebhookURLs before it sends one, and the same check runs over
+// this file's text in internal/testenv.
 func seedAutomation() {
+	var urls []demorig.WebhookRule
+	for _, r := range demoAlertRules {
+		urls = append(urls, demorig.WebhookRule{Name: r.name, URL: r.url})
+	}
+	for _, h := range demoHooks {
+		urls = append(urls, demorig.WebhookRule{Name: h.name, URL: h.url})
+	}
+	if err := demorig.CheckWebhookURLs(urls); err != nil {
+		die("%v", err)
+	}
 	// Nothing below is refused for being a duplicate. POST /alerts/rules and
 	// POST /hooks both accept a name that already exists and mint a second row,
 	// so a second capture run -- which is the normal way you work, adjusting a
@@ -546,7 +576,7 @@ var demoAlertRules = []demoRule{
 	// The one an operator makes first: a channel, everything that matters to a
 	// human, nothing quieter than a warning.
 	{
-		name: "Ops — #broadcast-alerts", url: "https://example.com/webhooks/slack/broadcast-alerts",
+		name: "Ops — #broadcast-alerts", url: "https://hooks.demo.invalid/webhooks/slack/broadcast-alerts",
 		format: "slack", severity: "warning",
 		events: []string{"destination.down", "destination.recovered",
 			"destination.falling_behind", "ingest.lost", "ingest.recovered"},
@@ -556,7 +586,7 @@ var demoAlertRules = []demoRule{
 	// type and lets the severity floor do the filtering, which is the other way
 	// round from the rule above and the reason both are here.
 	{
-		name: "On-call pager — critical only", url: "https://example.com/webhooks/discord/oncall",
+		name: "On-call pager — critical only", url: "https://hooks.demo.invalid/webhooks/discord/oncall",
 		format: "discord", severity: "critical",
 		debounce: 15, interval: 30,
 	},
@@ -564,7 +594,7 @@ var demoAlertRules = []demoRule{
 	// that drifts out of compliance drifts back, and a channel that says so
 	// every ten seconds is a channel that gets muted before the first real one.
 	{
-		name: "Audio desk — clipping and loudness", url: "https://example.com/hooks/audio-desk",
+		name: "Audio desk — clipping and loudness", url: "https://hooks.demo.invalid/hooks/audio-desk",
 		format: "json", severity: "info",
 		events: []string{"audio.clipping", "loudness.out_of_compliance",
 			"loudness.recovered"},
@@ -574,7 +604,7 @@ var demoAlertRules = []demoRule{
 	// and the reason it gets its own row: an install has exactly one account,
 	// and this is the only signal that somebody else is holding the password.
 	{
-		name: "Security log — sign-ins and tokens", url: "https://example.com/collector/polyemesis/security",
+		name: "Security log — sign-ins and tokens", url: "https://hooks.demo.invalid/collector/polyemesis/security",
 		format: "json", severity: "info",
 		events: []string{"auth.login.failed", "auth.login.succeeded",
 			"auth.password.changed", "auth.token.created", "auth.token.revoked",
@@ -585,7 +615,7 @@ var demoAlertRules = []demoRule{
 	// the season is the commonest thing in a real install and the page renders
 	// it differently; a shot of five live rows claims the switch does nothing.
 	{
-		name: "Recording volume — disk watch", url: "https://example.com/webhooks/slack/facilities",
+		name: "Recording volume — disk watch", url: "https://hooks.demo.invalid/webhooks/slack/facilities",
 		format: "slack", severity: "warning",
 		events:   []string{"disk.low", "disk.recovered"},
 		debounce: 60, interval: 600, disabled: true,
@@ -623,18 +653,18 @@ func (h demoHook) body() map[string]any {
 // "destination.down" in the same words argues they are the same feature.
 var demoHooks = []demoHook{
 	{
-		name: "Show automation — go-live mirror", url: "https://example.com/hooks/showrunner/live",
+		name: "Show automation — go-live mirror", url: "https://hooks.demo.invalid/hooks/showrunner/live",
 		triggers: []string{"ingest.published", "ingest.disconnected"},
 		timeout:  10, attempts: 3,
 	},
 	{
-		name: "Status page — destination edges", url: "https://example.com/hooks/statuspage/destinations",
+		name: "Status page — destination edges", url: "https://hooks.demo.invalid/hooks/statuspage/destinations",
 		triggers: []string{"destination.up", "destination.down"},
 		timeout:  5, attempts: 5,
 	},
 	// OFF, for the same reason the disk rule is.
 	{
-		name: "Incident bot — faults and rollovers", url: "https://example.com/hooks/incident-bot",
+		name: "Incident bot — faults and rollovers", url: "https://hooks.demo.invalid/hooks/incident-bot",
 		triggers: []string{"broadcast.fault", "destination.rolledover"},
 		timeout:  15, attempts: 2, disabled: true,
 	},

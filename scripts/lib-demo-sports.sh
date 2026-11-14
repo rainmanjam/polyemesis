@@ -4,7 +4,8 @@
 # going to five destinations labelled YouTube, which publish only to a receiver
 # container on an internal Docker network. Sourced by demo-seed.sh, never run on
 # its own; every function uses the variables that script defines (ROOT, DRIVER,
-# FIXTURE, IMAGE, WORK, NET, SRV, BASE_URL, ...).
+# FIXTURE, IMAGE, WORK, NET, SRV, BASE_URL, ...). The network and relay functions
+# are also used by the full scene (they need PROXY, PORT and IMAGE).
 #
 # NOTHING REACHES A REAL PLATFORM. Three layers, all kept:
 #   1. the fixture's destination hosts are checked against an allow-list of one
@@ -35,9 +36,10 @@ sports_configure() {
   # The receiver's name is the ONE host a destination may use; it is also the
   # host in the fixture's URLs (internal/testenv checks the two agree).
   RECV="${RECV:-polyemesis-demo-recv}"
-  RECV_IMAGE="bluenviron/mediamtx:1.21.3"
+  # Pinned by tag AND by the multi-platform index digest (read from the pulled
+  # image and confirmed against the registry), so a moved tag cannot change it.
+  RECV_IMAGE="bluenviron/mediamtx:1.21.3@sha256:59e43552f3be43695b70c19424dc2a42fcec18075f88d91561a24ac5d70a586c"
   PROXY="${DEMO_PROXY:-polyemesis-demo-sports-proxy}"
-  NET_FLAGS="--internal"
 }
 
 # THE THIRD SAFETY LAYER, asked of Docker rather than assumed: the rig's network
@@ -48,12 +50,18 @@ sports_require_internal_network() {
     || { echo "REFUSING: network $NET is not internal (or cannot be inspected); it could route off this machine." >&2; exit 1; }
 }
 
-# The internal network, checked to BE internal, then the receiver on it.
-sports_network_and_receiver() {
-  docker network create ${NET_FLAGS:+"$NET_FLAGS"} "$NET" >/dev/null \
+# The internal network, checked to BE internal. Both scenes use it; a network
+# that already exists (DEMO_NET naming a bridge) fails the create and is refused.
+sports_create_internal_network() {
+  docker network create --internal "$NET" >/dev/null \
     || { echo "could not create the network $NET" >&2; exit 1; }
   # Not trusting the flag: ask Docker what it made.
   sports_require_internal_network
+}
+
+# The internal network, then the receiver on it.
+sports_network_and_receiver() {
+  sports_create_internal_network
   docker run -d --name "$RECV" --network "$NET" "$RECV_IMAGE" >/dev/null \
     || { echo "the receiver $RECV failed to start" >&2; exit 1; }
 }
@@ -188,8 +196,8 @@ sports_proof() {
   local dir="$WORK/proof" kind key lang
   local langs=(en es pt fr ar) i=0
   umask 077
-  [ -s "$WORK/secrets.list" ] || { echo "no $WORK/secrets.list: is the rig up?" >&2; exit 1; }
   sports_require_internal_network
+  [ -s "$WORK/secrets.list" ] || { echo "no $WORK/secrets.list: is the rig up?" >&2; exit 1; }
   command rm -rf "$dir"; mkdir -p "$dir"
   # The layout first: each path must carry exactly one H.264 1920x1080 video
   # stream and one audio stream, or the proof stops naming the path.

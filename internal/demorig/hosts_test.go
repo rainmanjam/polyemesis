@@ -364,3 +364,110 @@ func TestCheckWebhookURLsChecksEveryRowEvenWithTheSameName(t *testing.T) {
 		t.Errorf("two same-named .invalid rules refused: %v", err)
 	}
 }
+
+func TestCheckInvalidDestinationsAcceptsInvalidHostsAndFiles(t *testing.T) {
+	rows := []DestRow{
+		{Name: "YouTube", Kind: "rtmp", URL: "rtmp://a.rtmp.ingest.demo.invalid/live2"},
+		{Name: "Facebook", Kind: "rtmp", URL: "rtmps://live-api-s.demo.invalid:443/rtmp"},
+		{Name: "Upper", Kind: "rtmp", URL: "RTMP://A.Demo.INVALID/x", BackupURL: "rtmp://b.demo.invalid/x"},
+		{Name: "SRT", Kind: "srt", URL: "srt://master-control.demo.invalid:9001?mode=caller&latency=200000"},
+		{Name: "Archive", Kind: "file", URL: "archive-main-full-mix.mkv"},
+	}
+	if err := CheckInvalidDestinations(rows); err != nil {
+		t.Fatalf("refused: %v", err)
+	}
+	if err := CheckInvalidDestinations(nil); err != nil {
+		t.Fatalf("no rows refused: %v", err)
+	}
+}
+
+func TestCheckInvalidDestinationsRefusesRealHostsAndOddShapes(t *testing.T) {
+	for _, u := range []string{
+		"rtmp://a.rtmp.youtube.com/live2",
+		"rtmps://live.twitch.tv/app",
+		"rtmp://a.demo.invalid.evil.com/x",
+		"rtmp://evil.com/x.demo.invalid",
+		"rtmp://evil.com/live?h=a.demo.invalid",
+		"rtmp://a.demo.invalid./x",
+		"rtmp://invalid/x",
+		"rtmp://.invalid/x",
+		"rtmp://user:pw@a.demo.invalid/x",
+		"rtmp://a.demo.invalid@evil.com/x",
+		"rtmp://a%2edemo.invalid/x",
+		"rtmp://a.demo.invalid%40evil.com/x",
+		"rtmp://a.demo.invalid:0/x",
+		"rtmp://a.demo.invalid:99999/x",
+		"rtmp://a.demo.invalid:/x",
+		"rtmp://[::1]/x",
+		"rtmp://127.0.0.1/x",
+		"http://a.demo.invalid/x",
+		"file:///etc/passwd",
+		"a.demo.invalid/x",
+		"rtmp://a.demo.invalid/x y",
+		"rtmp://a.demo.invalid/x|rtmp://evil.com/y",
+		"rtmp://a.demo.invalid/x,rtmp://evil.com/y",
+		"rtmp://a.demo.invalid/x#f",
+		"srt://a.demo.invalid:9000?mode=caller&host=evil.com",
+		"srt://a.demo.invalid:9000?streamid=x",
+		"srt://a.demo.invalid:9000?mode=caller&mode=listener",
+		"rtmp://a.demo.invalid/x?mode=caller",
+		"rtmp://a.demo.invalid/" + strings.Repeat("a", 2100),
+		"",
+	} {
+		for _, kind := range []string{"rtmp", "srt", ""} {
+			err := CheckInvalidDestinations([]DestRow{{Name: "Spanish", Kind: kind, URL: u}})
+			if err == nil {
+				t.Errorf("kind %q url %.60q accepted", kind, u)
+				continue
+			}
+			if !strings.Contains(err.Error(), "Spanish") {
+				t.Errorf("error lacks the name: %v", err)
+			}
+			if strings.Contains(err.Error(), "evil.com") && strings.Contains(u, "pw@") {
+				t.Errorf("error leaked userinfo: %v", err)
+			}
+		}
+	}
+}
+
+func TestCheckInvalidDestinationsChecksTheBackupAndNeverNamesAURL(t *testing.T) {
+	err := CheckInvalidDestinations([]DestRow{{Name: "English", Kind: "rtmp", URL: "rtmp://a.demo.invalid/x", BackupURL: "rtmp://b.rtmp.youtube.com/SECRETKEY"}})
+	if err == nil || !strings.Contains(err.Error(), "English") || !strings.Contains(err.Error(), "backup") {
+		t.Fatalf("backup not refused by name: %v", err)
+	}
+	if strings.Contains(err.Error(), "youtube") || strings.Contains(err.Error(), "SECRETKEY") {
+		t.Errorf("error names the URL: %v", err)
+	}
+	// A file destination has no scheme, in either URL field.
+	for _, d := range []DestRow{
+		{Name: "F", Kind: "file", URL: "rtmp://a.rtmp.youtube.com/x"},
+		{Name: "F", Kind: "file", URL: "https://example.com/x.mkv"},
+		{Name: "F", Kind: "file", URL: "a.mkv", BackupURL: "rtmp://a.rtmp.youtube.com/x"},
+		{Name: "F", Kind: "file", URL: ""},
+	} {
+		if err := CheckInvalidDestinations([]DestRow{d}); err == nil {
+			t.Errorf("file destination %+v accepted", d.URL)
+		}
+	}
+}
+
+func TestCheckInvalidDestinationsAppliesTheStoredRefusals(t *testing.T) {
+	seven := int64(7)
+	for field, mod := range map[string]func(d *DestRow){
+		"extraOutputArgs": func(d *DestRow) { d.ExtraOutputArgs = "-f flv x" },
+		"extraInputArgs":  func(d *DestRow) { d.ExtraInputArgs = "-re" },
+		"accountId":       func(d *DestRow) { d.AccountID = &seven },
+		"multitrack":      func(d *DestRow) { d.Multitrack = true },
+	} {
+		for _, d := range []DestRow{
+			{Name: "N", Kind: "rtmp", URL: "rtmp://a.demo.invalid/x"},
+			{Name: "N", Kind: "file", URL: "a.mkv"},
+		} {
+			mod(&d)
+			err := CheckInvalidDestinations([]DestRow{d})
+			if err == nil || !strings.Contains(err.Error(), "N") || !strings.Contains(err.Error(), field) {
+				t.Errorf("%s on %s: %v", field, d.Kind, err)
+			}
+		}
+	}
+}

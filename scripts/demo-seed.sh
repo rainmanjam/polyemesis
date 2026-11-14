@@ -33,8 +33,11 @@
 #
 #   NOTHING REACHES A REAL PLATFORM. Every destination URL in the fixture is
 #   under .invalid, which RFC 2606 reserves so it can never be delegated, and
-#   the platform destinations are created DISABLED. A demo seed that publishes
-#   to a real ingest is a broadcast nobody meant to make.
+#   the platform destinations are created DISABLED. That is enforced, not
+#   assumed: internal/demorig refuses the fixture before anything starts, and
+#   the server runs on an --internal Docker network with no route off the
+#   machine, reached only through a relay bound to 127.0.0.1. A demo seed that
+#   publishes to a real ingest is a broadcast nobody meant to make.
 #
 #   NOTHING RUNS AGAINST YOUR DATA. The server this starts uses a data
 #   directory THIS SCRIPT CREATES, under $TMPDIR, and refuses to reuse one it
@@ -95,7 +98,6 @@ FPS="${DEMO_FPS:-60}"
 # extra to remove there.
 RECV=""
 PROXY=""
-NET_FLAGS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -112,10 +114,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# The internal-network and relay functions are shared by both scenes.
+. "$ROOT/scripts/lib-demo-sports.sh"
 case "$SCENE" in
-  full) ;;
+  full)
+    # The full scene runs on an --internal network behind the same relay.
+    PROXY="${DEMO_PROXY:-polyemesis-demo-proxy}"
+    ;;
   sports)
-    . "$ROOT/scripts/lib-demo-sports.sh"
     sports_configure
     ;;
   *) echo "unknown scene: $SCENE (full or sports)" >&2; exit 2 ;;
@@ -224,13 +230,18 @@ if [ "$SCENE" = sports ]; then
   echo "==> every fixture destination is the local receiver"
 fi
 
-# THE FIRST SAFETY LAYER (full): the alert-rule URLs in the fixture must all be
-# https on a .invalid host (internal/demorig), before any container exists. The
-# fixture has no hooks, and no other URL the server would ever call.
+# THE FIRST SAFETY LAYER (full), before any container exists
+# (internal/demorig): every alert-rule URL is https on a .invalid host; every
+# destination that is not a file is an rtmp, rtmps or srt URL on a .invalid
+# host, with no platform account, extra FFmpeg argument or multitrack; and every
+# "start" schedule names file destinations only. The fixture has no hooks. The
+# driver runs the same check again before the destinations are created. The
+# network is internal and nothing is published but the relay, so a fixture
+# edit that slips past all of this still has no route out.
 if [ "$SCENE" = full ]; then
   go run "$DRIVER" - guardcontent "$FIXTURE" >&2 \
-    || { echo "REFUSING: the fixture has an alert URL that is not on a .invalid host; nothing was started." >&2; exit 1; }
-  echo "==> every fixture alert URL is on a .invalid host"
+    || { echo "REFUSING: the fixture has an alert URL, a destination or a schedule that could reach a real host; nothing was started." >&2; exit 1; }
+  echo "==> every fixture URL is on a .invalid host or a file"
 fi
 
 # One password for the seeder and for Playwright's auth setup, generated per
@@ -351,21 +362,19 @@ fi
 # while the gosrt listener was bound IPv6-only, and nothing logged a refusal
 # because nothing arrived.
 echo "==> starting polyemesis on :$PORT"
-# Sports: the network is --internal and the server is never published with -p;
-# the relay started after it is the only thing that binds 127.0.0.1:$PORT.
-PUBLISH=()
+# Both scenes: the network is --internal and the server is never published with
+# -p; the relay started after it is the only thing that binds 127.0.0.1:$PORT.
 if [ "$SCENE" = sports ]; then
   sports_network_and_receiver
 else
-  docker network create "$NET" >/dev/null 2>&1 || true
-  PUBLISH=(-p "127.0.0.1:$PORT:$PORT")
+  # Internal, and asked about rather than assumed, before the server exists.
+  sports_create_internal_network
 fi
 docker run -d --rm --name "$SRV" -e POLYEMESIS_SETUP_CODE --network "$NET" \
-  ${PUBLISH[@]+"${PUBLISH[@]}"} \
   -v "$DATA:/data" \
   "$IMAGE" -addr ":$PORT" -data /data -log warn >/dev/null \
   || { echo "the polyemesis server failed to start" >&2; exit 1; }
-[ "$SCENE" = sports ] && sports_start_relay
+sports_start_relay
 
 # ---------------------------------------------------------------- recordings
 #
@@ -458,7 +467,11 @@ echo "==> waiting for every programme to go live and probe"
 go run "$DRIVER" "$BASE_URL" wait "$FIXTURE"
 
 echo "==> creating the rendition ladder and the destinations"
-go run "$DRIVER" "$BASE_URL" finish "$FIXTURE"
+if [ "$SCENE" = full ]; then
+  go run "$DRIVER" "$BASE_URL" finish "$FIXTURE" invalid
+else
+  go run "$DRIVER" "$BASE_URL" finish "$FIXTURE"
+fi
 
 # THE FULL SCENE'S AUTOMATION PAGE AND ROLLING BUFFER: alert rules and
 # schedules (no hooks, see the fixture), and the first programme's buffer armed
@@ -561,8 +574,12 @@ for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.png"))):
         continue
     was = os.path.getsize(path)
     im = Image.open(path).convert("RGB")
+    # To a temp file beside the target, then a rename: a kill mid-save must not
+    # leave a truncated PNG at the committed path.
+    tmp = path + ".tmp"
     im.quantize(colors=256, method=Image.MEDIANCUT,
-                dither=Image.FLOYDSTEINBERG).save(path, optimize=True)
+                dither=Image.FLOYDSTEINBERG).save(tmp, format="PNG", optimize=True)
+    os.replace(tmp, path)
     now = os.path.getsize(path)
     before, after = before + was, after + now
 if before:

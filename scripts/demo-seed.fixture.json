@@ -492,7 +492,8 @@
       },
       {
         "name": "Saturday rehearsal — on air 11:00", "action": "start", "kind": "weekly", "tz": "UTC",
-        "atMinutes": 660, "days": [6], "graceSeconds": 1800, "enabled": false, "destinations": []
+        "atMinutes": 660, "days": [6], "graceSeconds": 1800, "enabled": false,
+        "destinations": ["Archive — as-transmitted master"]
       }
     ]
   },

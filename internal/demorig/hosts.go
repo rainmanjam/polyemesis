@@ -19,6 +19,7 @@ import (
 // negotiates with the platform, and extra arguments can name any output.
 type DestRow struct {
 	Name            string `json:"name"`
+	Kind            string `json:"kind"`
 	URL             string `json:"url"`
 	BackupURL       string `json:"backupUrl"`
 	ExtraInputArgs  string `json:"extraInputArgs"`
@@ -106,6 +107,21 @@ func CheckHosts(rows []DestRow, allowed []string) error {
 // redirect (srt streamid/host parameters) is refused even though its hostname
 // would pass.
 func hostProblem(raw string, allow []string) string {
+	return urlProblem(raw, func(host string) string {
+		for _, a := range allow {
+			if strings.EqualFold(host, a) {
+				return ""
+			}
+		}
+		return fmt.Sprintf("host %q is not allowed", host)
+	}, false)
+}
+
+// urlProblem is the shape rules shared by every URL check here. hostCheck
+// returns "" for an acceptable hostname, else the problem. allowSRTQuery lets
+// an srt URL carry the two harmless call options (see srtQueryOK); every other
+// URL with a query or fragment is refused.
+func urlProblem(raw string, hostCheck func(host string) string, allowSRTQuery bool) string {
 	if raw == "" {
 		return "empty URL"
 	}
@@ -128,7 +144,8 @@ func hostProblem(raw string, allow []string) string {
 	if err != nil {
 		return "URL does not parse"
 	}
-	switch strings.ToLower(u.Scheme) {
+	scheme := strings.ToLower(u.Scheme)
+	switch scheme {
 	case "rtmp", "rtmps", "srt":
 	default:
 		return "URL scheme is not rtmp, rtmps or srt"
@@ -137,17 +154,16 @@ func hostProblem(raw string, allow []string) string {
 	if host == "" {
 		return "URL has no host"
 	}
-	allowedHost := false
-	for _, a := range allow {
-		if strings.EqualFold(host, a) {
-			allowedHost = true
-			break
-		}
+	if msg := hostCheck(host); msg != "" {
+		return msg
 	}
-	if !allowedHost {
-		return fmt.Sprintf("host %q is not allowed", host)
+	if strings.Contains(u.Host, "%") {
+		return "URL host is percent-encoded"
 	}
-	if strings.ContainsAny(raw, "?#") {
+	if strings.Contains(raw, "#") {
+		return "URL has a query or fragment"
+	}
+	if strings.Contains(raw, "?") && !(allowSRTQuery && scheme == "srt" && srtQueryOK(u.RawQuery)) {
 		return "URL has a query or fragment"
 	}
 	if strings.HasSuffix(u.Host, ":") {
@@ -157,6 +173,119 @@ func hostProblem(raw string, allow []string) string {
 		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
 			return "URL port is not 1 to 65535"
 		}
+	}
+	return ""
+}
+
+// srtQueryOK accepts only mode=(caller|listener|rendezvous) and latency=digits,
+// each at most once: the options the full fixture's SRT row uses. A host=,
+// streamid= or any other key could name another endpoint, so it is refused.
+func srtQueryOK(q string) bool {
+	seen := map[string]bool{}
+	for _, kv := range strings.Split(q, "&") {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || seen[k] {
+			return false
+		}
+		seen[k] = true
+		switch k {
+		case "mode":
+			if v != "caller" && v != "listener" && v != "rendezvous" {
+				return false
+			}
+		case "latency":
+			if v == "" || len(v) > 7 {
+				return false
+			}
+			for i := 0; i < len(v); i++ {
+				if v[i] < '0' || v[i] > '9' {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// CheckInvalidDestinations is the full scene's first safety layer: the
+// question asked of every destination in the full fixture before any container
+// exists. It returns nil only if, for each row whose kind is not "file", the
+// URL and (when set) BackupURL are rtmp, rtmps or srt URLs whose host is under
+// .invalid (RFC 2606 reserves it, so it cannot resolve) with the shape rules
+// CheckHosts applies, and the CheckStored refusals hold. An srt URL may carry
+// mode and latency options only. A "file" row's URL and BackupURL have no
+// scheme. The error names the destination, never a URL.
+func CheckInvalidDestinations(rows []DestRow) error {
+	var bad []string
+	for _, r := range rows {
+		var msgs []string
+		if r.Kind == "file" {
+			if msg := fileProblem(r.URL, true); msg != "" {
+				msgs = append(msgs, msg)
+			}
+			if msg := fileProblem(r.BackupURL, false); msg != "" {
+				msgs = append(msgs, "backup: "+msg)
+			}
+		} else {
+			if msg := invalidHostProblem(r.URL); msg != "" {
+				msgs = append(msgs, msg)
+			}
+			if r.BackupURL != "" {
+				if msg := invalidHostProblem(r.BackupURL); msg != "" {
+					msgs = append(msgs, "backup: "+msg)
+				}
+			}
+		}
+		for _, m := range msgs {
+			bad = append(bad, fmt.Sprintf("%s: %s", r.Name, m))
+		}
+	}
+	var errs []string
+	if len(bad) > 0 {
+		errs = append(errs, "destinations that could reach a real host: "+strings.Join(bad, "; "))
+	}
+	// CheckStored with a throwaway allow-list: only its field refusals matter
+	// here, so the host half is stripped by giving every row a passing URL.
+	stripped := make([]DestRow, len(rows))
+	for i, r := range rows {
+		r.URL, r.BackupURL = "rtmp://x.invalid/x", ""
+		stripped[i] = r
+	}
+	if err := CheckStored(stripped, []string{"x.invalid"}); err != nil {
+		errs = append(errs, strings.TrimPrefix(err.Error(), "demo rig: "))
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return fmt.Errorf("demo rig: %s", strings.Join(errs, "; "))
+}
+
+func invalidHostProblem(raw string) string {
+	return urlProblem(raw, func(host string) string {
+		h := strings.ToLower(host)
+		if !strings.HasSuffix(h, ".invalid") || len(h) == len(".invalid") || strings.HasPrefix(h, ".") {
+			return "host is not under .invalid"
+		}
+		return ""
+	}, true)
+}
+
+// fileProblem: a file destination is a name with no scheme. The primary URL
+// must be set; the backup may be empty.
+func fileProblem(raw string, primary bool) string {
+	if raw == "" {
+		if primary {
+			return "empty file name"
+		}
+		return ""
+	}
+	if len(raw) > maxURLBytes {
+		return "file name is too long"
+	}
+	if strings.Contains(raw, ":") || strings.Contains(raw, "//") {
+		return "file name has a scheme"
 	}
 	return ""
 }
