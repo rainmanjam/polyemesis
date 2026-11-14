@@ -19,6 +19,11 @@ its first tagged release.
   capture confirmation was right, the list was not). The length, keyframe start and note are now saved beside each new
   clip and read back, and deleting or expiring a clip removes them too. Clips captured before this release have no
   saved length: they show a dash instead of 0.0s and no longer carry a rough-start badge. Nothing else changed.
+- **Free disk space read hundreds of times too large on some Linux mounts.** On a volume whose I/O block size is larger
+  than its allocation unit (Docker Desktop's shared folders are one), the Recordings Disk card and the recorder's
+  free-space guard multiplied by the wrong one, so 1.8 TB free of 3.6 TB read as about 460 TB of 920 TB and the guard
+  would not have warned in time. Both now count in the allocation unit. Volumes where the two match, and macOS and
+  Windows, read exactly as before.
 
 ## [0.18.0] — 2026-11-11
 
