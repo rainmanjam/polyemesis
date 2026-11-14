@@ -4,6 +4,11 @@
  * phrases that prove it, checked against docs/ by recipes-data.test.ts.
  * Step titles are the homepage's (components/home/Use.astro) without the final
  * period; the homepage test keeps the two in step.
+ *
+ * A recipe is complete (ruling P4-R12): inside its four steps it carries every
+ * action the docs require to get from the step before to the step after, so a
+ * reader following only the page reaches what the title says. The completeness
+ * guards in recipes-data.test.ts pin the gaps a review found.
  */
 
 /**
@@ -14,12 +19,55 @@
 const DEMO_CAPTION =
   "Demo install: the destinations and tracks in this picture are an example; yours are the ones you add and label.";
 
+/** The picture is the dashboard's Destinations section, not the Destinations page. */
+const DESTINATIONS_SHOT = {
+  file: "18-destinations.png",
+  chrome: "Dashboard",
+  caption: DEMO_CAPTION,
+};
+
+/* The ingest steps, from OBS.md and QUICKSTART.md in the order those docs give them. */
 /** @type {Fact} */
-const OUTPUT_TO_URL = {
-  text: "Use the Recording output set to Output to URL, container mpegts, and press Start Recording.",
+const ADD_SOURCE = {
+  text: "On the Sources page, add a source, pick SRT as its protocol and press Apply.",
+  doc: "quickstart",
+  evidence: ["Open the Sources page and add one", "press Apply"],
+  anchor: "3-create-a-source",
+};
+/** @type {Fact} */
+const COPY_URL = {
+  text: "Copy its publish URL from the Sources page. The URL carries the source's publish token, so keep it private.",
+  doc: "quickstart",
+  evidence: ["shows the publish URL for the source you just created", "publish token"],
+  anchor: "4-point-obs-at-it",
+};
+/** @type {Fact} */
+const OBS_CUSTOM_OUTPUT = {
+  text: "In OBS, open Settings → Output → Output Mode: Advanced → Recording, set Type to Custom Output (FFmpeg) and FFmpeg Output Type to Output to URL.",
   doc: "obs",
-  evidence: ["Output to URL", "mpegts", "Start Recording"],
-  anchor: "multitrack-over-srt",
+  evidence: ["Output Mode: Advanced → Recording", "Custom Output (FFmpeg)", "Output to URL"],
+  anchor: "3-configure-the-custom-ffmpeg-output",
+};
+/** @type {Fact} */
+const PASTE_URL = {
+  text: "Paste the URL as the File path or URL and set Container Format to mpegts.",
+  doc: "obs",
+  evidence: ["File path or URL", "mpegts"],
+  anchor: "3-configure-the-custom-ffmpeg-output",
+};
+/** @type {Fact} */
+const AUDIO_TRACKS = {
+  text: "Tick the tracks you want under Audio Track in that same panel.",
+  doc: "quickstart",
+  evidence: ["Tick the tracks you want under Audio Track"],
+  anchor: "4-point-obs-at-it",
+};
+/** @type {Fact} */
+const START_RECORDING = {
+  text: "Press Start Recording, not Start Streaming: with Output to URL, that button is the SRT push.",
+  doc: "obs",
+  evidence: ["Start Recording, not Start Streaming", "Output to URL"],
+  anchor: "4-start-it",
 };
 /** @type {Fact} */
 const METERS_AFTER_ROUTING = {
@@ -27,6 +75,13 @@ const METERS_AFTER_ROUTING = {
   doc: "quickstart",
   evidence: ["measured after routing"],
   anchor: "7-watch-that-it-is-actually-right",
+};
+/** @type {Fact} */
+const ENABLE_IT = {
+  text: "Tick the tracks it should carry, then enable it.",
+  doc: "quickstart",
+  evidence: ["tick the ones this destination should carry", "Enable it"],
+  anchor: "6-add-a-destination",
 };
 
 /** @type {Recipe[]} */
@@ -42,7 +97,7 @@ export const RECIPES = [
     lede: "Each voice gets its own track, and each destination gets the language it needs, from one upload.",
     tag: "audio routing · OBS",
     needs: [
-      { text: "Six tracks from OBS.", doc: "audio-routing", evidence: ["six is what OBS sends"] },
+      { text: "Up to six tracks from OBS.", doc: "audio-routing", evidence: ["six is what OBS sends"] },
       {
         text: "SRT in: Classic RTMP carries a single track.",
         doc: "obs",
@@ -54,17 +109,28 @@ export const RECIPES = [
         title: "Give each voice its own track",
         facts: [
           {
-            text: "In OBS, open Advanced Audio Properties and tick which of the six tracks each source feeds.",
+            text: "In OBS, under Settings → Output → Audio, set a bitrate for each track you intend to use.",
+            doc: "obs",
+            evidence: ["Settings → Output → Audio", "Set a bitrate for each track you intend to use"],
+            anchor: "1-enable-the-audio-tracks",
+          },
+          {
+            text: "Then open Advanced Audio Properties and tick which of the six tracks each source feeds.",
             doc: "obs",
             evidence: ["Advanced Audio Properties", "six"],
-            anchor: "multitrack-over-srt",
+            anchor: "2-assign-sources-to-tracks",
           },
         ],
       },
       {
         title: "Send it as one SRT stream",
         facts: [
-          OUTPUT_TO_URL,
+          ADD_SOURCE,
+          COPY_URL,
+          OBS_CUSTOM_OUTPUT,
+          PASTE_URL,
+          AUDIO_TRACKS,
+          START_RECORDING,
           {
             text: "The dashboard shows a meter for every incoming track within a couple of seconds.",
             doc: "quickstart",
@@ -87,11 +153,18 @@ export const RECIPES = [
         title: "One destination per language",
         facts: [
           {
-            text: "Tick the tracks each destination carries.",
+            text: "Under Destinations → Add, make one destination for each language.",
             doc: "quickstart",
-            evidence: ["tick the ones this destination should carry"],
+            evidence: ["Destinations → Add"],
             anchor: "6-add-a-destination",
           },
+          {
+            text: "Give each the platform's URL and stream key from the platform's own dashboard, or pick a connected account to have polyemesis fetch them.",
+            doc: "quickstart",
+            evidence: ["from the platform's own dashboard", "pick a Connected account"],
+            anchor: "6-add-a-destination",
+          },
+          ENABLE_IT,
           {
             text: "Then check the Meters page, which measures after routing.",
             doc: "quickstart",
@@ -100,14 +173,18 @@ export const RECIPES = [
           },
         ],
         shot: {
-          file: "18-destinations.png",
-          alt: "The Destinations page, one card per destination showing the tracks it carries",
-          chrome: "Destinations",
-          caption: DEMO_CAPTION,
+          ...DESTINATIONS_SHOT,
+          alt: "The dashboard's Destinations section, one card per destination showing the tracks it carries",
         },
       },
     ],
     check: [
+      {
+        text: "Play music in OBS and open Audio meters: the music track moves while the clean track stays flat.",
+        doc: "obs",
+        evidence: ["play music", "track 1 moves while track 2 stays flat"],
+        anchor: "5-verify",
+      },
       { ...METERS_AFTER_ROUTING },
       {
         text: "A destination set to a track the source is not sending gets silence.",
@@ -122,11 +199,6 @@ export const RECIPES = [
       },
     ],
     docs: ["audio-routing", "obs", "quickstart"],
-    howto: {
-      name: "Send two languages from one broadcast",
-      tools: ["OBS Studio"],
-      supplies: ["A running polyemesis server"],
-    },
   },
   {
     slug: "obs-to-five-platforms",
@@ -140,11 +212,16 @@ export const RECIPES = [
     tag: "OBS · connecting platforms",
     needs: [
       {
+        text: "A real hostname with a trusted certificate, and the dashboard opened by that hostname, never its IP.",
+        doc: "connecting-platforms",
+        evidence: ["Use a real hostname with a trusted certificate", "Open the dashboard by its hostname, never its IP"],
+        anchor: "server-prerequisites",
+      },
+      {
         text: "A developer app on each platform you connect.",
         doc: "connecting-platforms",
         evidence: ["Register an app"],
       },
-      { text: "OBS set up for Output to URL.", doc: "obs", evidence: ["Output to URL"] },
     ],
     steps: [
       {
@@ -158,18 +235,37 @@ export const RECIPES = [
           },
         ],
       },
-      { title: "Point OBS at it", facts: [OUTPUT_TO_URL] },
+      {
+        title: "Point OBS at it",
+        facts: [ADD_SOURCE, COPY_URL, OBS_CUSTOM_OUTPUT, PASTE_URL, START_RECORDING],
+      },
       {
         title: "Connect each platform",
         facts: [
           {
-            text: "Register an app in the platform's developer console, paste its credentials into Settings → Platform credentials, and press Connect account.",
+            text: "Register an app in the platform's developer console, with your redirect URL.",
             doc: "connecting-platforms",
-            evidence: ["Register an app", "Settings → Platform credentials", "Connect account"],
+            evidence: ["Register an app", "with your redirect URL"],
             anchor: "the-same-four-steps-on-every-platform",
           },
           {
-            text: "The same four steps work for X, Twitch, Kick, YouTube and Facebook; Facebook is still being verified.",
+            text: "The redirect URL has the form https://your-hostname/api/v1/oauth/<platform>/callback, and Settings → Platform credentials shows the exact one for each platform, with a copy button.",
+            doc: "connecting-platforms",
+            evidence: [
+              "https://polyemesis.example.com/api/v1/oauth/<platform>/callback",
+              "shows the exact string for each platform",
+              "with a copy button",
+            ],
+            anchor: "server-prerequisites",
+          },
+          {
+            text: "Paste the app's credentials into Settings → Platform credentials, press Connect account and approve the sign-in.",
+            doc: "connecting-platforms",
+            evidence: ["Paste its credentials into Settings → Platform credentials", "Connect account", "approve the sign-in"],
+            anchor: "the-same-four-steps-on-every-platform",
+          },
+          {
+            text: "The same sign-in steps work for X, Twitch, Kick, YouTube and Facebook; Facebook is still being verified.",
             doc: "connecting-platforms",
             evidence: ["The same four steps on every platform", "Facebook (being verified)"],
           },
@@ -179,22 +275,22 @@ export const RECIPES = [
         title: "Add a destination per platform",
         facts: [
           {
-            text: "Under Destinations → Add, pick the platform, then enable it.",
-            doc: "quickstart",
-            evidence: ["Destinations → Add", "Enable"],
-            anchor: "6-add-a-destination",
+            text: "Under Destinations → Add, choose the platform and pick the connected account under Connected account.",
+            doc: "connecting-platforms",
+            evidence: ["Destinations → Add", "pick the connected account under Connected account"],
+            anchor: "the-same-four-steps-on-every-platform",
           },
           {
-            text: "Choose the connected account for that platform.",
-            doc: "connecting-platforms",
-            evidence: ["connected account"],
+            text: "Leave the URL and stream key empty, and polyemesis fetches them from that account.",
+            doc: "quickstart",
+            evidence: ["leave them empty", "to have polyemesis fetch them"],
+            anchor: "6-add-a-destination",
           },
+          ENABLE_IT,
         ],
         shot: {
-          file: "18-destinations.png",
-          alt: "The Destinations page, one card per destination, each live",
-          chrome: "Destinations",
-          caption: DEMO_CAPTION,
+          ...DESTINATIONS_SHOT,
+          alt: "The dashboard's Destinations section, one card per destination, each live",
         },
       },
     ],
@@ -208,38 +304,53 @@ export const RECIPES = [
       { ...METERS_AFTER_ROUTING },
     ],
     docs: ["connecting-platforms", "platforms", "quickstart", "obs"],
-    howto: {
-      name: "Send OBS to several platforms through polyemesis",
-      tools: ["OBS Studio"],
-      supplies: ["A running polyemesis server"],
-    },
   },
   {
     slug: "streaming-from-a-backpack",
     route: "/recipes/streaming-from-a-backpack",
     title: "Streaming from a backpack — polyemesis recipe",
     description:
-      "Receive a bonded IRL encoder over several links as one ordinary SRT publish. Works with BELABOX, Moblin and IRL Pro. Four steps from a working install.",
+      "Receive a bonded encoder's links as one SRT publish. Tested with BELABOX's srtla_send, not yet with BELABOX hardware, Moblin or IRL Pro. Four steps.",
     heading: "Streaming from a backpack.",
     accent: "backpack",
     lede: "A bonded encoder's several links arrive as one ordinary SRT publish.",
     tag: "SRTLA · bonded encoders",
     needs: [
       {
-        text: "A bonded IRL encoder: BELABOX, Moblin or IRL Pro.",
+        text: "A bonded IRL encoder that speaks SRTLA: BELABOX, Moblin and IRL Pro all bond this way.",
         doc: "srtla",
-        evidence: ["BELABOX", "Moblin", "IRL Pro"],
+        evidence: ["BELABOX, Moblin and IRL Pro all bond this way"],
+      },
+      {
+        text: "A source, added on the Sources page.",
+        doc: "quickstart",
+        evidence: ["Open the Sources page and add one"],
+        anchor: "3-create-a-source",
       },
       { text: "One UDP port open to the server.", doc: "srtla", evidence: ["udp"] },
+      {
+        text: "The receiver was tested against BELABOX's reference sender, srtla_send. BELABOX hardware, Moblin and IRL Pro have not been tested against it yet; they speak the same protocol and are expected to work.",
+        doc: "srtla",
+        evidence: [
+          "tested against BELABOX's reference sender",
+          "BELABOX hardware, Moblin and IRL Pro have not been tested against this receiver yet",
+          "expected to work",
+        ],
+        anchor: "compatibility-and-testing",
+      },
     ],
     steps: [
       {
         title: "Turn the receiver on",
         facts: [
           {
-            text: "In Settings → Ingest → Listeners, set the SRTLA bonding port; 5000 is the usual choice.",
+            text: "In Settings → Ingest → Listeners, set the SRTLA bonding port; 5000 is the usual choice. 0, the default, leaves the receiver off.",
             doc: "srtla",
-            evidence: ["Settings → Ingest → Listeners", "5000 is the usual choice"],
+            evidence: [
+              "Settings → Ingest → Listeners",
+              "5000 is the usual choice",
+              "0, the default, turns the receiver off",
+            ],
             anchor: "setting-it-up",
           },
         ],
@@ -247,16 +358,27 @@ export const RECIPES = [
       {
         title: "Open that port as UDP",
         facts: [
-          { text: "In Docker, publish it with -p 5000:5000/udp.", doc: "srtla", evidence: ["-p 5000:5000/udp"], anchor: "setting-it-up" },
+          {
+            text: "Open the port as UDP in your firewall. In Docker, publish it, for example with -p 5000:5000/udp.",
+            doc: "srtla",
+            evidence: ["as UDP in your firewall", "-p 5000:5000/udp"],
+            anchor: "setting-it-up",
+          },
         ],
       },
       {
         title: "Point the encoder at it",
         facts: [
           {
-            text: "In BELABOX, Moblin or IRL Pro, choose SRTLA and enter your server, the port, and the source's publish token as the stream ID.",
+            text: "In the encoder, choose SRTLA and enter this server's address, the SRTLA port, and the source's publish token as the stream ID. The token is shown on the source's card.",
             doc: "srtla",
-            evidence: ["BELABOX", "Moblin", "IRL Pro", "publish token", "stream ID"],
+            evidence: ["choose SRTLA", "publish token", "stream ID", "shown on the programme's source card"],
+            anchor: "setting-it-up",
+          },
+          {
+            text: "On BELABOX, use the custom SRTLA relay setting. On Moblin and IRL Pro, choose an SRTLA URL with your token as the stream ID.",
+            doc: "srtla",
+            evidence: ["custom SRTLA relay setting", "choose an SRTLA URL with your token as the stream ID"],
             anchor: "setting-it-up",
           },
         ],
@@ -283,11 +405,6 @@ export const RECIPES = [
       { text: "The guide lists the limits.", doc: "srtla", evidence: ["Limits"], anchor: "limits" },
     ],
     docs: ["srtla", "obs", "link-health"],
-    howto: {
-      name: "Receive a bonded encoder with SRTLA",
-      tools: ["A bonded IRL encoder: BELABOX, Moblin or IRL Pro"],
-      supplies: ["A running polyemesis server"],
-    },
   },
 ];
 

@@ -9,8 +9,6 @@ const ld = howToLd(first) as {
   "@type": string;
   name: string;
   description: string;
-  tool: { "@type": string; name: string }[];
-  supply: { "@type": string; name: string }[];
   step: { "@type": string; name: string; text: string; url: string }[];
 };
 
@@ -18,10 +16,16 @@ describe("howToLd", () => {
   it("describes the recipe as a HowTo", () => {
     expect(ld["@context"]).toBe("https://schema.org");
     expect(ld["@type"]).toBe("HowTo");
-    expect(ld.name).toBe("Send two languages from one broadcast");
+    expect(ld.name).toBe(first.heading);
     expect(ld.description).toBe(first.description);
-    expect(ld.tool).toEqual([{ "@type": "HowToTool", name: "OBS Studio" }]);
-    expect(ld.supply).toEqual([{ "@type": "HowToSupply", name: "A running polyemesis server" }]);
+  });
+
+  it("holds only what the page shows: no tool, no supply", () => {
+    for (const r of RECIPES) {
+      const json = howToLd(r) as Record<string, unknown>;
+      expect(Object.keys(json).sort(), r.slug).toEqual(["@context", "@type", "description", "name", "step"]);
+      expect(json.name, r.slug).toBe(r.heading);
+    }
   });
 
   it("has one HowToStep per step, named without the trailing period and linked to its anchor", () => {
@@ -35,7 +39,7 @@ describe("howToLd", () => {
 
   it("joins a step's facts with a space", () => {
     const facts = first.steps[1].facts.map((f: { text: string }) => f.text);
-    expect(facts).toHaveLength(2);
+    expect(facts.length).toBeGreaterThanOrEqual(2);
     expect(ld.step[1].text).toBe(facts.join(" "));
   });
 

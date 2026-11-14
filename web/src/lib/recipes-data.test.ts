@@ -105,4 +105,64 @@ describe("recipe data", () => {
     expect(text).not.toMatch(/standard RTMP/i);
     expect(text).toContain("Classic RTMP carries a single track");
   });
+
+  /* Completeness guards: each pins a gap the review found (a recipe whose facts
+   * were all true but which left out a step the docs require). */
+  describe("completeness", () => {
+    const texts = (r: R): string[] => r.steps.flatMap((s: { facts: Fact[] }) => s.facts.map((f) => f.text));
+    const by = (slug: string): R => RECIPES.find((r: R) => r.slug === slug)!;
+    const at = (list: string[], re: RegExp) => list.findIndex((t) => re.test(t));
+
+    it("gives OBS an address before it is told to start, in every recipe that starts OBS", () => {
+      for (const r of RECIPES) {
+        const t = texts(r);
+        const start = at(t, /Start Recording/);
+        if (start < 0) continue;
+        const url = at(t, /publish URL/);
+        expect(url, `${r.slug}: a fact about the publish URL`).toBeGreaterThan(-1);
+        expect(url, `${r.slug}: the publish URL comes before Start Recording`).toBeLessThan(start);
+        expect(at(t, /Custom Output \(FFmpeg\)/), `${r.slug}: Custom Output (FFmpeg)`).toBeGreaterThan(-1);
+      }
+    });
+
+    it("tells the platforms recipe the redirect URL and the hostname", () => {
+      const r = by("obs-to-five-platforms");
+      expect(texts(r).join(" ")).toMatch(/redirect URL/);
+      expect(r.needs.map((f: Fact) => f.text).join(" ")).toMatch(/hostname/);
+    });
+
+    it("enables a destination after adding it, in the two recipes that send to destinations", () => {
+      for (const slug of ["two-languages-one-broadcast", "obs-to-five-platforms"]) {
+        const t = texts(by(slug));
+        const add = at(t, /Destinations → Add/);
+        expect(add, `${slug}: adds a destination`).toBeGreaterThan(-1);
+        const enable = t.findIndex((x, i) => i >= add && /enable/i.test(x));
+        expect(enable, `${slug}: a fact that enables it, at or after the add`).toBeGreaterThanOrEqual(add);
+      }
+    });
+
+    it("picks the connected account before it enables the destination", () => {
+      const step = by("obs-to-five-platforms").steps[3].facts.map((f: Fact) => f.text);
+      expect(step.findIndex((x: string) => /connected account/i.test(x))).toBeLessThan(
+        step.findIndex((x: string) => /enable/i.test(x)),
+      );
+    });
+
+    it("states the SRTLA compatibility as the doc does, and never says 'works with'", () => {
+      const r = by("streaming-from-a-backpack");
+      const all = [r.description, r.lede, ...texts(r), ...r.needs.map((f: Fact) => f.text), ...r.check.map((f: Fact) => f.text)].join(" ");
+      expect(all).not.toMatch(/works? with/i);
+      expect(r.description.length).toBeLessThanOrEqual(160);
+      expect(r.description).toMatch(/srtla_send/);
+      expect(r.description).toMatch(/not yet|untested/i);
+      const stated = [...r.needs, ...r.check].map((f: Fact) => f.text).join(" ");
+      expect(stated).toMatch(/not been tested/);
+    });
+
+    it("says where the SRTLA publish token comes from and that the port is a firewall matter", () => {
+      const t = texts(by("streaming-from-a-backpack")).join(" ");
+      expect(t).toMatch(/source card/);
+      expect(t).toMatch(/firewall/);
+    });
+  });
 });

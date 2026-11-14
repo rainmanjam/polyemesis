@@ -32,8 +32,14 @@ describe("RecipePage.astro", () => {
   });
 
   it("links the multistream guide on the platforms recipe only", () => {
-    expect(layout).toContain("/how-to-multistream-from-obs");
-    expect(layout).toMatch(/obs-to-five-platforms/);
+    expect(layout).toMatch(/recipe\.slug === "obs-to-five-platforms" && \([\s\S]*\/how-to-multistream-from-obs/);
+    expect(layout.match(/how-to-multistream-from-obs/g)).toHaveLength(1);
+  });
+
+  it("uses the same step ids as the HowTo urls (#step-n)", () => {
+    expect(read("../components/inner/Steps.astro")).toContain('idPrefix = "step"');
+    expect(read("./howto.ts".replace("./", "../lib/"))).toContain("#step-${i + 1}");
+    expect(layout).not.toContain("idPrefix");
   });
 });
 

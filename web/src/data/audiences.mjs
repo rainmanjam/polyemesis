@@ -157,8 +157,8 @@ export const AUDIENCES = {
         facts: [ADD_DESTINATION, KEY_CHOICE_STEP, CONNECT_STEPS],
         shot: {
           file: "18-destinations.png",
-          alt: "The Destinations page, one card per destination with the tracks it carries",
-          chrome: "Destinations",
+          alt: "The dashboard's Destinations section, one card per destination with the tracks it carries",
+          chrome: "Dashboard",
         },
       },
       {
@@ -200,8 +200,8 @@ export const AUDIENCES = {
         facts: [ADD_DESTINATION],
         shot: {
           file: "18-destinations.png",
-          alt: "The Destinations page, one card per destination with the tracks it carries",
-          chrome: "Destinations",
+          alt: "The dashboard's Destinations section, one card per destination with the tracks it carries",
+          chrome: "Dashboard",
           caption: DEMO_CAPTION,
         },
       },
@@ -284,8 +284,8 @@ export const AUDIENCES = {
         ],
         shot: {
           file: "18-destinations.png",
-          alt: "The Destinations page, one card per destination showing its video and the tracks it carries",
-          chrome: "Destinations",
+          alt: "The dashboard's Destinations section, one card per destination showing its video and the tracks it carries",
+          chrome: "Dashboard",
           caption: DEMO_CAPTION,
         },
       },

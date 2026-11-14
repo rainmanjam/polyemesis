@@ -176,7 +176,7 @@ const FIXED = [
     eyebrow: "RECIPE · SRTLA · BONDED ENCODERS",
     title: "Streaming from a backpack.",
     accent: "backpack",
-    sub: "Receive a bonded IRL encoder over several links as one ordinary SRT publish.",
+    sub: "Receive a bonded encoder's links as one SRT publish.",
     visual: "none",
   },
   {
