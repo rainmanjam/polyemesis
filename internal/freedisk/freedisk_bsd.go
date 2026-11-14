@@ -1,5 +1,8 @@
 //go:build !windows && !linux
 
+// Built and tested for darwin, the only non-Linux Unix release target. The
+// other BSDs name these fields differently and did not build before either.
+
 package freedisk
 
 import "golang.org/x/sys/unix"
@@ -12,8 +15,11 @@ func Space(path string) (free, total uint64, err error) {
 		return 0, 0, err
 	}
 	// Bavail, not Bfree: Bfree includes blocks reserved for root, which the
-	// service user cannot actually use. No Frsize on these platforms: Bsize is
-	// the unit.
-	free, total = bytesFromBlocks(uint64(st.Bavail), uint64(st.Blocks), 0, uint64(st.Bsize))
+	// service user cannot actually use. No Frsize here: Bsize is the unit.
+	free, total = statfsNumbers{
+		Blocks: uint64(st.Blocks),
+		Bavail: uint64(st.Bavail),
+		Bsize:  uint64(st.Bsize),
+	}.bytes()
 	return free, total, nil
 }

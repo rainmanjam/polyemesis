@@ -11,9 +11,17 @@ func Space(path string) (free, total uint64, err error) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return 0, 0, err
 	}
-	// Bavail, not Bfree: Bfree includes blocks reserved for root, which the
-	// service user cannot actually use. Counted in Frsize, not Bsize: see
-	// bytesFromBlocks.
-	free, total = bytesFromBlocks(uint64(st.Bavail), uint64(st.Blocks), uint64(st.Frsize), uint64(st.Bsize))
+	free, total = statfsNumbersOf(&st).bytes()
 	return free, total, nil
+}
+
+// statfsNumbersOf names which kernel field is which. Bavail, not Bfree: Bfree
+// includes blocks reserved for root, which the service user cannot actually use.
+func statfsNumbersOf(st *unix.Statfs_t) statfsNumbers {
+	return statfsNumbers{
+		Blocks: uint64(st.Blocks),
+		Bavail: uint64(st.Bavail),
+		Bsize:  uint64(st.Bsize),
+		Frsize: uint64(st.Frsize),
+	}
 }
