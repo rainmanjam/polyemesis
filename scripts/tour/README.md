@@ -8,7 +8,7 @@ The poster is the frame at 52.8 s of the render, written by `publish.sh` to `web
 
 ## Prerequisites
 
-Docker (the rig), Go (the version in `go.mod`), Node, `ffmpeg` and `ffprobe`, system Google Chrome, Python 3 with `pip install playwright`. For the frame check: `tesseract`. HyperFrames is run as `npx hyperframes@0.9.39` (pinned in `hf/package.json`; no install step).
+Docker (the rig), Go (the version in `go.mod`), Node, `ffmpeg` and `ffprobe`, system Google Chrome, Python 3 with `pip install playwright`. For the frame check: `tesseract`. HyperFrames is run as `npx hyperframes@0.9.39` (pinned in `hf/package.json`; no install step). The render fetches GSAP from a CDN (cdn.jsdelivr.net, pinned 3.15.0) and the pinned tool from npm, and uploads nothing.
 
 ## Order
 
@@ -17,8 +17,8 @@ Docker (the rig), Go (the version in `go.mod`), Node, `ffmpeg` and `ffprobe`, sy
 3. `python3 scripts/tour/build_assets.py` trims the raw shots into `scripts/tour/hf/assets/shots/` (about 32 MB), copies the three fonts from `web/public/fonts/` into `hf/assets/fonts/`, and writes `edit.json` (each shot's duration).
 4. `python3 scripts/tour/build.py` regenerates `hf/index.html` and `hf/compositions/*.html` from `edit.json`, and `chapters.json`. The committed HTML is its output.
 5. In `scripts/tour/hf/`: `npx hyperframes@0.9.39 render`, then move the render to `scripts/tour/out/tour-master.mp4`.
-6. `bash scripts/tour/publish.sh` encodes the master into `web/public/media/tour.mp4` (H.264 high, `+faststart`, no audio, 1920x1080, `-crf` 20 up to 30 until it is at most 8,000,000 bytes) and extracts the poster. These are its only two outputs. It then runs the check below.
-7. `bash scripts/tour/check_frames.sh scripts/tour/out/tour-master.mp4` OCRs a frame every 0.5 s and exits 1 listing the times where `Nothing is live`, `No chat account`, `not connected`, `YouTube · YouTube` or `No platform accounts connected` appear. It exits 2 when `tesseract` is missing. Work files go to `scripts/tour/check/ocr/` (`frames.py` uses `check/frames/`).
+6. `bash scripts/tour/check_frames.sh scripts/tour/out/tour-master.mp4` OCRs a frame every 0.5 s and exits 1 listing the times where `Nothing is live`, `No chat account`, `not connected`, `YouTube · YouTube` (also when OCR drops the separator) or `No platform accounts connected` appear. It exits 2 when `tesseract` is missing or when text was read in fewer than half of the frames. Work files go to `scripts/tour/check/ocr/` (`frames.py` uses `check/frames/`). Run it before publishing.
+7. `bash scripts/tour/publish.sh` encodes the master into `web/public/media/tour.mp4` (H.264 high, `+faststart`, no audio, 1920x1080, `-crf` 20 up to 30 until it is at most 8,000,000 bytes) and extracts the poster. These are its only two outputs. It then runs the `--check` below.
 8. `python3 scripts/tour/frames.py <video>` then `python3 scripts/tour/sheets.py` make contact sheets in `scripts/tour/out/sheets/` to look at.
 
 `bash scripts/tour/publish.sh --check` writes nothing and exits 1 unless the mp4 exists, is at most 8,000,000 bytes, has no audio stream and is 1920x1080; the poster exists; the mp4's duration is within 0.5 s of `TOUR.duration` in `web/src/data/tour.mjs`; and `TOUR.chapters` there has the same starts and titles as `chapters.json`. (`chapters.json` holds the on-video form, `01 · ONE STREAM IN`; `tour.mjs` the display form, `One stream in`. They match with the number prefix dropped and case ignored.) After a re-film, update `web/src/data/tour.mjs` to the new duration and starts.

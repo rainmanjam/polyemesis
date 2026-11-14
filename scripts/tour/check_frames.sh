@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check_frames.sh <video>   OCR one frame every 0.5 s; exit 1 listing the times where a forbidden
 # string appears. Exit 2 whenever the check could not run properly (no tesseract, no frames, an
-# OCR failure, no text read at all): a skipped or broken check must never read as a pass.
+# OCR failure, text read in fewer than half of the frames): a skipped or broken check must never read as a pass.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,10 +12,10 @@ command -v ffmpeg >/dev/null 2>&1 || { echo "ffmpeg is not installed" >&2; exit 
 [ -s "$VIDEO" ] || { echo "check_frames.sh: $VIDEO is missing or empty" >&2; exit 2; }
 
 # Fixed phrases, then one pattern (ERE, case-insensitive): OCR reads the middle dot of
-# "YouTube · YouTube" as ".", "-", ":" or nothing. The fixed phrases are matched with a frame's
+# "YouTube · YouTube" as ".", "-", ":" or nothing at all ("YouTubeYouTube"). The fixed phrases are matched with a frame's
 # lines joined (they wrap); the pattern is matched within one line.
 FORBIDDEN=("Nothing is live" "No chat account" "not connected" "No platform accounts connected")
-DOUBLE='youtube[^[:alnum:]]{1,3}youtube'
+DOUBLE='youtube[^[:alnum:]]{0,3}youtube'
 
 DIR="$HERE/check/ocr"
 mkdir -p "$DIR"
@@ -62,8 +62,10 @@ for png in "${frames[@]}"; do
   fi
 done
 
-if [ "$nonempty" -eq 0 ]; then
-  echo "check_frames.sh: no text was read from any frame of $VIDEO" >&2
+# Text in at least half of the frames, not in one: a broken OCR that reads a single frame
+# must not read as a pass. (The tour has text on screen for nearly all of its length.)
+if [ $((nonempty * 2)) -lt "${#frames[@]}" ]; then
+  echo "check_frames.sh: text was read from only $nonempty of ${#frames[@]} frames of $VIDEO" >&2
   exit 2
 fi
 if [ "$hits" -gt 0 ]; then
