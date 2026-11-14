@@ -1534,6 +1534,10 @@ const DROPPED = {
       cut: "once you pass a free tier's limits",
       why: "Castr, which this card names, has no free tier: docs/evidence/competitor-facts-2026-08-15.md section 7 B ('THERE IS NO FREE TIER'; implying a shared free tier is not fine). The card now reads 'A subscription, in some cases after a free tier'; the rest of the sentence is checked.",
     },
+    {
+      cut: "sending them different audio",
+      why: "Owner's decision of 2026-11-14: the opening leads with commentary languages. The sentence about music moved down to 'Where polyemesis sits' and kept word for word from the parenthesis on; 'them' became 'each destination' because it no longer follows the sentence that names Twitch and YouTube.",
+    },
   ],
   "/free-restream-service": [
     {
@@ -1543,6 +1547,10 @@ const DROPPED = {
     {
       cut: "ffmpeg 8 build",
       why: "One wording for the installer's FFmpeg across /download and this page, the one docs/INSTALL.md uses ('the installer's pinned static build'). The rest of the sentence is checked.",
+    },
+    {
+      cut: "if that is the answer you came for, it is at the top of the page on purpose.",
+      why: "Owner's decision of 2026-11-14: the opening now leads with commentary languages, so the free-tier answer is no longer at the top of the page. The pointer is rewritten as 'the section called Is Restream free? is just below'; the sentence before it (the free tier and its two channels) is kept word for word.",
     },
   ],
   "/how-to-multistream-from-obs": [
