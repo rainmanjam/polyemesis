@@ -301,17 +301,19 @@ The tour's order of steps, prerequisites, frame check and caption rules are in
 
 ## Timing, for a maintainer
 
-Measured on the maintainer's machine on 2026-11-13, with the Docker image
-already built and cached (a first run also builds the image and takes longer):
+Measured on the maintainer's machine on 2026-11-13. Each end-to-end figure is a
+run that started with the rig's own Docker image removed, so the image was built
+during the run; the warm figure has the image already present:
 
-- the sports scene took about 92 s from start to finish, including about 52 s of
-  capture. The publisher held 59.80 fps at speed 0.994x with 0 dropped frames,
-  so `DEMO_FPS=30` was not needed. The destinations settled about 35 s after
-  their checks began;
-- the full scene's capture took about 1.3 minutes (16 tests passed) after the
-  build, in a clean run. No clean end-to-end wall time for the full scene was
-  recorded;
-- the lanes script took about 138 s for the three shots.
+- the sports rig took about 32 s to reach live with the image built from nothing
+  and about 27 s with the image present (`scripts/demo-seed.sh --scene sports
+  --no-capture`). The publisher held 59.79 fps at speed 0.994x with 0 dropped
+  frames, so `DEMO_FPS=30` was not needed;
+- the sports scene end to end, with its capture, took 168 s;
+- the full scene end to end took 176 s, and its capture passed all 16 tests;
+- the lanes script took 134 s for the three shots;
+- a whole refresh, the sports scene, the full scene and the lanes script one
+  after another, therefore takes about 478 s, a little under 8 minutes.
 
 None of this runs in CI. The host needs Docker, Go (the version in `go.mod`),
 Node and npm (to build the UI and run the capture), system Google Chrome and
