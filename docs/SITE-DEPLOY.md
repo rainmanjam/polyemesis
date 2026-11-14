@@ -209,6 +209,14 @@ declared header set, and
 files exist they cannot silently drift. Deleting the nginx path is a separate
 decision, and the test is what makes it safe to defer.
 
+The two policies differ in one place, on purpose. Cloudflare injects its Web
+Analytics beacon at the edge, so the Pages policy allows
+`https://static.cloudflareinsights.com` in `script-src` and the nginx policy
+does not: nginx never receives that script. The test names that source as the
+only permitted difference (`pagesOnlyCSPSources`) and fails on any other. If
+you turn Web Analytics off in the Cloudflare dashboard, remove the source from
+`web/public/_headers` and from that list together.
+
 If you do build the container, build it from the repository root, not from
 `web/`:
 

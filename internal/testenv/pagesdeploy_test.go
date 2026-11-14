@@ -446,6 +446,9 @@ func TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares(t *test
 	}
 
 	for name, want := range declared {
+		if name == "Content-Security-Policy" {
+			want = withPagesOnlySources(t, want)
+		}
 		got, ok := served[name]
 		if !ok {
 			t.Errorf("nginx declares %s: %s, and web/public/_headers does not "+
@@ -457,12 +460,64 @@ func TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares(t *test
 		}
 		if got != want {
 			t.Errorf("%s disagrees between the two hosting paths:\n"+
-				"          nginx : %s\n"+
-				"          Pages : %s\n"+
+				"          expected : %s\n"+
+				"          Pages    : %s\n"+
 				"        A header that is present and weakened is worse than one "+
-				"that is missing, because it reads as covered.", name, want, got)
+				"that is missing, because it reads as covered. The expected "+
+				"value is the nginx one, plus pagesOnlyCSPSources for the "+
+				"Content-Security-Policy and nothing else.", name, want, got)
 		}
 	}
+}
+
+// pagesOnlyCSPSources is every source the Pages policy carries that the nginx
+// policy does not, by directive. It is the whole permitted difference between
+// the two hosting paths.
+//
+// The one entry is Cloudflare Web Analytics. Cloudflare injects the beacon
+// script at its edge, so only the Pages path ever receives it; nginx would be
+// carrying an exception for a script it cannot serve. The owner chose on
+// 2026-11-14 to allow the beacon rather than turn the analytics off. The beacon
+// reports to the site's own /cdn-cgi/rum, which default-src 'self' covers, so
+// there is deliberately no connect-src entry: measured in a browser, not taken
+// from a table.
+//
+// Adding an entry here widens the public site's policy. Say why, in this
+// comment, with what was measured.
+var pagesOnlyCSPSources = map[string][]string{
+	"script-src": {"https://static.cloudflareinsights.com"},
+}
+
+// withPagesOnlySources returns the nginx policy with the Pages-only sources
+// appended to the directives that take them: the exact policy Pages must serve.
+//
+// Building the expectation, rather than stripping the sources from what Pages
+// serves, is what keeps the allowance honest in both directions. A source that
+// is allowed here and missing from web/public/_headers fails the comparison, so
+// the allowance cannot outlive the thing it allows.
+func withPagesOnlySources(t *testing.T, policy string) string {
+	t.Helper()
+
+	applied := map[string]bool{}
+	directives := strings.Split(policy, ";")
+	for i, d := range directives {
+		d = strings.TrimSpace(d)
+		name, _, _ := strings.Cut(d, " ")
+		if extra, ok := pagesOnlyCSPSources[name]; ok {
+			d += " " + strings.Join(extra, " ")
+			applied[name] = true
+		}
+		directives[i] = d
+	}
+	for name := range pagesOnlyCSPSources {
+		if !applied[name] {
+			t.Fatalf("pagesOnlyCSPSources allows extra sources in %s, and "+
+				"web/nginx-security-headers.conf declares no %s directive to "+
+				"extend. An allowance with nothing to attach to is checked "+
+				"against nothing.", name, name)
+		}
+	}
+	return strings.Join(directives, "; ")
 }
 
 // ---------------------------------------------------------------- rule four
