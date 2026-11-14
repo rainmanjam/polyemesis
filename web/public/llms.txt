@@ -38,6 +38,12 @@ the summary is wrong.
 - [Documentation](https://polyemesis.com/docs)
 - [Bandwidth calculator](https://polyemesis.com/calculator): what a multistream costs an uplink, modelling copied video
 
+## Who it is for
+
+- [Sports clubs](https://polyemesis.com/for/sports-clubs): one match feed to five YouTube channels, each with its own commentary language over the same crowd sound
+- [Churches and events](https://polyemesis.com/for/churches-and-events): the room, the online congregation and a second-language channel each get the version made for them
+- [Streamers](https://polyemesis.com/for/streamers): your 16:9 stream as it is, a 9:16 version as one shared encode, and a mix for each output
+
 ## Guides and answers
 
 - [Multistreaming](https://polyemesis.com/multistream): what it is, and what a self-hosted one does differently

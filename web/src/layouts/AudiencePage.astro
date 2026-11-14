@@ -1,0 +1,96 @@
+---
+/* One audience page (/for/...): the routing diagram, what it needs, the setup
+ * as steps, the docs worth reading and where to go next. Every sentence comes
+ * from data/audiences.mjs (a Fact tied to its doc); {tracks}, {dests} and
+ * {trackCount} are filled from the case here. Rules: styles/new-pages.css. */
+import InnerPage from "./InnerPage.astro";
+import RoutingDiagram from "../components/RoutingDiagram.astro";
+import Steps from "../components/inner/Steps.astro";
+import FactList from "../components/inner/FactList.astro";
+import DocLinks from "../components/inner/DocLinks.astro";
+import { AUDIENCES } from "../data/audiences.mjs";
+import { CASES, mixLabel } from "../data/cases.mjs";
+import { fillCase } from "../lib/facts";
+
+type Audience = (typeof AUDIENCES)[keyof typeof AUDIENCES];
+interface Props {
+  audience: Audience;
+}
+
+type Dest = Parameters<typeof mixLabel>[1];
+
+const RECIPES: Record<string, string> = {
+  "two-languages-one-broadcast": "Two languages, one broadcast",
+  "obs-to-five-platforms": "OBS to five platforms",
+  "streaming-from-a-backpack": "Streaming from a backpack",
+};
+
+// A recipe is linked once its page exists, so this layout can land before the recipes do.
+const recipePages = Object.keys(import.meta.glob("../pages/recipes/*.astro"));
+const recipes = (slugs: string[]) => slugs.filter((slug) => recipePages.includes(`../pages/recipes/${slug}.astro`));
+
+const { audience: a } = Astro.props;
+const c = CASES[a.key];
+const fill = (t: string) => fillCase(t, c);
+const needs = a.needs.map((f) => ({ ...f, text: fill(f.text) }));
+const steps = a.steps.map((s) => ({ ...s, title: fill(s.title), facts: s.facts.map((f) => ({ ...f, text: fill(f.text) })) }));
+
+// Sports and worship list what each destination hears under the destinations step.
+const notes = a.mixesAfterStep ? { [a.mixesAfterStep]: c.dests.map((d: Dest) => `${d.name}: ${mixLabel(c, d)}`) } : {};
+
+const others = Object.values(AUDIENCES).filter((o) => o.key !== a.key);
+const index = [
+  { id: "diagram", label: "The routing" },
+  { id: "need", label: "What you need" },
+  { id: "setup", label: "Set it up" },
+  { id: "features", label: "Worth knowing" },
+  { id: "next", label: "Next" },
+];
+---
+
+<InnerPage
+  title={a.title}
+  description={a.description}
+  path={a.route}
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: a.crumbLabel }]}
+  heading={a.heading}
+  accent={a.accent}
+  lede={a.lede}
+  index={index}
+  lightbox
+  band={{ ...a.band, command: true, secondary: { label: "Read the quickstart", href: "/docs/quickstart" } }}
+>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="/#matrix">Try the routing matrix</a>
+
+  <section id="diagram">
+    <h2>Where each track goes</h2>
+    <RoutingDiagram caseKey={a.key} />
+    <p class="fine" data-fine>{c.fine}</p>
+  </section>
+
+  <section id="need">
+    <h2>What you need</h2>
+    <FactList facts={needs} />
+  </section>
+
+  <section id="setup">
+    <h2>Set it up</h2>
+    <Steps steps={steps} notes={notes} />
+  </section>
+
+  <section id="features">
+    <h2>Worth knowing</h2>
+    <DocLinks slugs={a.features} />
+  </section>
+
+  <section id="next">
+    <h2>Next</h2>
+    <ul class="rows">
+      {recipes(a.related).map((slug) => <li><a href={`/recipes/${slug}`}>{RECIPES[slug]}</a></li>)}
+      {others.map((o) => <li><a href={o.route}>{o.heading}</a></li>)}
+      <li><a href="/docs/quickstart">The quickstart</a></li>
+      <li><a href="/calculator">The bandwidth calculator</a></li>
+    </ul>
+  </section>
+</InnerPage>

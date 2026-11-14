@@ -9,9 +9,11 @@ import { docLinksOf, type Step } from "../../lib/facts";
 interface Props {
   steps: Step[];
   idPrefix?: string;
+  /** Extra lines under a step, keyed by its 1-based number (the sports page lists what each destination hears). */
+  notes?: Record<number, string[]>;
 }
 
-const { steps, idPrefix = "step" } = Astro.props;
+const { steps, idPrefix = "step", notes = {} } = Astro.props;
 ---
 
 <ol class="steps" role="list">
@@ -23,6 +25,7 @@ const { steps, idPrefix = "step" } = Astro.props;
         <p class="docrow">
           {docLinksOf(step.facts).map((l) => <><a href={l.href}>{l.text}</a>{" "}</>)}
         </p>
+        {notes[i + 1] && <ul class="mixes">{notes[i + 1].map((n) => <li>{n}</li>)}</ul>}
         {step.shot && <Shot shot={step.shot.file} alt={step.shot.alt} chrome={step.shot.chrome} caption={step.shot.caption} />}
       </li>
     ))

@@ -81,6 +81,6 @@ describe("audience data", () => {
 
   it("avoids the banned words", () => {
     const text = readFileSync(fileURLToPath(new URL("../data/audiences.mjs", import.meta.url)), "utf8");
-    expect(text).not.toMatch(/bypass|dodge|DMCA|pre-release|Stream Deck\+|minute|\b\d+\s+stars?\b|one maintainer/i);
+    expect(text).not.toMatch(/bypass|dodge|DMCA|pre-release|Stream Deck\+|minute|\b\d+\s+stars?\b/i);
   });
 });

@@ -3,9 +3,16 @@
  * a Fact (lib/facts.ts): the doc it comes from and the phrases that prove it,
  * checked against docs/ by audiences-data.test.ts. A page never types a track
  * or destination name; it writes {tracks}, {dests} and {trackCount}.
- *
+ */
+
+/**
  * @typedef {import("../lib/facts").Fact} Fact
- * @typedef {import("../lib/facts").Step} Step */
+ * @typedef {import("../lib/facts").Step} Step
+ * @typedef {"sports"|"worship"|"streamer"} CaseKey
+ * @typedef {{ key: CaseKey, route: string, title: string, description: string, heading: string, accent: string,
+ *   lede: string, crumbLabel: string, needs: Fact[], steps: Step[], features: string[], related: string[],
+ *   band: { heading: string, accent: string, lede: string },
+ *   mixesAfterStep: number }} Audience */
 
 export const AUDIENCE_ROUTES = {
   sports: "/for/sports-clubs",
@@ -95,6 +102,7 @@ const STEP_CHECK = {
   facts: [METERS_AFTER_ROUTING, SILENCE_FACT],
 };
 
+/** @type {Record<CaseKey, Audience>} */
 export const AUDIENCES = {
   sports: {
     key: "sports",
@@ -158,6 +166,7 @@ export const AUDIENCES = {
     ],
     features: ["link-health", "broadcast-delay", "rollover", "monitoring", "stream-deck"],
     related: ["two-languages-one-broadcast"],
+    mixesAfterStep: 4,
     band: { heading: "Your match feed, in every language.", accent: "language", lede: "Run it on a server you control. Your keys and settings stay on it." },
   },
 
@@ -194,6 +203,7 @@ export const AUDIENCES = {
     ],
     features: ["captions", "scheduled-broadcast", "recurring-events", "storage", "rollover"],
     related: ["two-languages-one-broadcast"],
+    mixesAfterStep: 4,
     band: { heading: "Every room hears its own mix.", accent: "mix", lede: "Run it on a server you control. Your keys and settings stay on it." },
   },
 
@@ -265,6 +275,7 @@ export const AUDIENCES = {
     ],
     features: ["renditions", "automod", "overlay", "clip-publishing", "stream-deck"],
     related: ["streaming-from-a-backpack", "obs-to-five-platforms"],
+    mixesAfterStep: 0,
     band: { heading: "Every output, its own mix.", accent: "mix", lede: "Run it on a server you control. Your keys and settings stay on it." },
   },
 };

@@ -128,6 +128,12 @@
   Cache-Control: no-cache
 /twitch-vod-track
   Cache-Control: no-cache
+/for/sports-clubs
+  Cache-Control: no-cache
+/for/churches-and-events
+  Cache-Control: no-cache
+/for/streamers
+  Cache-Control: no-cache
 /404
   Cache-Control: no-cache
 # The comparison pages are nested, so they are SERVED at /vs/<name> and built as

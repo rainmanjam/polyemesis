@@ -49,6 +49,9 @@ export const pageSource = {
   "/vs/streamlabs": "src/data/vs/streamlabs.mjs",
   "/multistream": "src/pages/multistream.astro",
   "/twitch-vod-track": "src/pages/twitch-vod-track.astro",
+  "/for/sports-clubs": "src/data/audiences.mjs",
+  "/for/churches-and-events": "src/data/audiences.mjs",
+  "/for/streamers": "src/data/audiences.mjs",
   ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
 };
 

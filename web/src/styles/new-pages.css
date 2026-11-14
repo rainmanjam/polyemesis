@@ -196,3 +196,13 @@
   font-size: 0.75rem;
   color: var(--color-muted);
 }
+.inner-main .step .mixes {
+  list-style: none;
+  margin: 4px 0 14px;
+  padding: 0;
+  max-width: 62ch;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-muted);
+}

@@ -58,6 +58,7 @@
       "site": true,
       "usedBy": [
         "web/src/components/home/FeatureTour.astro",
+        "web/src/data/audiences.mjs",
         "web/src/pages/download.astro"
       ],
       "exception": null,
@@ -85,7 +86,9 @@
       "test": "renditions — the ladder, shared across destinations",
       "screen": "/renditions",
       "site": true,
-      "usedBy": [],
+      "usedBy": [
+        "web/src/data/audiences.mjs"
+      ],
       "exception": null,
       "allowFailedWords": []
     },
@@ -226,6 +229,7 @@
       "site": true,
       "usedBy": [
         "web/src/components/home/Why.astro",
+        "web/src/data/audiences.mjs",
         "web/src/data/install-page.mjs"
       ],
       "exception": null,
