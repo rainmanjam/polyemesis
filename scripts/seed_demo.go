@@ -1,7 +1,7 @@
 //go:build ignore
 
 // Seeds a running polyemesis with data worth photographing, for
-// scripts/capture-media.sh.
+// scripts/capture-lanes.sh.
 //
 // Marketing screenshots of an empty install are worse than no screenshots: the
 // product's entire argument is that each destination gets a DIFFERENT mix, and
@@ -224,7 +224,7 @@ func main() {
 	//
 	// It gets its OWN destinations rather than sharing: a lane with nothing in
 	// it photographs as a programme that is not working, which is the opposite
-	// of the claim. It also gets its own stream -- see capture-media.sh, which
+	// of the claim. It also gets its own stream -- see the capture script, which
 	// reads the third line below -- because a second lane reading "Offline"
 	// beside a live one argues that multi-source is broken.
 	// `solo` STOPS HERE, at one programme.
@@ -271,7 +271,7 @@ func main() {
 	relay := int(get("/stats")["relay"].(map[string]any)["port"].(float64))
 	fmt.Println(relay)
 	fmt.Println(sourceToken())
-	// Empty third line under `solo`: capture-media.sh already treats a missing
+	// Empty third line under `solo`: the capture script treats a missing
 	// second token as "one live programme", so the contract holds.
 	if secondID == 0 {
 		fmt.Println()
@@ -832,8 +832,8 @@ func annotate() {
 
 	// AUTOMOD, SEEDED SO IT PHOTOGRAPHS AS AN INSTRUMENT RATHER THAN A FORM.
 	//
-	// The same argument as the synthetic stream at the top of
-	// capture-media.sh: a screenshot of an empty rule list shows a product
+	// The same argument as the synthetic stream the capture
+	// script publishes: a screenshot of an empty rule list shows a product
 	// that does nothing. Two patterns and a rate detector is the smallest
 	// configuration that shows what the card is for -- a regex rule with an
 	// action, a sequence detector with a window, and the matrix granting each

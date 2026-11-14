@@ -23,13 +23,10 @@ make build                                  # compiles the UI and embeds it in t
 ```
 
 Each command builds what it needs, photographs, compresses and tears down or
-leaves the rig running as described below. `./scripts/capture-media.sh` is the
-older single-programme arrangement and is not used for any committed shot. Its
-capture step no longer completes: four of its sixteen capture tests fail against
-the current spec (monitoring, clips, automod and automation), so committed shots
-come only from `demo-seed.sh` and `capture-lanes.sh`. It and `capture-lanes.sh`
-build their seeder with `scripts/build-seeder.sh`, and each removes its work
-directory, which holds credentials, on every exit.
+leaves the rig running as described below. Committed shots come only from
+`demo-seed.sh` and `capture-lanes.sh`. `capture-lanes.sh` builds its seeder with
+`scripts/build-seeder.sh`, and each removes its work directory, which holds
+credentials, on every exit.
 
 The binary is stamped with the latest release tag, so the header reads a release,
 not `dev`. `demo-seed.sh` reads the override from `DEMO_VERSION` and

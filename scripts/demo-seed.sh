@@ -344,7 +344,7 @@ mkdir -p "$OUT"
   printf '%s' "$POLYEMESIS_SETUP_CODE" > "$WORK/setup.code" )
 
 # BUILT EVERY RUN, never reused if present (DEMO_REUSE_IMAGE=1, which the script
-# never sets, is for iterating on this script and for its offline tests). capture-media.sh learned this the
+# never sets, is for iterating on this script and for its offline tests). The first capture script learned this the
 # expensive way: the image on the machine was a week old, so every screenshot
 # committed from it photographed week-old code. A tool that advertises the
 # product must photograph the product as it is now.
@@ -371,7 +371,7 @@ fi
 
 # Server AND publishers in containers on one network, dialing each other by
 # name. The host-to-container route does not work here and the reason is
-# recorded in capture-media.sh: the publisher reached 127.0.0.1:6000 over IPv4
+# recorded here and in capture-lanes.sh: the publisher reached 127.0.0.1:6000 over IPv4
 # while the gosrt listener was bound IPv6-only, and nothing logged a refusal
 # because nothing arrived.
 echo "==> starting polyemesis on :$PORT"
@@ -570,8 +570,8 @@ echo "==> capturing into $OUT"
 node "$ROOT/scripts/check-shots.mjs" "$SCENE" "$WORK/.started" \
   || { echo "the shots failed their check; nothing was compressed or copied." >&2; exit 1; }
 
-# THE SAME COMPRESSION capture-media.sh has always applied, which this script
-# never did -- so its shots came out at 300-450 KB against 90-200 KB for the
+# THE SAME COMPRESSION the committed shots were always given, which this script
+# first did not apply -- so its shots came out at 300-450 KB against 90-200 KB for the
 # committed ones, and could not be committed as they were. A 256-colour palette
 # is lossless to the eye on a UI capture (flat fills, one accent, text); the
 # site still serves avif/webp variants built from these by Astro's <Picture>.
@@ -606,7 +606,7 @@ fi
 # The site keeps its own copies (Astro must see them under web/src to build the
 # avif/webp variants), and web/src/lib/features-shots.test.ts fails when they
 # differ from docs/media by a byte. So refresh them here, the same way
-# capture-media.sh does: only files the site already ships, and only when this
+# capture-lanes.sh does: only files the site already ships, and only when this
 # run wrote the committed set. A verification run into a scratch --out must not
 # touch the site.
 SITE_SHOTS="$ROOT/web/src/assets/shots"
