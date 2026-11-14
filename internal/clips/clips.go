@@ -585,10 +585,6 @@ func (c *Capturer) sweepLocked() (int, error) {
 }
 
 func (c *Capturer) remove(cl Clip, reason string) bool {
-	if _, err := Resolve(c.cfg.Dir, cl.Name); err != nil {
-		c.log.Warn("clip retention skipped a name it could not resolve", "name", cl.Name, "err", err)
-		return false
-	}
 	if err := Remove(c.cfg.Dir, cl.Name); err != nil {
 		c.log.Warn("delete clip", "name", cl.Name, "err", err)
 		return false
