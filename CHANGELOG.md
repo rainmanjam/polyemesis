@@ -11,19 +11,26 @@ its first tagged release.
 ### Fixed
 
 - **Renditions: "Not encoding" while a programme's renditions were encoding.** On a server with more than one programme,
-  the Renditions page showed only the programme that had reported last, so renditions belonging to the others read "Not
-  encoding" (and the running count dropped) until their programme reported again. Every programme's renditions now stay on
-  screen. The encodes themselves were never affected, and nothing else changed.
+  the Renditions page used only the renditions of whichever programme had reported last, so every rendition belonging to
+  another programme read "Not encoding", and the running count dropped, until its own programme reported again. The page
+  now keeps every programme's renditions and shows each one's real state; a programme you delete drops out of the page
+  within a few seconds. The encodes themselves were never affected. The Dashboard is unchanged: its Pipeline card still
+  lists only the selected programme's renditions.
 - **Clips: every clip listed as "Rough start, 0.0s".** The clip list rebuilt each row from the file name alone, so a clip
   that began at a keyframe and ran 30 seconds still read as a rough start of zero length once it was in the list (the
-  capture confirmation was right, the list was not). The length, keyframe start and note are now saved beside each new
-  clip and read back, and deleting or expiring a clip removes them too. Clips captured before this release have no
-  saved length: they show a dash instead of 0.0s and no longer carry a rough-start badge. Nothing else changed.
+  confirmation when you captured it was right; the list was not). The length, keyframe start and note of each new clip are
+  now saved beside it and read back, and deleting a clip, or retention expiring it, removes them with it. Clips captured
+  before this fix have nothing saved: they show a dash for the length and a neutral "Start not checked" instead of a
+  length or a warning, because their start was never measured. `GET /clips` gains a `measured` field to say so; no
+  existing field changed. Nothing else on the Clips page changed.
 - **Free disk space read hundreds of times too large on some Linux mounts.** On a volume whose I/O block size is larger
-  than its allocation unit (Docker Desktop's shared folders are one), the Recordings Disk card and the recorder's
-  free-space guard multiplied by the wrong one, so 1.8 TB free of 3.6 TB read as about 460 TB of 920 TB and the guard
-  would not have warned in time. Both now count in the allocation unit. Volumes where the two match, and macOS and
-  Windows, read exactly as before.
+  than its allocation unit (Docker Desktop's shared folders are one), free and total space were multiplied by the wrong
+  one, so a volume with 1.8 TB free of 3.6 TB read as roughly 460 TB of 920 TB on the Recordings Disk card. The same
+  number feeds four checks, which now see the true, smaller figure: the recorder's free-space floor (below it, recording
+  stops and the Recordings page says why), the uploads Save floor, the room playlist media needs for its normalised
+  copies, and the delay buffer's disk guard. On such a mount with less free than a floor, recording now stops and
+  uploads, normalised copies or delay spills are refused, where before they went ahead until the volume really filled.
+  Volumes where the two block sizes match (ext4, xfs, btrfs and most others), macOS and Windows read exactly as before.
 
 ## [0.18.0] — 2026-11-11
 
