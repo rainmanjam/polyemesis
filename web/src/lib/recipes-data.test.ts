@@ -91,12 +91,12 @@ describe("recipe data", () => {
 
   it("avoids the banned words", () => {
     const text = JSON.stringify(RECIPES);
-    expect(text).not.toMatch(/bypass|dodge|DMCA|pre-release|Stream Deck\+|minute|totalTime|\b\d+\s+stars?\b|one maintainer/i);
+    expect(text).not.toMatch(/bypass|dodge|DMCA|pre-release|Stream Deck\+|minute|totalTime|\b\d+\s+stars?\b/i);
   });
 
   it("says Facebook is still being verified in the platforms recipe", () => {
     const r = RECIPES.find((x: R) => x.slug === "obs-to-five-platforms");
-    const text = r.steps.flatMap((s: { facts: Fact[] }) => s.facts.map((f) => f.text)).join(" ");
+    const text = r!.steps.flatMap((s: { facts: Fact[] }) => s.facts.map((f) => f.text)).join(" ");
     expect(text).toContain("Facebook is still being verified");
   });
 

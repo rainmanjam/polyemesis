@@ -134,6 +134,12 @@
   Cache-Control: no-cache
 /for/streamers
   Cache-Control: no-cache
+/recipes/two-languages-one-broadcast
+  Cache-Control: no-cache
+/recipes/obs-to-five-platforms
+  Cache-Control: no-cache
+/recipes/streaming-from-a-backpack
+  Cache-Control: no-cache
 /404
   Cache-Control: no-cache
 # The comparison pages are nested, so they are SERVED at /vs/<name> and built as

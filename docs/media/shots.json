@@ -230,7 +230,8 @@
       "usedBy": [
         "web/src/components/home/Why.astro",
         "web/src/data/audiences.mjs",
-        "web/src/data/install-page.mjs"
+        "web/src/data/install-page.mjs",
+        "web/src/data/recipes.mjs"
       ],
       "exception": null,
       "allowFailedWords": []

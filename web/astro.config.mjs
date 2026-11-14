@@ -52,6 +52,9 @@ export const pageSource = {
   "/for/sports-clubs": "src/data/audiences.mjs",
   "/for/churches-and-events": "src/data/audiences.mjs",
   "/for/streamers": "src/data/audiences.mjs",
+  "/recipes/two-languages-one-broadcast": "src/data/recipes.mjs",
+  "/recipes/obs-to-five-platforms": "src/data/recipes.mjs",
+  "/recipes/streaming-from-a-backpack": "src/data/recipes.mjs",
   ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
 };
 

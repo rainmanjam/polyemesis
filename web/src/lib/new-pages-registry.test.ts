@@ -7,7 +7,12 @@ import { OG_CARDS, ogSlugFor } from "../data/og.mjs";
 
 /* Every new route is registered in the six places that each have a check
  * elsewhere; this fails here, with the route's name, before the build does. */
-export const NEW_ROUTES = ["/for/sports-clubs", "/for/churches-and-events", "/for/streamers"];
+export const NEW_ROUTES = [
+  "/for/sports-clubs", "/for/churches-and-events", "/for/streamers",
+  "/recipes/two-languages-one-broadcast",
+  "/recipes/obs-to-five-platforms",
+  "/recipes/streaming-from-a-backpack",
+];
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)), "utf8");
 const exists = (rel: string) => existsSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)));

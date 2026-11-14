@@ -40,7 +40,7 @@ describe("howToLd", () => {
   });
 
   it("takes the site from its second argument", () => {
-    expect(howToLd(first, "https://example.test").step[0].url).toBe(
+    expect((howToLd(first, "https://example.test") as typeof ld).step[0].url).toBe(
       "https://example.test/recipes/two-languages-one-broadcast#step-1",
     );
   });
