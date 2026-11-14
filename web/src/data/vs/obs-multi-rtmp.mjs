@@ -159,15 +159,6 @@ export const DATA = {
       },
     ],
   },
-  useOther: {
-    heading: "Use the plugin, not this",
-    items: [
-      "Your upload comfortably carries every destination at once. If it does, the main reason to move the fan-out off your machine has already been answered.",
-      "The per-destination mixes you want are ones you can lay out across OBS's six tracks. Selecting one of those per output is exactly what this plugin does, at zero cost.",
-      "You want no infrastructure. A plugin that ships with your broadcast software is one fewer thing to keep alive.",
-      "You are already running it and it works. There is no upgrade being sold here.",
-    ],
-  },
   footer:
     "Everything this page says about obs-multi-rtmp was checked on <strong>15 August 2026</strong>, and is recorded in <code>docs/evidence/competitor-facts-2026-08-15.md</code>. Prices and plan limits move; check before deciding on the strength of a number here.",
   closing: { heading: "Still weighing it up?" },

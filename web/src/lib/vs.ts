@@ -60,12 +60,6 @@ export interface VsData {
   which?: { heading: string; intro?: string; verdict?: "head" | "foot"; items: VsWhichItem[] };
   sections: VsSection[];
   merits?: { heading: string; note?: string; items: { h: string; p: string }[]; after?: string[] };
-  useOther?: {
-    heading: string;
-    items: string[];
-    after?: string[];
-    links?: { label: string; href: string }[];
-  };
   /** The note at the foot: when it was checked and where it is recorded. */
   footer?: string;
   closing: { heading: string; accent?: string; lede?: string };
@@ -74,7 +68,7 @@ export interface VsData {
 export const VS_SLUGS = ["aitum-multistream", "obs-multi-rtmp", "restreamer", "streamelements", "streamlabs"] as const;
 
 /* Ids the template itself uses for its own sections. */
-const RESERVED_IDS = ["glance", "fits", "which", "does-well", "use-other", "others"];
+const RESERVED_IDS = ["glance", "fits", "which", "does-well", "others"];
 
 const ALLOWED_TAGS = new Set(["a", "code", "em", "strong"]);
 const TAG = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^<>]*)>/g;
@@ -101,7 +95,6 @@ const HTML_PATHS = [
   /^sections\[\d+\]\.(intro|after\[\d+\]|paragraphs\[\d+\]|columns\[\d+\]\.steps\[\d+\])$/,
   /^(merits|sections\[\d+\])\.items\[\d+\]\.(p|more)$/,
   /^merits\.(note|after\[\d+\])$/,
-  /^useOther\.(items|after)\[\d+\]$/,
   /^footer$/,
 ];
 
@@ -202,11 +195,6 @@ function checkLists(d: VsData): string[] {
   if (d.fits.other.items.length === 0) out.push("fits.other is empty");
   if (d.which && d.which.items.length === 0) out.push("which has no items");
   if (d.merits && d.merits.items.length === 0) out.push("merits has no items");
-  if (d.useOther && d.useOther.items.length === 0) out.push("useOther has no items");
-  d.useOther?.links?.forEach((l, i) => {
-    const bad = hrefProblem(l.href);
-    if (bad) out.push(`useOther.links[${i}].href: ${bad}`);
-  });
   return out;
 }
 

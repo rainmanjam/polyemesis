@@ -971,8 +971,9 @@
   :where(.inner-main) .inst-tab:hover { color: var(--color-fg); }
   :where(.inner-main) .inst-tab[aria-selected="true"] {
     color: var(--color-fg);
-    /* Coral, exactly as the homepage's own install tabs (Install.astro) mark the selected tab. */
-    border-bottom-color: var(--color-accent);
+    /* Ink, exactly as the homepage's own install tabs (Install.astro) mark the selected tab: ink
+       text and a 2px ink underline, so the selected tab is not told apart by hue alone. */
+    border-bottom-color: var(--color-fg);
   }
   :where(.inner-main) .inst-tab:focus-visible {
     outline: 2px solid var(--color-primary-bright);

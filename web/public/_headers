@@ -31,37 +31,42 @@
 # So no rule may set a header that a later rule also sets. The security headers
 # stay on /* because they belong on everything; Cache-Control is now stated once
 # per path class, and the HTML rule is scoped to the HTML rather than to /*.
-# CLOUDFLARE WEB ANALYTICS IS NOT ALLOWED HERE, AND A TEST DECIDED THAT.
+# CLOUDFLARE WEB ANALYTICS IS ALLOWED HERE, AND THE OWNER DECIDED THAT.
 #
-# Lighthouse (desktop, 2026-08-16) failed two audits on the live homepage --
-# errors-in-console and inspector-issues -- for one reason:
+# Cloudflare injects its Web Analytics beacon at the edge because Web Analytics
+# is enabled for this site:
 #
-#   Loading the script 'https://static.cloudflareinsights.com/beacon.min.js/...'
-#   violates the following Content Security Policy directive:
-#   "script-src 'self' 'unsafe-inline'"
+#   https://static.cloudflareinsights.com/beacon.min.js/v<hash>
 #
-# Cloudflare injects that beacon at the edge because Web Analytics is enabled on
-# the Pages project. The first fix here added static.cloudflareinsights.com to
-# script-src and cloudflareinsights.com to connect-src, and it was WRONG --
-# TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares failed
-# immediately, because this policy is required to match deploy/nginx.conf.example
-# byte for byte. Its message is the whole argument:
+# Until 2026-11-14 this policy blocked it. Every page view logged one console
+# error, Lighthouse (desktop, 2026-08-16) failed errors-in-console and
+# inspector-issues on the homepage, and the analytics collected nothing. This
+# file used to say the fix was to turn Web Analytics off in the dashboard. The
+# owner chose the other way: keep the analytics and allow the beacon.
 #
-#   "A header that is present and weakened is worse than one that is missing,
-#    because it reads as covered."
+# WHAT IS ALLOWED IS WHAT WAS MEASURED, NOT WHAT THE DOCUMENTATION LISTS.
 #
-# Matching the weakening into nginx would have been worse still: nginx never
-# serves that beacon, so it would carry an exception for a script it cannot
-# receive, purely to keep two files equal.
+# Cloudflare's CSP table names two entries: static.cloudflareinsights.com in
+# script-src and cloudflareinsights.com in connect-src. The second is for a
+# snippet embedded by hand. The injected beacon on a proxied site reports to
+# this site's own /cdn-cgi/rum, which default-src 'self' already covers. Loaded
+# in a browser with only the script-src entry added: the beacon returned 200,
+# POST /cdn-cgi/rum returned 204, and there were no policy violations. So
+# connect-src is not opened.
 #
-# THE FIX IS THEREFORE NOT HERE. Turn Web Analytics off in the Cloudflare
-# dashboard. The beacon stops being injected, the console errors stop, and this
-# policy stays as tight as the nginx one it mirrors. Nothing is lost: the
-# analytics was collecting nothing anyway -- every request for it was blocked.
+# THIS IS THE ONE PLACE THE POLICY DIFFERS FROM nginx-security-headers.conf.
+#
+# nginx never receives the beacon, so it carries no exception for a script it
+# cannot serve. TestThePagesHeadersRestateEverySecurityHeaderTheNginxConfigDeclares
+# names this source as the single permitted difference and fails on any other.
+# It also fails if the source is removed here while the test still allows it.
+#
+# If Web Analytics is turned off in the Cloudflare dashboard, remove the source
+# here and its entry in the test together.
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; base-uri 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; font-src 'self'; base-uri 'self'; frame-ancestors 'none'
 
 # HTML must revalidate, or a deploy is invisible until caches expire. Scoped to
 # the built pages rather than /*, so it cannot leak onto a hashed asset.
