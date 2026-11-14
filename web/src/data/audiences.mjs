@@ -52,16 +52,15 @@ const OUTPUT_TO_URL = {
 };
 /** @type {Fact} */
 const RTMP_SINGLE = {
-  text: "Classic RTMP carries a single track, so multitrack audio needs SRT.",
+  text: "Classic RTMP carries a single track, so multitrack audio from OBS needs SRT.",
   doc: "obs",
-  evidence: ["Classic RTMP carries one audio track"],
-  anchor: "standard-rtmp-single-track",
+  evidence: ["Classic RTMP carries one audio track", "If your encoder is OBS, use SRT"],
 };
 /** @type {Fact} */
 const LABEL_TRACKS = {
-  text: "On Sources → annotations, label the incoming tracks so every destination sees the same names.",
+  text: "Optionally, on Sources → annotations, label the incoming tracks so every destination sees the same names.",
   doc: "quickstart",
-  evidence: ["annotations"],
+  evidence: ["annotations", "This is optional"],
   anchor: "5-tell-it-what-each-track-is",
 };
 /** @type {Fact} */
@@ -84,18 +83,33 @@ const SILENCE_FACT = {
   doc: "quickstart",
   evidence: ["selecting a track the source is not sending"],
 };
+/** A destination's key comes from the platform's dashboard or from a connected account: either works.
+ *  @type {Fact} */
+const KEY_OR_ACCOUNT = {
+  text: "For each platform you send to, its stream key from the platform's dashboard, or a connected account that lets polyemesis fetch it.",
+  doc: "quickstart",
+  evidence: ["platform's own dashboard", "Connected account", "have polyemesis fetch them"],
+  anchor: "6-add-a-destination",
+};
 /** @type {Fact} */
-const CONNECT_ACCOUNT = {
-  text: "A connected account for each platform you send to.",
+const KEY_CHOICE_STEP = {
+  text: "For each destination, paste the stream key from the platform's dashboard, or leave it empty and pick a connected account.",
+  doc: "quickstart",
+  evidence: ["platform's own dashboard", "leave them empty and pick a Connected account"],
+  anchor: "6-add-a-destination",
+};
+/** @type {Fact} */
+const CONNECT_STEPS = {
+  text: "To connect an account: register an app, paste its credentials in Settings, press Connect account.",
   doc: "connecting-platforms",
-  evidence: ["Connect account"],
+  evidence: ["Register an app", "Connect account"],
   anchor: "the-same-four-steps-on-every-platform",
 };
 
 /** @type {Step} */
 const STEP_SEND_SRT = { title: "Send it as multitrack SRT", facts: [OUTPUT_TO_URL, RTMP_SINGLE] };
 /** @type {Step} */
-const STEP_LABEL = { title: "Label the tracks", facts: [LABEL_TRACKS] };
+const STEP_LABEL = { title: "Label the tracks (optional)", facts: [LABEL_TRACKS] };
 /** @type {Step} */
 const STEP_CHECK = {
   title: "Check what each destination hears",
@@ -122,10 +136,10 @@ export const AUDIENCES = {
       },
       SRT_FACT,
       {
-        text: "A connected YouTube account for each channel.",
-        doc: "connecting-platforms",
-        evidence: ["YouTube", "Connect account"],
-        anchor: "the-same-four-steps-on-every-platform",
+        text: "For each YouTube channel, its stream key from the YouTube dashboard, or a connected account that lets polyemesis fetch it.",
+        doc: "quickstart",
+        evidence: ["platform's own dashboard", "Connected account", "have polyemesis fetch them"],
+        anchor: "6-add-a-destination",
       },
     ],
     steps: [
@@ -140,15 +154,7 @@ export const AUDIENCES = {
       STEP_LABEL,
       {
         title: "One destination per channel",
-        facts: [
-          {
-            text: "Connect each YouTube channel: register an app, paste its credentials in Settings, press Connect account.",
-            doc: "connecting-platforms",
-            evidence: ["Register an app", "Connect account"],
-            anchor: "the-same-four-steps-on-every-platform",
-          },
-          ADD_DESTINATION,
-        ],
+        facts: [ADD_DESTINATION, KEY_CHOICE_STEP, CONNECT_STEPS],
         shot: {
           file: "18-destinations.png",
           alt: "The Destinations page, one card per destination with the tracks it carries",
@@ -175,15 +181,15 @@ export const AUDIENCES = {
     route: AUDIENCE_ROUTES.worship,
     title: "One service, a mix for every room — polyemesis",
     description:
-      "Give the room, the online congregation and a second-language channel the version made for them, and send a speech-only feed out as a podcast.",
+      "Send one service to several destinations, each with the mix made for it: the room mix, the broadcast mix, a second language or music only.",
     heading: "One service, a mix for every room.",
     accent: "mix",
-    lede: "The room, the online congregation and a second-language channel each hear the version made for them, while a speech-only feed goes out as a podcast.",
+    lede: "One service goes out to several destinations, and each one carries the mix made for it: the room mix, the broadcast mix, a second language, or music only.",
     crumbLabel: "for churches and events",
     needs: [
       { text: "One audio track for each of {tracks}. OBS sends up to six.", doc: "audio-routing", evidence: ["six is what OBS sends"] },
       SRT_FACT,
-      CONNECT_ACCOUNT,
+      KEY_OR_ACCOUNT,
     ],
     steps: [
       { title: "Put each of {tracks} on its own track", facts: [ADVANCED_AUDIO] },
@@ -258,7 +264,19 @@ export const AUDIENCES = {
         title: "Point each destination at its own video",
         facts: [
           {
-            text: "Point the vertical destination at the rendition, leave the others on the copied video, and tick each one's tracks.",
+            text: "Destinations select a rendition rather than owning one, so point the vertical destination at the 9:16 rendition.",
+            doc: "renditions",
+            evidence: ["Destinations select a rendition rather than owning one"],
+            anchor: "the-problem",
+          },
+          {
+            text: "Every other destination stays on passthrough, which copies the source video, until you point it at a rendition.",
+            doc: "renditions",
+            evidence: ["Every destination stays on passthrough", "copies the source video"],
+            anchor: "passthrough-is-a-rendition",
+          },
+          {
+            text: "Tick the tracks each destination should carry.",
             doc: "quickstart",
             evidence: ["tick the ones this destination should carry"],
             anchor: "6-add-a-destination",

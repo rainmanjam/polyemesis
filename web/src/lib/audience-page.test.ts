@@ -28,6 +28,11 @@ describe("AudiencePage.astro", () => {
     expect(layout).not.toContain("<style");
   });
 
+  it("renders the fine print once, straight after the diagram", () => {
+    expect(layout.match(/data-fine/g)).toHaveLength(1);
+    expect(layout).toMatch(/<RoutingDiagram[^>]*\/>\s*<p class="fine" data-fine>\{c\.fine\}<\/p>/);
+  });
+
   it("shows the demo caption on every non-sports shot and the sports page's none", () => {
     for (const a of Object.values(AUDIENCES)) {
       for (const s of a.steps as { shot?: { caption?: string } }[]) {

@@ -60,9 +60,8 @@ describe("audience data", () => {
         expect(existsSync(shotsDir + sh.file), sh.file).toBe(true);
         if (a.key === "sports") expect(sh.caption).toBeUndefined();
       }
-      // A file may be reused only where the plan says (destinations on the streamer page).
       const files = shots.map((s: { file: string }) => s.file);
-      if (a.key !== "streamer") expect(new Set(files).size).toBe(files.length);
+      expect(new Set(files).size).toBe(files.length);
     }
   });
 
@@ -82,5 +81,24 @@ describe("audience data", () => {
   it("avoids the banned words", () => {
     const text = readFileSync(fileURLToPath(new URL("../data/audiences.mjs", import.meta.url)), "utf8");
     expect(text).not.toMatch(/bypass|dodge|DMCA|pre-release|Stream Deck\+|minute|\b\d+\s+stars?\b/i);
+  });
+
+  it("never states a connected account without the stream-key alternative", () => {
+    for (const a of audiences) {
+      for (const f of factsOf(a)) {
+        if (/connected (youtube )?account/i.test(f.text) && f.doc === "quickstart") expect(f.text, f.text).toMatch(/stream key/i);
+      }
+    }
+  });
+
+  it("says no destination the case does not have", () => {
+    // A claim about a kind of destination may appear in an audience's own strings only if its case has it.
+    const KINDS = [/podcast/i, /speech-only/i, /congregation/i];
+    for (const a of audiences) {
+      const c = CASES[a.key];
+      const caseText = [...c.tracks.map((t: { label: string }) => t.label), ...c.dests.map((d: { name: string }) => d.name)].join(" ");
+      const own = [a.title, a.description, a.heading, a.lede, a.band.heading, a.band.lede].join(" ");
+      for (const k of KINDS) if (k.test(own)) expect(caseText, `${a.key}: "${k}" is not in its case`).toMatch(k);
+    }
   });
 });

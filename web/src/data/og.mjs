@@ -144,7 +144,7 @@ const FIXED = [
     eyebrow: "FOR CHURCHES AND EVENTS",
     title: "One service, a mix for every room.",
     accent: "mix",
-    sub: "Give the room, the online congregation and a second-language channel the version made for them, and send a speech-only feed out as a podcast.",
+    sub: "Send one service to several destinations, each with the mix made for it: the room mix, the broadcast mix, a second language or music only.",
     visual: "none",
   },
   {

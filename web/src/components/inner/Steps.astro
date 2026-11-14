@@ -25,6 +25,7 @@ const { steps, idPrefix = "step", notes = {} } = Astro.props;
         <p class="docrow">
           {docLinksOf(step.facts).map((l) => <><a href={l.href}>{l.text}</a>{" "}</>)}
         </p>
+        {notes[i + 1] && <p class="docrow">In this example:</p>}
         {notes[i + 1] && <ul class="mixes">{notes[i + 1].map((n) => <li>{n}</li>)}</ul>}
         {step.shot && <Shot shot={step.shot.file} alt={step.shot.alt} chrome={step.shot.chrome} caption={step.shot.caption} />}
       </li>

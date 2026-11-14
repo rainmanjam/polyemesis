@@ -77,7 +77,7 @@ const index = [
     <h2>Next</h2>
     <ul class="rows">
       {relatedRecipes(a.related).map((r) => <li><a href={r.href}>{r.title}</a></li>)}
-      {others.map((o) => <li><a href={o.route}>{o.heading}</a></li>)}
+      {others.map((o) => <li><a href={o.route}>{o.crumbLabel.charAt(0).toUpperCase() + o.crumbLabel.slice(1)}</a></li>)}
       <li><a href="/docs/quickstart">The quickstart</a></li>
       <li><a href="/calculator">The bandwidth calculator</a></li>
     </ul>
