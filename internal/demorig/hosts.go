@@ -52,6 +52,13 @@ func plainKey(k string) bool {
 // maxURLBytes bounds the raw string: the rig's URLs are about 40 bytes.
 const maxURLBytes = 2048
 
+const (
+	// invalidSuffix is the RFC 2606 reserved top-level domain that cannot resolve.
+	invalidSuffix = ".invalid"
+	// msgQueryOrFragment is the refusal for a URL with a query or a fragment.
+	msgQueryOrFragment = "URL has a query or fragment"
+)
+
 // CheckStored is the one question the driver asks of a stored row before it
 // starts anything: is it safe? It is CheckHosts plus the four fields above,
 // refused when set at all (a redacted mask is still "set"; an account id of 0
@@ -63,26 +70,7 @@ func CheckStored(rows []DestRow, allowed []string) error {
 	}
 	var bad []string
 	for _, r := range rows {
-		var fields []string
-		if r.ExtraInputArgs != "" {
-			fields = append(fields, "extraInputArgs")
-		}
-		if r.ExtraOutputArgs != "" {
-			fields = append(fields, "extraOutputArgs")
-		}
-		if r.AccountID != nil {
-			fields = append(fields, "accountId")
-		}
-		if r.Multitrack {
-			fields = append(fields, "multitrack")
-		}
-		if !plainKey(r.StreamKey) {
-			fields = append(fields, "streamKey (characters outside A-Z a-z 0-9 . _ ~ -)")
-		}
-		if !plainKey(r.BackupStreamKey) {
-			fields = append(fields, "backupStreamKey (characters outside A-Z a-z 0-9 . _ ~ -)")
-		}
-		if len(fields) > 0 {
+		if fields := storedFieldProblems(r); len(fields) > 0 {
 			bad = append(bad, fmt.Sprintf("%s: %s set", r.Name, strings.Join(fields, ", ")))
 		}
 	}
@@ -91,6 +79,33 @@ func CheckStored(rows []DestRow, allowed []string) error {
 	}
 	return fmt.Errorf("demo rig: destinations that could reach a real platform without their URL: %s", strings.Join(bad, "; "))
 }
+
+// storedFieldProblems names, in a fixed order, each of the row's fields that
+// could reach a real platform without the URL saying so. It never returns a value.
+func storedFieldProblems(r DestRow) []string {
+	var fields []string
+	if r.ExtraInputArgs != "" {
+		fields = append(fields, "extraInputArgs")
+	}
+	if r.ExtraOutputArgs != "" {
+		fields = append(fields, "extraOutputArgs")
+	}
+	if r.AccountID != nil {
+		fields = append(fields, "accountId")
+	}
+	if r.Multitrack {
+		fields = append(fields, "multitrack")
+	}
+	if !plainKey(r.StreamKey) {
+		fields = append(fields, "streamKey "+plainKeyDetail)
+	}
+	if !plainKey(r.BackupStreamKey) {
+		fields = append(fields, "backupStreamKey "+plainKeyDetail)
+	}
+	return fields
+}
+
+const plainKeyDetail = "(characters outside A-Z a-z 0-9 . _ ~ -)"
 
 // CheckHosts returns nil only if every row's URL, and BackupURL when set, parses
 // and has a hostname equal to one of allowed (case-folded). The error names every
@@ -149,6 +164,35 @@ func hostProblem(raw string, allow []string) string {
 // an srt URL carry the two harmless call options (see srtQueryOK); every other
 // URL with a query or fragment is refused.
 func urlProblem(raw string, hostCheck func(host string) string, allowSRTQuery bool) string {
+	if msg := urlTextProblem(raw); msg != "" {
+		return msg
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "URL does not parse"
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "rtmp" && scheme != "rtmps" && scheme != "srt" {
+		return "URL scheme is not rtmp, rtmps or srt"
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "URL has no host"
+	}
+	if msg := hostCheck(host); msg != "" {
+		return msg
+	}
+	if strings.Contains(u.Host, "%") {
+		return "URL host is percent-encoded"
+	}
+	if msg := queryProblem(raw, u, allowSRTQuery); msg != "" {
+		return msg
+	}
+	return portProblem(u)
+}
+
+// urlTextProblem refuses a raw string by its characters alone, before it is parsed.
+func urlTextProblem(raw string) string {
 	if raw == "" {
 		return "empty URL"
 	}
@@ -167,32 +211,26 @@ func urlProblem(raw string, hostCheck func(host string) string, allowSRTQuery bo
 	if strings.Contains(raw, "@") {
 		return "URL has userinfo"
 	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "URL does not parse"
-	}
-	scheme := strings.ToLower(u.Scheme)
-	switch scheme {
-	case "rtmp", "rtmps", "srt":
-	default:
-		return "URL scheme is not rtmp, rtmps or srt"
-	}
-	host := u.Hostname()
-	if host == "" {
-		return "URL has no host"
-	}
-	if msg := hostCheck(host); msg != "" {
-		return msg
-	}
-	if strings.Contains(u.Host, "%") {
-		return "URL host is percent-encoded"
-	}
+	return ""
+}
+
+// queryProblem refuses a fragment always, and a query unless allowSRTQuery lets
+// an srt URL carry its two harmless call options.
+func queryProblem(raw string, u *url.URL, allowSRTQuery bool) string {
 	if strings.Contains(raw, "#") {
-		return "URL has a query or fragment"
+		return msgQueryOrFragment
 	}
-	if strings.Contains(raw, "?") && !(allowSRTQuery && scheme == "srt" && srtQueryOK(u.RawQuery)) {
-		return "URL has a query or fragment"
+	if !strings.Contains(raw, "?") {
+		return ""
 	}
+	if allowSRTQuery && strings.EqualFold(u.Scheme, "srt") && srtQueryOK(u.RawQuery) {
+		return ""
+	}
+	return msgQueryOrFragment
+}
+
+// portProblem refuses an empty port, or one outside 1 to 65535.
+func portProblem(u *url.URL) string {
 	if strings.HasSuffix(u.Host, ":") {
 		return "URL has an empty port"
 	}
@@ -211,25 +249,29 @@ func srtQueryOK(q string) bool {
 	seen := map[string]bool{}
 	for _, kv := range strings.Split(q, "&") {
 		k, v, ok := strings.Cut(kv, "=")
-		if !ok || seen[k] {
+		if !ok || seen[k] || !srtOptionOK(k, v) {
 			return false
 		}
 		seen[k] = true
-		switch k {
-		case "mode":
-			if v != "caller" && v != "listener" && v != "rendezvous" {
-				return false
-			}
-		case "latency":
-			if v == "" || len(v) > 7 {
-				return false
-			}
-			for i := 0; i < len(v); i++ {
-				if v[i] < '0' || v[i] > '9' {
-					return false
-				}
-			}
-		default:
+	}
+	return true
+}
+
+// srtOptionOK reports whether one key=value pair is a harmless srt option.
+func srtOptionOK(k, v string) bool {
+	switch k {
+	case "mode":
+		return v == "caller" || v == "listener" || v == "rendezvous"
+	case "latency":
+		return v != "" && len(v) <= 7 && allDigits(v)
+	default:
+		return false
+	}
+}
+
+func allDigits(v string) bool {
+	for i := 0; i < len(v); i++ {
+		if v[i] < '0' || v[i] > '9' {
 			return false
 		}
 	}
@@ -249,28 +291,7 @@ func srtQueryOK(q string) bool {
 func CheckInvalidDestinations(rows []DestRow) error {
 	var bad []string
 	for _, r := range rows {
-		var msgs []string
-		if r.Kind != "file" && r.Enabled {
-			msgs = append(msgs, "a network destination is enabled in the fixture (it would start the moment it is created)")
-		}
-		if r.Kind == "file" {
-			if msg := fileProblem(r.URL, true); msg != "" {
-				msgs = append(msgs, msg)
-			}
-			if msg := fileProblem(r.BackupURL, false); msg != "" {
-				msgs = append(msgs, "backup: "+msg)
-			}
-		} else {
-			if msg := invalidHostProblem(r.URL); msg != "" {
-				msgs = append(msgs, msg)
-			}
-			if r.BackupURL != "" {
-				if msg := invalidHostProblem(r.BackupURL); msg != "" {
-					msgs = append(msgs, "backup: "+msg)
-				}
-			}
-		}
-		for _, m := range msgs {
+		for _, m := range invalidRowProblems(r) {
 			bad = append(bad, fmt.Sprintf("%s: %s", r.Name, m))
 		}
 	}
@@ -278,14 +299,7 @@ func CheckInvalidDestinations(rows []DestRow) error {
 	if len(bad) > 0 {
 		errs = append(errs, "destinations that could reach a real host: "+strings.Join(bad, "; "))
 	}
-	// CheckStored with a throwaway allow-list: only its field refusals matter
-	// here, so the host half is stripped by giving every row a passing URL.
-	stripped := make([]DestRow, len(rows))
-	for i, r := range rows {
-		r.URL, r.BackupURL = "rtmps://x.invalid/x", ""
-		stripped[i] = r
-	}
-	if err := CheckStored(stripped, []string{"x.invalid"}); err != nil {
+	if err := storedRefusals(rows); err != nil {
 		errs = append(errs, strings.TrimPrefix(err.Error(), "demo rig: "))
 	}
 	if len(errs) == 0 {
@@ -294,10 +308,47 @@ func CheckInvalidDestinations(rows []DestRow) error {
 	return fmt.Errorf("demo rig: %s", strings.Join(errs, "; "))
 }
 
+// invalidRowProblems is one row's shape problems: enabled, then the URL, then
+// the backup. A file row is checked as a name, any other as a URL under .invalid.
+func invalidRowProblems(r DestRow) []string {
+	var msgs []string
+	if r.Kind != "file" && r.Enabled {
+		msgs = append(msgs, "a network destination is enabled in the fixture (it would start the moment it is created)")
+	}
+	var primary, backup string
+	if r.Kind == "file" {
+		primary, backup = fileProblem(r.URL, true), fileProblem(r.BackupURL, false)
+	} else {
+		primary = invalidHostProblem(r.URL)
+		if r.BackupURL != "" {
+			backup = invalidHostProblem(r.BackupURL)
+		}
+	}
+	if primary != "" {
+		msgs = append(msgs, primary)
+	}
+	if backup != "" {
+		msgs = append(msgs, "backup: "+backup)
+	}
+	return msgs
+}
+
+// storedRefusals is CheckStored with a throwaway allow-list: only its field
+// refusals matter here, so the host half is stripped by giving every row a
+// passing URL.
+func storedRefusals(rows []DestRow) error {
+	stripped := make([]DestRow, len(rows))
+	for i, r := range rows {
+		r.URL, r.BackupURL = "rtmps://x"+invalidSuffix+"/x", ""
+		stripped[i] = r
+	}
+	return CheckStored(stripped, []string{"x" + invalidSuffix})
+}
+
 func invalidHostProblem(raw string) string {
 	return urlProblem(raw, func(host string) string {
 		h := strings.ToLower(host)
-		if !strings.HasSuffix(h, ".invalid") || len(h) == len(".invalid") || strings.HasPrefix(h, ".") {
+		if !strings.HasSuffix(h, invalidSuffix) || len(h) == len(invalidSuffix) || strings.HasPrefix(h, ".") {
 			return "host is not under .invalid"
 		}
 		return ""
@@ -369,7 +420,7 @@ func webhookProblem(raw string) string {
 		return "URL has userinfo"
 	}
 	if strings.ContainsAny(raw, "?#") {
-		return "URL has a query or fragment"
+		return msgQueryOrFragment
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -382,7 +433,7 @@ func webhookProblem(raw string) string {
 		return "URL has a port"
 	}
 	host := strings.ToLower(u.Hostname())
-	if !strings.HasSuffix(host, ".invalid") || len(host) == len(".invalid") {
+	if !strings.HasSuffix(host, invalidSuffix) || len(host) == len(invalidSuffix) {
 		return "host is not under .invalid"
 	}
 	return ""

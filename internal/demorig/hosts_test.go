@@ -522,3 +522,26 @@ func TestStreamKeysMayHoldOnlyPlainCharacters(t *testing.T) {
 		t.Error("a key on a file destination was accepted")
 	}
 }
+
+// The srt call options are mode=(caller|listener|rendezvous) and latency=1 to 7
+// digits, each once; anything else is refused.
+func TestSRTQueryOptionsArePinned(t *testing.T) {
+	for q, want := range map[string]bool{
+		"mode=caller":                     true,
+		"mode=listener&latency=120":       true,
+		"latency=1234567":                 true,
+		"mode=rendezvous":                 true,
+		"latency=12a":                     false,
+		"latency=12345678":                false,
+		"latency=":                        false,
+		"mode=sender":                     false,
+		"mode=caller&mode=caller":         false,
+		"streamid=x":                      false,
+		"mode":                            false,
+		"mode=caller&host=evil.example.x": false,
+	} {
+		if got := srtQueryOK(q); got != want {
+			t.Errorf("srtQueryOK(%q) = %v, want %v", q, got, want)
+		}
+	}
+}
