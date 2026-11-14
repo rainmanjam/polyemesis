@@ -65,7 +65,16 @@ export E2E_PASSWORD
 
 # First-run setup needs the server's one-time setup code; preset it so the
 # server started below and the seeder share it. See lib-preflight.sh.
-export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+# Generated per run, as scripts/demo-seed.sh does: a literal here is a setup
+# code committed to a public repository.
+if [ -z "${POLYEMESIS_SETUP_CODE:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate a setup code; export POLYEMESIS_SETUP_CODE yourself" >&2
+    exit 1
+  }
+  POLYEMESIS_SETUP_CODE="demo-$(openssl rand -hex 8)"
+fi
+export POLYEMESIS_SETUP_CODE
 
 # Everything this script starts is a container, so cleanup is docker's job. The
 # host-process kills that used to be here were left over from the binary-launch
@@ -77,6 +86,9 @@ cleanup() {
   pkill -f "capture-source" 2>/dev/null || true
   docker rm -f "$SRC_NAME" "$SRC2_NAME" "$SRV_NAME" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
+  # The work directory holds secrets.tsv (the admin password, the setup code and
+  # the publish tokens) and the server log, so it goes on EVERY exit path.
+  if [ -n "${WORK:-}" ]; then command rm -rf "$WORK"; fi
 }
 trap cleanup EXIT INT TERM
 
@@ -84,7 +96,10 @@ command -v docker >/dev/null || { echo "docker required"; exit 1; }
 docker info >/dev/null 2>&1 || { echo "docker is not running"; exit 1; }
 
 echo "==> fresh data directory"
-rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
+rm -rf "$WORK"
+# Private: it will hold the admin password, the setup code and the publish tokens.
+( umask 077; mkdir -p "$WORK" )
+mkdir -p "$OUT"
 
 # What the capture must refuse to show (ui/e2e/captureKit.ts requires this list
 # in every scene): `kind<TAB>value`, mode 600, never printed. Publish tokens are

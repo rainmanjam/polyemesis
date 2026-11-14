@@ -74,10 +74,22 @@ export E2E_PASSWORD
 
 # First-run setup needs the server's one-time setup code; preset it so the
 # server started below and the seeder share it. See lib-preflight.sh.
-export POLYEMESIS_SETUP_CODE="${POLYEMESIS_SETUP_CODE:-acceptance-setup-code}"
+# Generated per run, as scripts/demo-seed.sh does: a literal here is a setup
+# code committed to a public repository.
+if [ -z "${POLYEMESIS_SETUP_CODE:-}" ]; then
+  command -v openssl >/dev/null 2>&1 || {
+    echo "openssl is needed to generate a setup code; export POLYEMESIS_SETUP_CODE yourself" >&2
+    exit 1
+  }
+  POLYEMESIS_SETUP_CODE="demo-$(openssl rand -hex 8)"
+fi
+export POLYEMESIS_SETUP_CODE
 
 echo "==> fresh data directory"
-rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
+rm -rf "$WORK"
+# Private: it will hold the admin password, the setup code and the publish tokens.
+( umask 077; mkdir -p "$WORK" )
+mkdir -p "$OUT"
 
 # The credentials this server holds, one `kind<TAB>value` per line, for the
 # capture to refuse any frame on which one is legible (ui/e2e/captureKit.ts).
