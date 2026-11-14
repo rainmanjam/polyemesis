@@ -42,6 +42,21 @@
  *                  child paragraph of article.doc-prose, and of a long-form page's
  *                  sections), and doc body text is 17px
  *   task-list      a docs task list stays inside the phone's width
+ *   new-diagram-wide   audience pages, 1440 and 1024: the routing drawing shows and every
+ *                  text in it is at least 12px at its on-screen scale
+ *   new-diagram-phone  audience pages at 390: the drawing is hidden, the list shows and
+ *                  every row (the longest destination label wraps) stays inside the screen
+ *   new-fine       audience pages: p[data-fine] is the case's fine print, once
+ *   new-steps-no-js  scripts off: one step per step in the data, one list row per destination
+ *   new-captions   audience pages: each shot with a caption in the data shows it, and no
+ *                  shot is without one where the data gives none
+ *   new-howto      recipe pages: one HowTo block with four steps that match the visible
+ *                  steps (name, id, url fragment), the h1 as its name, no totalTime/tool/supply
+ *   new-tour       /tour: VideoObject matches the page (date, chapters), the demo-install
+ *                  sentence, the video plays under the policy and every chapter reads in full
+ *   new-tour-width the video is at least 320px wide at 390 and 600px at 1024 and 1440
+ *   new-tour-no-js scripts off, real policy: the video plays from its own controls
+ *   new-tour-reduced reduced motion: the video is paused after two seconds in view
  *
  * NO TIMING. Every wait is on a condition with a long timeout. The fixed waits
  * are windows in which an ABSENCE is asserted (nothing moves for a second) or
@@ -62,6 +77,10 @@ import { extname, join, resolve, sep } from "node:path";
 import { availableParallelism } from "node:os";
 import { chromium } from "playwright";
 import { BUILD_FROM_CLONE, COMPOSE_UP, DOCKER_RUN, INSTALL_SCRIPT } from "../src/data/install.mjs";
+import { AUDIENCES, AUDIENCE_ROUTES } from "../src/data/audiences.mjs";
+import { CASES } from "../src/data/cases.mjs";
+import { RECIPES } from "../src/data/recipes.mjs";
+import { TOUR_ROUTE } from "../src/data/tour-page.mjs";
 
 const DIST = resolve(process.env.CHECK_INNER_DIST ?? new URL("../dist/", import.meta.url).pathname);
 const TYPES = {
@@ -94,6 +113,11 @@ const MEASURE = { min: 62, max: 80 };
  * already measures their sideways scroll at four widths. The one long-form route measured for line length also runs
  * at 1440 with scripts on. */
 const PHONE_ONLY = ["390 js", "390 no-js"];
+const RECIPE_ROUTES_LIST = RECIPES.map((r) => r.route);
+const AUDIENCE_KEYS = Object.fromEntries(Object.entries(AUDIENCE_ROUTES).map(([k, path]) => [path, k]));
+const isAudience = (r) => r in AUDIENCE_KEYS;
+const isRecipe = (r) => RECIPE_ROUTES_LIST.includes(r);
+const NEW_ROUTE_CONTEXTS = [...PHONE_ONLY, "1440 js"];
 const ROUTE_SPECS = [
   { path: "/download" },
   { path: "/features" },
@@ -119,7 +143,18 @@ const ROUTE_SPECS = [
   { path: "/vs/obs-multi-rtmp", in: PHONE_ONLY },
   { path: "/vs/streamelements", in: PHONE_ONLY },
   { path: "/vs/streamlabs", in: PHONE_ONLY },
+  { path: "/for/sports-clubs", in: NEW_ROUTE_CONTEXTS },
+  { path: "/for/churches-and-events", in: NEW_ROUTE_CONTEXTS },
+  { path: "/for/streamers", in: NEW_ROUTE_CONTEXTS },
+  { path: "/recipes/two-languages-one-broadcast", in: NEW_ROUTE_CONTEXTS },
+  { path: "/recipes/obs-to-five-platforms", in: NEW_ROUTE_CONTEXTS },
+  { path: "/recipes/streaming-from-a-backpack", in: NEW_ROUTE_CONTEXTS },
+  { path: "/tour", in: [...NEW_ROUTE_CONTEXTS, "1440 reduced"] },
 ];
+// The seven routes are typed above so the registry test can see them; this keeps them equal to the data.
+for (const r of [...Object.values(AUDIENCE_ROUTES), ...RECIPE_ROUTES_LIST, TOUR_ROUTE]) {
+  if (!ROUTE_SPECS.some((s) => s.path === r)) throw new Error(`check-inner.mjs does not list the route ${r}`);
+}
 const ALL_ROUTES = ROUTE_SPECS.map((r) => r.path);
 // CHECK_INNER_ROUTES=/download,/404 narrows a LOCAL run to those routes (the proofs that a check can fail use it).
 const ROUTES = process.env.CHECK_INNER_ROUTES ? process.env.CHECK_INNER_ROUTES.split(",").map((x) => x.trim()) : ALL_ROUTES;
@@ -216,6 +251,16 @@ const CHECKS = [
   { id: "doc-index", where: (c, r) => c.js && !c.reduced && !phone(c) && r === "/docs/audio-routing", run: checkDocIndex },
   { id: "measure", where: (c, r) => c.js && !c.reduced && !phone(c) && (r === "/docs/audio-routing" || r === LONGFORM_ROUTE), run: checkMeasure },
   { id: "task-list", where: (c, r) => c.js && !c.reduced && r === "/docs/meta-app-review", run: checkTaskList },
+  { id: "new-diagram-wide", where: (c, r) => c.name === "1440 js" && isAudience(r), run: checkDiagramWide },
+  { id: "new-diagram-phone", where: (c, r) => JS(c) && phone(c) && isAudience(r), run: checkDiagramPhone },
+  { id: "new-fine", where: (c, r) => c.name === "1440 js" && isAudience(r), run: checkFine },
+  { id: "new-steps-no-js", where: (c, r) => !c.js && phone(c) && isAudience(r), run: checkAudienceNoJs },
+  { id: "new-captions", where: (c, r) => c.name === "1440 js" && isAudience(r), run: checkCaptions },
+  { id: "new-howto", where: (c, r) => c.name === "1440 js" && isRecipe(r), run: checkHowTo },
+  { id: "new-tour", where: (c, r) => c.name === "1440 js" && r === TOUR_ROUTE, run: checkTour },
+  { id: "new-tour-width", where: (c, r) => JS(c) && !c.reduced && r === TOUR_ROUTE, run: checkTourWidth },
+  { id: "new-tour-no-js", where: (c, r) => !c.js && phone(c) && r === TOUR_ROUTE, run: checkTourNoJs },
+  { id: "new-tour-reduced", where: (c, r) => c.reduced && r === TOUR_ROUTE, run: checkTourReduced },
 ];
 const ONLY = process.env.CHECK_INNER_ONLY ? process.env.CHECK_INNER_ONLY.split(",").map((x) => x.trim()) : null;
 if (ONLY) {
@@ -725,6 +770,189 @@ async function checkTaskList({ page, c, where }) {
   }, c.width);
   if (m.n < 3) bad("task-list", where, `expected a task list of 3 or more items, found ${m.n}`);
   if (m.out) bad("task-list", where, `${m.out} task-list items run past the viewport`);
+}
+
+/* ------------------------------------------------- the seven new pages (plan 4) */
+
+const MIN_DIAGRAM_PX = 12;
+const TOUR_MIN_WIDTH = { 390: 320, 1024: 600, 1440: 600 };
+const frames2 = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+async function resize(page, width) {
+  await page.setViewportSize({ width, height: 900 });
+  await frames2(page);
+}
+
+/** Every <text> of the routing drawing, at its on-screen size; null when the drawing is not displayed. */
+function diagramTextSizes() {
+  const svg = document.querySelector("svg.diag-svg");
+  if (!svg) return { missing: true };
+  if (getComputedStyle(svg).display === "none") return { hidden: true };
+  const scale = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width;
+  const sizes = [...svg.querySelectorAll("text")].map((t) => parseFloat(getComputedStyle(t).fontSize) * scale);
+  return { scale, sizes };
+}
+
+async function checkDiagramWide({ page, route, where }) {
+  for (const width of [1440, 1024]) {
+    await resize(page, width);
+    const m = await page.evaluate(diagramTextSizes);
+    if (m.missing) return bad("new-diagram-wide", where, `${route} has no svg.diag-svg`);
+    if (m.hidden) return bad("new-diagram-wide", where, `${route}: the routing drawing is hidden at ${width}`);
+    if (!m.sizes.length) return bad("new-diagram-wide", where, `${route}: the drawing has no text`);
+    const min = Math.min(...m.sizes);
+    if (min < MIN_DIAGRAM_PX) bad("new-diagram-wide", where, `${route} at ${width}: drawing text is ${min.toFixed(1)}px on screen, under ${MIN_DIAGRAM_PX}px`);
+  }
+}
+
+async function checkDiagramPhone({ page, c, route, where }) {
+  const m = await page.evaluate((width) => {
+    const svg = document.querySelector("svg.diag-svg");
+    const list = document.querySelector("ol.diag-list");
+    if (!svg || !list) return { missing: true };
+    const rows = [...list.querySelectorAll("li")];
+    return {
+      svgDisplay: getComputedStyle(svg).display,
+      listShown: list.checkVisibility(),
+      rows: rows.length,
+      outside: rows.filter((li) => li.getBoundingClientRect().right > width + 1).length,
+      clipped: rows.filter((li) => li.scrollWidth > li.clientWidth + 1).length,
+    };
+  }, c.width);
+  if (m.missing) return bad("new-diagram-phone", where, `${route} has no drawing or no list`);
+  if (m.svgDisplay !== "none") bad("new-diagram-phone", where, `${route}: the drawing is displayed at ${c.width} (display ${m.svgDisplay})`);
+  if (!m.listShown || !m.rows) bad("new-diagram-phone", where, `${route}: the routing list is not visible at ${c.width}`);
+  if (m.outside || m.clipped) bad("new-diagram-phone", where, `${route}: ${m.outside} list rows run past the screen, ${m.clipped} clip their text`);
+}
+
+async function checkFine({ page, route, where }) {
+  const texts = await page.evaluate(() => [...document.querySelectorAll("p[data-fine]")].map((p) => p.textContent));
+  if (texts.length !== 1) return bad("new-fine", where, `${route}: expected one p[data-fine], found ${texts.length}`);
+  const want = squash(CASES[AUDIENCE_KEYS[route]].fine);
+  if (squash(texts[0]) !== want) bad("new-fine", where, `${route}: the fine print is not the case's: "${squash(texts[0]).slice(0, 60)}"`);
+}
+
+async function checkAudienceNoJs({ page, route, where }) {
+  const key = AUDIENCE_KEYS[route];
+  const m = await page.evaluate(() => ({
+    steps: document.querySelectorAll("ol.steps > li").length,
+    rows: document.querySelectorAll("ol.diag-list > li").length,
+  }));
+  if (m.steps !== AUDIENCES[key].steps.length) bad("new-steps-no-js", where, `${route}: ${m.steps} steps, the data has ${AUDIENCES[key].steps.length}`);
+  if (m.rows !== CASES[key].dests.length) bad("new-steps-no-js", where, `${route}: ${m.rows} routing rows, the case has ${CASES[key].dests.length} destinations`);
+}
+
+async function checkCaptions({ page, route, where }) {
+  const shots = AUDIENCES[AUDIENCE_KEYS[route]].steps.filter((s) => s.shot).map((s) => s.shot);
+  const figs = await page.evaluate(() =>
+    [...document.querySelectorAll("ol.steps figure.frame")].map((f) => f.querySelector("figcaption")?.textContent ?? ""),
+  );
+  if (figs.length !== shots.length) return bad("new-captions", where, `${route}: ${figs.length} pictures in the steps, the data has ${shots.length}`);
+  const shown = figs.map(squash);
+  for (const s of shots.filter((x) => x.caption)) {
+    if (!shown.some((t) => t.includes(squash(s.caption)))) bad("new-captions", where, `${route}: no caption shows "${squash(s.caption).slice(0, 50)}"`);
+  }
+  const uncaptionedInData = shots.filter((x) => !x.caption).length;
+  const uncaptionedOnPage = shown.filter((t) => !t).length;
+  if (uncaptionedOnPage !== uncaptionedInData) bad("new-captions", where, `${route}: ${uncaptionedOnPage} pictures without a caption, the data leaves ${uncaptionedInData} without`);
+  if (route !== AUDIENCE_ROUTES.sports && uncaptionedOnPage) bad("new-captions", where, `${route}: a picture has no caption`);
+}
+
+/** The one ld+json block of a given @type (the layout adds others, such as the breadcrumb); undefined, after a failure, if not exactly one. */
+function oneLd(blocks, type, id, where, route) {
+  const parsed = [];
+  for (const b of blocks) {
+    try {
+      parsed.push(JSON.parse(b));
+    } catch {
+      bad(id, where, `${route}: an ld+json block is not JSON`);
+    }
+  }
+  const mine = parsed.filter((x) => x["@type"] === type);
+  if (mine.length !== 1) return void bad(id, where, `${route}: expected one ${type} block, found ${mine.length} (of ${blocks.length} ld+json blocks)`);
+  return mine[0];
+}
+
+async function checkHowTo({ page, route, where }) {
+  const m = await page.evaluate(() => ({
+    blocks: [...document.querySelectorAll('script[type="application/ld+json"]')].map((s) => s.textContent),
+    h1: document.querySelector("h1")?.textContent ?? "",
+    steps: [...document.querySelectorAll("ol.steps > li")].map((li) => ({ id: li.id, h3: li.querySelector("h3")?.textContent ?? "" })),
+  }));
+  const ld = oneLd(m.blocks, "HowTo", "new-howto", where, route);
+  if (!ld) return;
+  if (squash(m.h1) !== squash(ld.name ?? "")) bad("new-howto", where, `${route}: the HowTo name is not the h1`);
+  for (const k of ["totalTime", "tool", "supply"]) if (k in ld) bad("new-howto", where, `${route}: the HowTo has a ${k}, which the page does not show`);
+  if (!Array.isArray(ld.step) || ld.step.length !== 4) return bad("new-howto", where, `${route}: HowTo has ${ld.step?.length} steps, expected 4`);
+  if (m.steps.length !== 4) return bad("new-howto", where, `${route}: ${m.steps.length} visible steps, expected 4`);
+  ld.step.forEach((st, i) => {
+    const vis = m.steps[i];
+    if (st.name !== squash(vis.h3).replace(/\.$/, "")) bad("new-howto", where, `${route}: step ${i + 1} name "${st.name}" is not its visible title`);
+    if (vis.id !== `step-${i + 1}`) bad("new-howto", where, `${route}: step ${i + 1} has id "${vis.id}"`);
+    if (new URL(st.url).hash !== `#${vis.id}`) bad("new-howto", where, `${route}: step ${i + 1} url fragment is not #${vis.id}`);
+  });
+}
+
+/** The chapters, the demo sentence and the structured data of /tour, read from the page text. */
+async function readTour(page) {
+  return page.evaluate(() => ({
+    blocks: [...document.querySelectorAll('script[type="application/ld+json"]')].map((s) => s.textContent),
+    body: document.body.innerText,
+    chapters: [...document.querySelectorAll('section[id^="chapter-"]')].map((s) => ({ text: s.innerText.trim(), h: s.getBoundingClientRect().height })),
+  }));
+}
+
+const DEMO_SENTENCE = /filmed on a demo install.*not to YouTube/is;
+
+function tourTextProblems(m) {
+  const out = [];
+  if (!DEMO_SENTENCE.test(m.body)) out.push("the demo-install sentence is missing");
+  if (!m.chapters.length) out.push("no chapter sections");
+  m.chapters.forEach((ch, i) => {
+    if (!ch.text || ch.h <= 0) out.push(`chapter ${i + 1} is empty or not shown`);
+  });
+  return out;
+}
+
+async function checkTour({ page, route, where }) {
+  const m = await readTour(page);
+  for (const p of tourTextProblems(m)) bad("new-tour", where, `${route}: ${p}`);
+  const ld = oneLd(m.blocks, "VideoObject", "new-tour", where, route);
+  if (!ld) return;
+  const date = m.body.match(/Filmed on v[\w.]+, released (\d{4}-\d{2}-\d{2})/)?.[1];
+  if (!date || ld.uploadDate !== date) bad("new-tour", where, `${route}: uploadDate ${ld.uploadDate} is not the page's date ${date}`);
+  if (!/^PT/.test(ld.duration ?? "")) bad("new-tour", where, `${route}: duration ${ld.duration} is not an ISO duration`);
+  if (ld.hasPart?.length !== m.chapters.length) bad("new-tour", where, `${route}: ${ld.hasPart?.length} parts for ${m.chapters.length} chapters`);
+  // The video plays from its own controls under the real policy.
+  await page.evaluate(() => document.querySelector("video").play());
+  await page.waitForFunction(() => document.querySelector("video").readyState >= 1);
+  const csp = await page.evaluate(() => window.__csp);
+  if (csp.length) bad("new-tour", where, `${route}: playing raised a policy violation: ${csp.join("; ")}`);
+  await page.evaluate(() => document.querySelector("video").pause());
+}
+
+async function checkTourWidth({ page, c, route, where }) {
+  const widths = c.phone ? [390] : [1440, 1024];
+  for (const w of widths) {
+    if (!c.phone) await resize(page, w);
+    const got = await page.evaluate(() => document.querySelector("video").getBoundingClientRect().width);
+    if (got < TOUR_MIN_WIDTH[w]) bad("new-tour-width", where, `${route} at ${w}: the video is ${got.toFixed(0)}px wide, under ${TOUR_MIN_WIDTH[w]}px`);
+  }
+}
+
+async function checkTourNoJs({ page, route, where }) {
+  const m = await readTour(page);
+  for (const p of tourTextProblems(m)) bad("new-tour-no-js", where, `${route}: ${p}`);
+  // A blocked media request is also a console error, which the page's own listener fails on.
+  await page.evaluate(() => document.querySelector("video").play());
+  await page.waitForFunction(() => document.querySelector("video").readyState >= 1);
+}
+
+async function checkTourReduced({ page, route, where }) {
+  await page.evaluate(() => document.querySelector("video").scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(SETTLE_MS); // a window in which an absence is asserted
+  const paused = await page.evaluate(() => document.querySelector("video").paused);
+  if (!paused) bad("new-tour-reduced", where, `${route}: the video plays under reduced motion`);
 }
 
 /* --------------------------------------------------------------------- main */

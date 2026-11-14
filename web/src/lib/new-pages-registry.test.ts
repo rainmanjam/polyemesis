@@ -27,6 +27,7 @@ describe.each(NEW_ROUTES)("%s", (route) => {
   });
   it("is in llms.txt", () => expect(read("public/llms.txt")).toContain(`https://polyemesis.com${route})`));
   it("is in the layout check", () => expect(read("scripts/check-layout.mjs")).toContain(`"${route}": 0`));
+  it("is in the inner checks", () => expect(read("scripts/check-inner.mjs")).toContain(`"${route}"`));
   it("has a link-preview card and image", () => {
     expect(OG_CARDS.some((c: { path: string }) => c.path === route)).toBe(true);
     expect(exists(`public/og/${ogSlugFor(route)}.png`)).toBe(true);
