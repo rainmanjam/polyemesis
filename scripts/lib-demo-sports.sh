@@ -42,10 +42,8 @@ sports_configure() {
   PROXY="${DEMO_PROXY:-polyemesis-demo-sports-proxy}"
 }
 
-# THE THIRD SAFETY LAYER, asked of Docker rather than assumed: the rig's network
-# must be internal. Used after creating it, and before anything acts on a rig
-# that is already running (--state start and routing, --proof).
-sports_require_internal_network() {
+# Asked before a network is created, so a refused engine leaves none behind.
+sports_require_modern_engine() {
   # Docker Engine before 26.0.0 forwarded DNS queries from an internal network to
   # the host's resolver (CVE-2024-29018), so an --internal network was not quite
   # closed. Refuse an older (or unreadable) engine rather than trust the flag.
@@ -59,6 +57,13 @@ sports_require_internal_network() {
     echo "REFUSING: Docker Engine $ver is older than 26.0.0, which forwarded DNS from internal networks to the host's resolver; update Docker." >&2
     exit 1
   fi
+}
+
+# THE THIRD SAFETY LAYER, asked of Docker rather than assumed: the rig's network
+# must be internal. Used after creating it, and before anything acts on a rig
+# that is already running (--state start and routing, --proof).
+sports_require_internal_network() {
+  sports_require_modern_engine
   [ "$(docker network inspect -f '{{.Internal}}' "$NET" 2>/dev/null)" = true ] \
     || { echo "REFUSING: network $NET is not internal (or cannot be inspected); it could route off this machine." >&2; exit 1; }
 }
@@ -66,6 +71,7 @@ sports_require_internal_network() {
 # The internal network, checked to BE internal. Both scenes use it; a network
 # that already exists (DEMO_NET naming a bridge) fails the create and is refused.
 sports_create_internal_network() {
+  sports_require_modern_engine
   docker network create --internal "$NET" >/dev/null \
     || { echo "could not create the network $NET" >&2; exit 1; }
   # Not trusting the flag: ask Docker what it made.

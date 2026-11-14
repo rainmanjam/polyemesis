@@ -200,6 +200,12 @@ func main() {
 		return
 	}
 
+	// `setup` is all --base runs, and it signs in first: the keys are checked
+	// before the driver sends anything.
+	if cmd == "setup" {
+		guardKeys(fx)
+	}
+
 	jar, _ := cookiejar.New(nil)
 	client = newClient(jar)
 	waitUp()
@@ -268,7 +274,6 @@ func readFixture(path string) *fixture {
 // ------------------------------------------------------------------- 1. setup
 
 func setup(fx *fixture) {
-	guardKeys(fx)
 	refuseIfOccupied(fx)
 	applySettings(fx)
 
@@ -897,6 +902,8 @@ func fixtureDestRows(fx *fixture) []demorig.DestRow {
 		for _, d := range s.Destinations {
 			row := demorig.DestRow{Name: d.Name}
 			row.Kind, _ = d.Rest["kind"].(string)
+			row.StreamKey, _ = d.Rest["streamKey"].(string)
+			row.BackupStreamKey, _ = d.Rest["backupStreamKey"].(string)
 			row.Enabled, _ = d.Rest["enabled"].(bool)
 			row.URL, _ = d.Rest["url"].(string)
 			row.BackupURL, _ = d.Rest["backupUrl"].(string)

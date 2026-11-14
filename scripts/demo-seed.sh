@@ -32,14 +32,18 @@
 # WHAT IT WILL NOT DO.
 #
 #   NOTHING REACHES A REAL PLATFORM. Three layers, each checked by code:
-#     1. Before anything starts, internal/demorig refuses the fixture unless
-#        every network destination (rtmp, rtmps, srt) is on a .invalid host
-#        (RFC 2606 reserves it, so it can never be delegated), is not enabled,
-#        and has no backup on a real host, platform account, extra FFmpeg
-#        argument or multitrack; every alert URL is https on a .invalid host;
-#        every "start" schedule names file destinations; and every key in what
-#        is sent to the server is spelled exactly as an allow-list has it (the
-#        server matches keys ignoring case, so a variant would slip past).
+#     1. Before anything starts, internal/demorig refuses the fixture. Sports:
+#        every destination URL, and backup URL, must be on the receiver's host
+#        (the receiver container's name) and no destination may be enabled.
+#        Full: every network destination (rtmp, rtmps, srt) must be on a
+#        .invalid host (RFC 2606 reserves it, so it can never be delegated) and
+#        must not be enabled, every alert URL must be https on a .invalid host,
+#        and every "start" schedule must name file destinations. Both scenes:
+#        no platform account, extra FFmpeg argument or multitrack; stream keys
+#        of only A-Z a-z 0-9 . _ ~ - (librtmp reads options out of a key); and
+#        every key in what is sent to the server spelled exactly as an
+#        allow-list has it (the server matches keys ignoring case, so a variant
+#        would slip past).
 #     2. The sports scene checks the rows the server stored before every start.
 #     3. The server runs on an --internal Docker network (asked of Docker, not
 #        assumed; engines older than 26.0.0 are refused) with no route off the

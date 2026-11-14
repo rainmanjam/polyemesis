@@ -29,7 +29,7 @@ func jsonTagName(f reflect.StructField) string {
 func TestDemoRigDestRowTagsMatchTheServer(t *testing.T) {
 	rowT := reflect.TypeOf(demorig.DestRow{})
 	dbT := reflect.TypeOf(db.Destination{})
-	for _, field := range []string{"URL", "BackupURL", "ExtraInputArgs", "ExtraOutputArgs", "AccountID", "Multitrack", "Kind"} {
+	for _, field := range []string{"URL", "BackupURL", "StreamKey", "BackupStreamKey", "ExtraInputArgs", "ExtraOutputArgs", "AccountID", "Multitrack", "Kind"} {
 		rf, ok := rowT.FieldByName(field)
 		if !ok {
 			t.Fatalf("demorig.DestRow has no field %s", field)

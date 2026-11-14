@@ -471,3 +471,54 @@ func TestCheckInvalidDestinationsAppliesTheStoredRefusals(t *testing.T) {
 		}
 	}
 }
+
+// An FFmpeg built against librtmp reads options out of the key ("socks=host:port"
+// in "key socks=..." opens a connection to that host), so a key may hold only
+// the characters a real one does.
+func TestStreamKeysMayHoldOnlyPlainCharacters(t *testing.T) {
+	good := []string{"", "abc", "live_0123.key-x~y", "ABC123"}
+	for _, k := range good {
+		d := DestRow{Name: "English", Kind: "rtmp", URL: "rtmp://a.demo.invalid/x", StreamKey: k, BackupStreamKey: k}
+		if err := CheckInvalidDestinations([]DestRow{d}); err != nil {
+			t.Errorf("key %q refused by the fixture check: %v", k, err)
+		}
+		if err := CheckStored([]DestRow{{Name: "English", URL: "rtmp://polyemesis-demo-recv/x", StreamKey: k, BackupStreamKey: k}}, recv); err != nil {
+			t.Errorf("key %q refused by the stored check: %v", k, err)
+		}
+	}
+	for _, k := range []string{
+		"abc socks=203.0.113.9:1080", "a b", "a\tb", "a/b", "a?b", "a&b", "a=b", "a:b",
+		"a\nb", "ab\x00", "café", "***", "[redacted]", "a|b", "a,b", "a@b", "a#b", "a%20b",
+	} {
+		for _, field := range []string{"streamKey", "backupStreamKey"} {
+			d := DestRow{Name: "English", Kind: "rtmp", URL: "rtmp://a.demo.invalid/x"}
+			s := DestRow{Name: "English", URL: "rtmp://polyemesis-demo-recv/x"}
+			if field == "streamKey" {
+				d.StreamKey, s.StreamKey = k, k
+			} else {
+				d.BackupStreamKey, s.BackupStreamKey = k, k
+			}
+			for label, err := range map[string]error{
+				"fixture": CheckInvalidDestinations([]DestRow{d}),
+				"stored":  CheckStored([]DestRow{s}, recv),
+			} {
+				if err == nil {
+					t.Errorf("%s: %s %q accepted", label, field, k)
+					continue
+				}
+				if !strings.Contains(err.Error(), "English") || !strings.Contains(err.Error(), field) {
+					t.Errorf("%s: the error should name the destination and %s: %v", label, field, err)
+				}
+				for _, leak := range []string{"socks", "203.0.113", "redacted", "***"} {
+					if strings.Contains(err.Error(), leak) {
+						t.Errorf("%s: the error leaked key text %q: %v", label, leak, err)
+					}
+				}
+			}
+		}
+	}
+	// A file destination carries no key, so the same rule applies to it.
+	if err := CheckInvalidDestinations([]DestRow{{Name: "F", Kind: "file", URL: "a.mkv", StreamKey: "a b"}}); err == nil {
+		t.Error("a key on a file destination was accepted")
+	}
+}

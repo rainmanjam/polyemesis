@@ -23,10 +23,30 @@ type DestRow struct {
 	Enabled         bool   `json:"enabled"`
 	URL             string `json:"url"`
 	BackupURL       string `json:"backupUrl"`
+	StreamKey       string `json:"streamKey"`
+	BackupStreamKey string `json:"backupStreamKey"`
 	ExtraInputArgs  string `json:"extraInputArgs"`
 	ExtraOutputArgs string `json:"extraOutputArgs"`
 	AccountID       *int64 `json:"accountId"`
 	Multitrack      bool   `json:"multitrack"`
+}
+
+// plainKey reports whether a stream key holds only [A-Za-z0-9._~-] (or is
+// empty). An FFmpeg built against librtmp reads options such as socks=host:port
+// out of the key, so anything else could name a host the URL does not.
+func plainKey(k string) bool {
+	if len(k) > 512 {
+		return false
+	}
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '~', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // maxURLBytes bounds the raw string: the rig's URLs are about 40 bytes.
@@ -55,6 +75,12 @@ func CheckStored(rows []DestRow, allowed []string) error {
 		}
 		if r.Multitrack {
 			fields = append(fields, "multitrack")
+		}
+		if !plainKey(r.StreamKey) {
+			fields = append(fields, "streamKey (characters outside A-Z a-z 0-9 . _ ~ -)")
+		}
+		if !plainKey(r.BackupStreamKey) {
+			fields = append(fields, "backupStreamKey (characters outside A-Z a-z 0-9 . _ ~ -)")
 		}
 		if len(fields) > 0 {
 			bad = append(bad, fmt.Sprintf("%s: %s set", r.Name, strings.Join(fields, ", ")))
@@ -217,7 +243,9 @@ func srtQueryOK(q string) bool {
 // .invalid (RFC 2606 reserves it, so it cannot resolve) with the shape rules
 // CheckHosts applies, and the CheckStored refusals hold. An srt URL may carry
 // mode and latency options only. A "file" row's URL and BackupURL have no
-// scheme. The error names the destination, never a URL.
+// scheme. A non-file row that is enabled is refused, because it would start the
+// moment it is created. Stream keys hold only [A-Za-z0-9._~-]. The error names
+// the destination, never a URL or a key.
 func CheckInvalidDestinations(rows []DestRow) error {
 	var bad []string
 	for _, r := range rows {

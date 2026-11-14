@@ -35,7 +35,7 @@ cat > "$TMP/bin/docker" <<'STUB'
 echo "$*" >> "$STUB_LOG"
 case "$1" in
   info) [ "${STUB_DOCKER_UP:-1}" = 1 ]; exit $? ;;
-  version) echo "${STUB_DOCKER_VERSION:-27.0.1}"; exit 0 ;;
+  version) echo "${STUB_DOCKER_VERSION-27.0.1}"; exit 0 ;;
   ps) exit 0 ;;
   network) [ "$2" = inspect ] && echo "${STUB_NET_INTERNAL:-true}"; exit 0 ;;
   port) [ -n "${STUB_PORT_LINE:-}" ] && echo "$STUB_PORT_LINE"; exit 0 ;;
@@ -481,4 +481,97 @@ expect_no_call "run"
 : > "$STUB_LOG"
 STUB_DOCKER_VERSION=26.0.0 run_script --scene sports --no-capture --reset
 ! grep -q "older than 26" "$ERR" || fail "26.0.0 was refused as too old"
+# Accepted, and the run went on to ask Docker whether the network is internal.
+grep -q "network inspect" "$STUB_LOG" || fail "an accepted engine never reached the internal-network check"
+pass
+
+# 32
+begin engine-version-checked-before-the-network-exists
+for v in 25.0.5 ""; do
+  : > "$STUB_LOG"
+  STUB_DOCKER_VERSION="$v" run_script --scene sports --no-capture --reset
+  expect_rc 1
+  expect_err "REFUSING"
+  expect_no_call "network create"
+  expect_no_call "run"
+  : > "$STUB_LOG"
+  STUB_DOCKER_VERSION="$v" run_script --no-capture --reset
+  expect_rc 1
+  expect_err "REFUSING"
+  expect_no_call "network create"
+done
+pass
+
+# 33
+begin stream-keys-with-odd-characters-refused
+mutate_full 'd0["streamKey"] = "abc socks=203.0.113.9:1080"'
+mutate_full 'd0["streamKey"] = "a b"'
+for key in 'abc socks=203.0.113.9:1080' 'a/b' 'a?b=c&d'; do
+  python3 - "$ROOT/scripts/demo-seed.sports.fixture.json" "$TMP/sports-key.json" "$key" <<'PY'
+import json, sys
+fx = json.load(open(sys.argv[1]))
+fx["sources"][0]["destinations"][0]["streamKey"] = sys.argv[3]
+json.dump(fx, open(sys.argv[2], "w"))
+PY
+  DEMO_FIXTURE="$TMP/sports-key.json" run_script --scene sports --no-capture
+  expect_rc 1
+  expect_err "REFUSING"
+  expect_no_call "network create"
+  expect_no_call "run"
+done
+pass
+
+# 34
+begin misspelt-keys-in-alert-rules-and-renditions-refused
+# guardcontent must pass alert rules and renditions to the key check (a key
+# variant in either would otherwise reach the server).
+python3 - "$ROOT/scripts/demo-seed.fixture.json" "$TMP/rule-key.json" "$TMP/rend-key.json" <<'PY'
+import json, sys
+f = json.load(open(sys.argv[1]))
+f["automation"]["alertRules"][0]["Severity"] = "critical"
+json.dump(f, open(sys.argv[2], "w"))
+f = json.load(open(sys.argv[1]))
+r = next(r for s in f["sources"] for r in s.get("renditions", []))
+r["Height"] = 720
+json.dump(f, open(sys.argv[3], "w"))
+PY
+go run "$ROOT/scripts/demo_seed_driver.go" - guardcontent "$TMP/rule-key.json" > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 1
+expect_err "alert rule"
+go run "$ROOT/scripts/demo_seed_driver.go" - guardcontent "$TMP/rend-key.json" > "$OUT" 2> "$ERR"; RC=$?
+expect_rc 1
+expect_err "rendition"
+pass
+
+# 35
+begin base-mode-checks-keys-before-any-request
+# `setup` is the only thing --base runs. A case-variant key must be refused
+# before the driver sends anything, not after it has signed in.
+python3 - "$ROOT/scripts/demo-seed.fixture.json" "$TMP/base-variant.json" <<'PY'
+import json, sys
+f = json.load(open(sys.argv[1]))
+f["sources"][0]["destinations"][0]["backupurl"] = "rtmp://b.rtmp.youtube.com/live2"
+json.dump(f, open(sys.argv[2], "w"))
+PY
+python3 - "$DEMO_PORT" "$TMP/requests.log" <<'PY' &
+import http.server, sys
+log = open(sys.argv[2], "w")
+class H(http.server.BaseHTTPRequestHandler):
+    def _any(self):
+        log.write(self.command + " " + self.path + "\n"); log.flush()
+        self.send_response(404); self.end_headers()
+    do_GET = do_POST = do_PUT = _any
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+LISTENER_PID=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  ( exec 3<> "/dev/tcp/127.0.0.1/$DEMO_PORT" ) 2> /dev/null && break
+  sleep 0.5
+done
+E2E_PASSWORD=x go run "$ROOT/scripts/demo_seed_driver.go" "http://127.0.0.1:$DEMO_PORT" setup "$TMP/base-variant.json" > "$OUT" 2> "$ERR"; RC=$?
+kill "$LISTENER_PID" 2> /dev/null; LISTENER_PID=""
+expect_rc 1
+expect_err "spelled exactly"
+[ ! -s "$TMP/requests.log" ] || fail "the driver sent a request before refusing: $(head -n 1 "$TMP/requests.log")"
 pass
