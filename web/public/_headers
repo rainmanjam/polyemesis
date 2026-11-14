@@ -140,6 +140,8 @@
   Cache-Control: no-cache
 /recipes/streaming-from-a-backpack
   Cache-Control: no-cache
+/tour
+  Cache-Control: no-cache
 /404
   Cache-Control: no-cache
 # The comparison pages are nested, so they are SERVED at /vs/<name> and built as

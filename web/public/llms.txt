@@ -49,6 +49,7 @@ the summary is wrong.
 - [Two languages, one broadcast](https://polyemesis.com/recipes/two-languages-one-broadcast): give each voice its own OBS track, send them as one SRT stream, and give each destination the language it needs
 - [OBS to five platforms](https://polyemesis.com/recipes/obs-to-five-platforms): send OBS to your own server once, connect each platform's account, and add a destination for each
 - [Streaming from a backpack](https://polyemesis.com/recipes/streaming-from-a-backpack): receive a bonded IRL encoder over several links as one ordinary SRT publish
+- [Video tour](https://polyemesis.com/tour): watch a match feed come in, split into a mix per destination and go live, with on-screen captions and no voiceover
 
 ## Guides and answers
 

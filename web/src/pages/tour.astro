@@ -1,0 +1,75 @@
+---
+/* /tour: the video tour with a section of text per chapter. The chapter notes
+ * (data/tour-page.mjs) say only what the chapter's frames show and the docs
+ * support; this page adds no sentence of its own about the product. Rules:
+ * styles/new-pages.css. */
+import InnerPage from "../layouts/InnerPage.astro";
+import Tour from "../components/home/Tour.astro";
+import DocLinks from "../components/inner/DocLinks.astro";
+import { TOUR } from "../data/tour.mjs";
+import { TOUR_PAGE, TOUR_ROUTE } from "../data/tour-page.mjs";
+import { filmedRelease } from "../lib/release";
+import { clock, videoLd } from "../lib/video-ld";
+
+const filmed = filmedRelease(TOUR_PAGE.filmedVersion);
+const index = [
+  { id: "watch", label: "Watch" },
+  ...TOUR.chapters.map((c, i) => ({ id: `chapter-${i + 1}`, label: c.title })),
+  { id: "next", label: "Next" },
+];
+const ld = videoLd({
+  site: "https://polyemesis.com",
+  route: TOUR_ROUTE,
+  name: TOUR_PAGE.heading,
+  description: TOUR_PAGE.lede,
+  tour: TOUR,
+  uploadDate: filmed.date,
+});
+---
+
+<InnerPage
+  title={TOUR_PAGE.title}
+  description={TOUR_PAGE.description}
+  path={TOUR_ROUTE}
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: "tour" }]}
+  heading={TOUR_PAGE.heading}
+  accent={TOUR_PAGE.accent}
+  lede={TOUR_PAGE.lede}
+  index={index}
+>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="/docs/quickstart">Read the quickstart</a>
+
+  <section id="watch">
+    <h2>Watch</h2>
+    <Tour />
+    <p class="fact">Filmed on v{filmed.version}, released {filmed.date}.</p>
+    <p class="fact">There is no voiceover. The captions on screen say what each step does, and the sections below say the same in text.</p>
+    {/* VideoObject, holding only what this page shows: the video and its poster,
+        the heading and lede above, the release date of the version filmed, the
+        length in the player's bar and the chapters below (P4-R14). */}
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(ld)} />
+  </section>
+
+  {
+    TOUR.chapters.map((c, i) => (
+      <section id={`chapter-${i + 1}`} class="chapter">
+        <h2>{c.title}</h2>
+        <span class="when">Starts at {clock(c.start)}</span>
+        {TOUR_PAGE.notes[i].facts.map((f: { text: string }) => (
+          <p class="fact">{f.text}</p>
+        ))}
+        <DocLinks slugs={TOUR_PAGE.notes[i].docs} />
+      </section>
+    ))
+  }
+
+  <section id="next">
+    <h2>Next</h2>
+    <ul class="rows">
+      <li><a href="/download">Install polyemesis</a></li>
+      <li><a href="/docs/quickstart">The quickstart</a></li>
+      <li><a href="/for/sports-clubs">One match feed, five languages</a></li>
+    </ul>
+  </section>
+</InnerPage>

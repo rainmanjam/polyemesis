@@ -180,6 +180,14 @@ const FIXED = [
     visual: "none",
   },
   {
+    path: "/tour",
+    eyebrow: "TOUR",
+    title: "A tour of the console.",
+    accent: "tour",
+    sub: "Watch a match feed come in, split into a mix per destination and go live, with on-screen captions and no voiceover.",
+    visual: "none",
+  },
+  {
     path: "/vs/aitum-multistream",
     eyebrow: "COMPARED",
     title: "Mix tracks on the server, per destination.",

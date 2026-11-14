@@ -12,6 +12,7 @@ export const NEW_ROUTES = [
   "/recipes/two-languages-one-broadcast",
   "/recipes/obs-to-five-platforms",
   "/recipes/streaming-from-a-backpack",
+  "/tour",
 ];
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)), "utf8");

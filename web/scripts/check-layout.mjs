@@ -71,6 +71,7 @@ const REQUIRED = {
   "/recipes/two-languages-one-broadcast": 0,
   "/recipes/obs-to-five-platforms": 0,
   "/recipes/streaming-from-a-backpack": 0,
+  "/tour": 0,
   "/vs/aitum-multistream": 0,
   "/vs/obs-multi-rtmp": 0,
   "/vs/restreamer": 0,

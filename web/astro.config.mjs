@@ -55,6 +55,7 @@ export const pageSource = {
   "/recipes/two-languages-one-broadcast": "src/data/recipes.mjs",
   "/recipes/obs-to-five-platforms": "src/data/recipes.mjs",
   "/recipes/streaming-from-a-backpack": "src/data/recipes.mjs",
+  "/tour": "src/data/tour-page.mjs",
   ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
 };
 
