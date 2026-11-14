@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { AUDIENCES, AUDIENCE_ROUTES } from "../data/audiences.mjs";
+import * as SETUP from "../data/setup-facts.mjs";
 import { CASES, CASE_ORDER } from "../data/cases.mjs";
 import { BY_SLUG } from "../data/docs.mjs";
 import { factProblems, fillCase, type Fact } from "./facts";
@@ -102,5 +103,103 @@ describe("audience data", () => {
       const own = [a.title, a.description, a.heading, a.lede, a.band.heading, a.band.lede].join(" ");
       for (const k of KINDS) if (k.test(own)) expect(caseText, `${a.key}: "${k}" is not in its case`).toMatch(k);
     }
+  });
+
+  /* Completeness guards (ruling P4-R17): each pins a gap the final review found, a page whose facts were
+   * all true but which left out a step the docs require. Each is proved by removing the fact it guards. */
+  describe("completeness", () => {
+    const texts = (a: (typeof audiences)[number]): string[] => a.steps.flatMap((s: { facts: Fact[] }) => s.facts.map((f) => f.text));
+    const at = (list: string[], re: RegExp) => list.findIndex((t) => re.test(t));
+
+    it("gives OBS an address before it is told to start, on every audience page", () => {
+      for (const a of audiences) {
+        const t = texts(a);
+        const start = at(t, /Start Recording/);
+        expect(start, `${a.key}: says Start Recording`).toBeGreaterThan(-1);
+        const url = at(t, /publish URL/);
+        expect(url, `${a.key}: a fact about the publish URL`).toBeGreaterThan(-1);
+        expect(url, `${a.key}: the publish URL comes before Start Recording`).toBeLessThan(start);
+        const addSource = at(t, /add a source/i);
+        expect(addSource, `${a.key}: adds a source`).toBeGreaterThan(-1);
+        expect(t[addSource], `${a.key}: sets the source to SRT`).toMatch(/SRT/);
+        expect(addSource, `${a.key}: source before its URL`).toBeLessThan(url);
+        expect(at(t, /Custom Output \(FFmpeg\)/), `${a.key}: Custom Output (FFmpeg)`).toBeGreaterThan(-1);
+        const paste = at(t, /File path or URL/);
+        expect(paste, `${a.key}: pastes the URL into OBS`).toBeGreaterThan(-1);
+        expect(paste, `${a.key}: pastes before Start Recording`).toBeLessThan(start);
+      }
+    });
+
+    it("ticks the Audio Track boxes before Start Recording, and sets the track bitrates first", () => {
+      for (const a of audiences) {
+        const t = texts(a);
+        const start = at(t, /Start Recording/);
+        const ticks = at(t, /Audio Track/);
+        expect(ticks, `${a.key}: ticks Audio Track`).toBeGreaterThan(-1);
+        expect(ticks, `${a.key}: ticks before Start Recording`).toBeLessThan(start);
+        const bitrates = at(t, /set a bitrate for each track/);
+        expect(bitrates, `${a.key}: sets a bitrate for each track`).toBeGreaterThan(-1);
+        expect(bitrates, `${a.key}: bitrates before Start Recording`).toBeLessThan(start);
+        expect(at(t, /Advanced Audio Properties/), `${a.key}: assigns sources to tracks`).toBeGreaterThan(-1);
+      }
+    });
+
+    it("adds a destination, ticks its tracks and enables it, in that order", () => {
+      for (const a of audiences) {
+        const t = texts(a);
+        const add = at(t, /Destinations → Add/);
+        expect(add, `${a.key}: adds a destination`).toBeGreaterThan(-1);
+        const tick = t.findIndex((x, i) => i > add && /tick the ones/i.test(x));
+        expect(tick, `${a.key}: ticks its tracks after the add`).toBeGreaterThan(add);
+        const enable = t.findIndex((x, i) => i > tick && /\benable\b/i.test(x));
+        expect(enable, `${a.key}: enables it after the ticks`).toBeGreaterThan(tick);
+      }
+    });
+
+    it("says what an account needs before it says to connect one, with the stream key still offered", () => {
+      for (const a of audiences) {
+        const t = texts(a);
+        const host = at(t, /real hostname with a trusted certificate/);
+        expect(host, `${a.key}: the hostname and certificate`).toBeGreaterThan(-1);
+        expect(t[host], `${a.key}: never its IP`).toMatch(/never its IP/);
+        const connect = at(t, /Connect account/);
+        expect(connect, `${a.key}: presses Connect account`).toBeGreaterThan(host);
+        expect(at(t, /its own requirements/), `${a.key}: each platform's app has its own requirements`).toBeGreaterThan(-1);
+        expect(at(t, /redirect URL/), `${a.key}: the redirect URL`).toBeGreaterThan(-1);
+        expect(texts(a).join(" "), `${a.key}: the stream-key alternative`).toMatch(/platform's own dashboard/);
+      }
+    });
+
+    it("uses the facts it shares with the recipes, not its own wording of them", () => {
+      const shared = [
+        SETUP.OBS_BITRATES, SETUP.OBS_TRACK_TICKS, SETUP.ADD_SOURCE, SETUP.COPY_URL, SETUP.OBS_CUSTOM_OUTPUT, SETUP.PASTE_URL,
+        SETUP.AUDIO_TRACKS, SETUP.START_RECORDING, SETUP.LABEL_TRACKS, SETUP.ADD_DESTINATION, SETUP.URL_AND_KEY, SETUP.TICK_TRACKS,
+        SETUP.ENABLE_DESTINATION, SETUP.METERS_AFTER_ROUTING, SETUP.SILENCE_FACT, SETUP.CONNECT_NEEDS_HOSTNAME,
+        SETUP.APP_REQUIREMENTS, SETUP.REDIRECT_URL, SETUP.REGISTER_APP, SETUP.PASTE_CREDENTIALS, SETUP.SAME_FOUR_STEPS,
+      ];
+      for (const a of audiences) for (const f of shared) expect(factsOf(a), `${a.key}: ${f.text}`).toContain(f);
+    });
+
+    it("does not tell the streamer that every destination receives the encoder's video as it is", () => {
+      // A rendition re-encodes the vertical destination's video, so the sentence is true on the other two pages only.
+      expect(factsOf(AUDIENCES.streamer)).not.toContain(SETUP.ENCODER_SETTINGS);
+      expect(factsOf(AUDIENCES.sports)).toContain(SETUP.ENCODER_SETTINGS);
+      expect(factsOf(AUDIENCES.worship)).toContain(SETUP.ENCODER_SETTINGS);
+    });
+
+    it("says where the church's non-OBS encoder stands, since its example source is a hardware encoder", () => {
+      expect(factsOf(AUDIENCES.worship)).toContain(SETUP.ANY_SRT_ENCODER);
+    });
+
+    it("tells the streamer where to add the rendition, how to shape it and to choose Blurred fill", () => {
+      const t = texts(AUDIENCES.streamer).join(" ");
+      expect(t).toMatch(/Renditions page/);
+      expect(t).toMatch(/both a width and a height/);
+      expect(t).toMatch(/Blurred fill/);
+      expect(t).toMatch(/Stretch to fit/);
+      const adds = at(texts(AUDIENCES.streamer), /Destinations → Add/);
+      const rendition = at(texts(AUDIENCES.streamer), /Renditions page/);
+      expect(adds, "destinations exist before they are pointed at a rendition").toBeLessThan(rendition);
+    });
   });
 });

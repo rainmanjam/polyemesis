@@ -178,7 +178,9 @@
 }
 .inner-main .fine {
   max-width: 60ch;
-  margin: 12px 0 0;
+  /* The audience pages put it last in a section, against the next heading. The
+     space below matches the one between two steps (54 to 68px measured). */
+  margin: 12px 0 3.5rem;
   font-family: var(--font-mono);
   font-size: 0.75rem;
   line-height: 1.5;

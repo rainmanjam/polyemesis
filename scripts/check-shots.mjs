@@ -17,9 +17,9 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/** Site copies kept with no page using them, on purpose (none at present: a file
- *  is listed here only until a page uses it). web/src/lib/shots-usage.test.ts pins the length. */
-export const KEPT_WITHOUT_USER = [];
+/** Site copies kept with no page using them, on purpose. Plan 4 removes an
+ *  entry when it uses the file. web/src/lib/shots-usage.test.ts pins the length. */
+export const KEPT_WITHOUT_USER = ["06-renditions.png"];
 
 /** A source with its comments removed: a file name in a comment is not a use. */
 export function withoutComments(text) {

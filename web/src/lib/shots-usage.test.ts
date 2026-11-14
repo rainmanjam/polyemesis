@@ -14,7 +14,7 @@ const SHOTS = join(SRC, "assets", "shots");
 /** Kept without a user on purpose; the list and withoutComments live in scripts/check-shots.mjs,
  *  which also derives the manifest's usedBy, so the two cannot disagree. */
 const WHITELIST = KEPT_WITHOUT_USER;
-const WHITELIST_LENGTH = 0; // it can only grow in plain sight: a new entry must change this number too
+const WHITELIST_LENGTH = 1; // it can only grow in plain sight: a new entry must change this number too
 
 describe("screenshots in src/assets/shots", () => {
   const shots = readdirSync(SHOTS).filter((f) => f.endsWith(".png"));

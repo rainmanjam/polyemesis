@@ -180,7 +180,7 @@ describe("recipe data", () => {
     });
 
     it("sets the backpack source's protocol to SRT before anything is pointed at it", () => {
-      expect(by("streaming-from-a-backpack").needs.map((f: Fact) => f.text).join(" ")).toMatch(/protocol set to SRT/);
+      expect(by("streaming-from-a-backpack").needs.map((f: Fact) => f.text).join(" ")).toMatch(/SRT as its protocol/);
     });
 
     it("keeps to the docs' words about the publish URL", () => {

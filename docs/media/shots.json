@@ -86,9 +86,7 @@
       "test": "renditions — the ladder, shared across destinations",
       "screen": "/renditions",
       "site": true,
-      "usedBy": [
-        "web/src/data/audiences.mjs"
-      ],
+      "usedBy": [],
       "exception": null,
       "allowFailedWords": []
     },
@@ -231,7 +229,7 @@
         "web/src/components/home/Why.astro",
         "web/src/data/audiences.mjs",
         "web/src/data/install-page.mjs",
-        "web/src/data/recipes.mjs"
+        "web/src/data/setup-facts.mjs"
       ],
       "exception": null,
       "allowFailedWords": []

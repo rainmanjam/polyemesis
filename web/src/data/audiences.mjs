@@ -1,13 +1,21 @@
 /* The three audience pages (/for/...): their metadata, what each needs, the
  * steps to set it up and the docs worth reading next. Every product sentence is
- * a Fact (lib/facts.ts): the doc it comes from and the phrases that prove it,
- * checked against docs/ by audiences-data.test.ts. A page never types a track
- * or destination name; it writes {tracks}, {dests} and {trackCount}.
+ * a Fact (lib/facts.ts): the doc it comes from and the phrases that tie it to
+ * that doc, checked against docs/ by audiences-data.test.ts. A page never types
+ * a track or destination name; it writes {tracks}, {dests} and {trackCount}.
+ *
+ * A page is complete (ruling P4-R17): a reader following only its steps, from a
+ * fresh working install, ends with what its heading promises. The steps the
+ * pages share with the recipes are the Facts in setup-facts.mjs, defined once;
+ * the completeness guards in audiences-data.test.ts pin the gaps a review found.
  */
+
+import * as SETUP from "./setup-facts.mjs";
 
 /**
  * @typedef {import("../lib/facts").Fact} Fact
  * @typedef {import("../lib/facts").Step} Step
+ * @typedef {import("../lib/facts").StepShot} StepShot
  * @typedef {"sports"|"worship"|"streamer"} CaseKey
  * @typedef {{ key: CaseKey, route: string, title: string, description: string, heading: string, accent: string,
  *   lede: string, crumbLabel: string, needs: Fact[], steps: Step[], features: string[], related: string[],
@@ -20,100 +28,58 @@ export const AUDIENCE_ROUTES = {
   streamer: "/for/streamers",
 };
 
-/** The picture's label on the pages that borrow the sports-club demo install. */
-const DEMO_CAPTION =
-  "Demo install: the destinations and tracks in this picture are the sports-club example's; yours are the ones you add and label.";
-
-/** @type {Fact} */
-const SIX_TRACKS = {
-  text: "OBS sends up to six audio tracks.",
-  doc: "audio-routing",
-  evidence: ["six is what OBS sends"],
-};
-/** @type {Fact} */
-const SRT_FACT = {
-  text: "Multitrack SRT into polyemesis. Classic RTMP carries a single track.",
-  doc: "obs",
-  evidence: ["Multitrack over SRT", "Classic RTMP carries one audio track"],
-};
-/** @type {Fact} */
-const ADVANCED_AUDIO = {
-  text: "In OBS, open Advanced Audio Properties in the Audio Mixer and tick which tracks each source feeds.",
-  doc: "obs",
-  evidence: ["Advanced Audio Properties"],
-  anchor: "multitrack-over-srt",
-};
-/** @type {Fact} */
-const OUTPUT_TO_URL = {
-  text: "Use the Recording output set to Output to URL with container mpegts, and press Start Recording.",
-  doc: "obs",
-  evidence: ["Output to URL", "mpegts", "Start Recording"],
-  anchor: "multitrack-over-srt",
-};
-/** @type {Fact} */
-const RTMP_SINGLE = {
-  text: "Classic RTMP carries a single track, so multitrack audio from OBS needs SRT.",
-  doc: "obs",
-  evidence: ["Classic RTMP carries one audio track", "If your encoder is OBS, use SRT"],
-};
-/** @type {Fact} */
-const LABEL_TRACKS = {
-  text: "Optionally, on Sources → annotations, label the incoming tracks so every destination sees the same names.",
-  doc: "quickstart",
-  evidence: ["annotations", "This is optional"],
-  anchor: "5-tell-it-what-each-track-is",
-};
-/** @type {Fact} */
-const ADD_DESTINATION = {
-  text: "Add one destination for each under Destinations → Add and tick the tracks it should carry.",
-  doc: "quickstart",
-  evidence: ["Destinations → Add", "tick the ones this destination should carry"],
-  anchor: "6-add-a-destination",
-};
-/** @type {Fact} */
-const METERS_AFTER_ROUTING = {
-  text: "The Meters page shows loudness measured after routing, which is what each platform receives.",
-  doc: "quickstart",
-  evidence: ["measured after routing"],
-  anchor: "7-watch-that-it-is-actually-right",
-};
-/** @type {Fact} */
-const SILENCE_FACT = {
-  text: "A destination set to a track the source is not sending gets silence.",
-  doc: "quickstart",
-  evidence: ["selecting a track the source is not sending"],
-};
-/** A destination's key comes from the platform's dashboard or from a connected account: either works.
- *  @type {Fact} */
-const KEY_OR_ACCOUNT = {
-  text: "For each platform you send to, its stream key from the platform's dashboard, or a connected account that lets polyemesis fetch it.",
-  doc: "quickstart",
-  evidence: ["platform's own dashboard", "Connected account", "have polyemesis fetch them"],
-  anchor: "6-add-a-destination",
-};
-/** @type {Fact} */
-const KEY_CHOICE_STEP = {
-  text: "For each destination, paste the stream key from the platform's dashboard, or leave it empty and pick a connected account.",
-  doc: "quickstart",
-  evidence: ["platform's own dashboard", "leave them empty and pick a Connected account"],
-  anchor: "6-add-a-destination",
-};
-/** @type {Fact} */
-const CONNECT_STEPS = {
-  text: "To connect an account: register an app, paste its credentials in Settings, press Connect account.",
-  doc: "connecting-platforms",
-  evidence: ["Register an app", "Connect account"],
-  anchor: "the-same-four-steps-on-every-platform",
-};
-
 /** @type {Step} */
-const STEP_SEND_SRT = { title: "Send it as multitrack SRT", facts: [OUTPUT_TO_URL, RTMP_SINGLE] };
+const STEP_TRACKS = { title: "Put each of {tracks} on its own track", facts: [SETUP.OBS_BITRATES, SETUP.OBS_TRACK_TICKS] };
+/** Every action from "nothing to push to" to "OBS is pushing", in the docs' order.
+ *  @type {Step} */
+const STEP_SEND_SRT = {
+  title: "Send it as multitrack SRT",
+  facts: [
+    SETUP.ADD_SOURCE,
+    SETUP.COPY_URL,
+    SETUP.OBS_CUSTOM_OUTPUT,
+    SETUP.PASTE_URL,
+    SETUP.AUDIO_TRACKS,
+    SETUP.ENCODER_SETTINGS,
+    SETUP.START_RECORDING,
+    SETUP.METERS_APPEAR,
+  ],
+};
+/** The streamer's destinations may re-encode through a rendition, so "your encoder settings are what every destination
+ *  receives" is not said there. */
 /** @type {Step} */
-const STEP_LABEL = { title: "Label the tracks (optional)", facts: [LABEL_TRACKS] };
+const STEP_SEND_SRT_STREAMER = { ...STEP_SEND_SRT, facts: STEP_SEND_SRT.facts.filter((f) => f !== SETUP.ENCODER_SETTINGS) };
+/** The church's example source is a hardware encoder, which the docs cover only as "anything that can push MPEG-TS over SRT".
+ *  @type {Step} */
+const STEP_SEND_SRT_WORSHIP = { ...STEP_SEND_SRT, facts: [SETUP.ANY_SRT_ENCODER, ...STEP_SEND_SRT.facts] };
+/** @type {Step} */
+const STEP_LABEL = { title: "Label the tracks (optional)", facts: [SETUP.LABEL_TRACKS] };
+/** The key route needs nothing from this step; the account route needs all of it, and before the destination is added.
+ *  @type {Step} */
+const STEP_CONNECT = {
+  title: "Connect an account (optional)",
+  facts: [
+    SETUP.CONNECT_NEEDS_HOSTNAME,
+    SETUP.APP_REQUIREMENTS,
+    SETUP.REDIRECT_URL,
+    SETUP.REGISTER_APP,
+    SETUP.PASTE_CREDENTIALS,
+    SETUP.SAME_FOUR_STEPS,
+  ],
+};
 /** @type {Step} */
 const STEP_CHECK = {
   title: "Check what each destination hears",
-  facts: [METERS_AFTER_ROUTING, SILENCE_FACT],
+  facts: [SETUP.METERS_AFTER_ROUTING, SETUP.SILENCE_FACT],
+};
+
+/** Where the sports page puts its two pictures: the destinations step and the check. */
+/** @type {StepShot} */
+const SPORTS_DESTINATIONS_SHOT = {
+  file: "18-destinations.png",
+  alt: "The dashboard's Destinations section, one card per destination with the tracks it carries",
+  chrome: "Dashboard",
+  caption: "Demo install: the five YouTube channels and their tracks in this picture are example names; yours are the ones you add and label.",
 };
 
 /** @type {Record<CaseKey, Audience>} */
@@ -134,33 +100,24 @@ export const AUDIENCES = {
         doc: "audio-routing",
         evidence: ["six is what OBS sends"],
       },
-      SRT_FACT,
-      {
-        text: "For each YouTube channel, its stream key from the YouTube dashboard, or a connected account that lets polyemesis fetch it.",
-        doc: "quickstart",
-        evidence: ["platform's own dashboard", "Connected account", "have polyemesis fetch them"],
-        anchor: "6-add-a-destination",
-      },
+      SETUP.SRT_NEED,
+      SETUP.KEY_OR_ACCOUNT_NEED,
     ],
     steps: [
       {
-        title: "Put each of {tracks} on its own track",
+        ...STEP_TRACKS,
         facts: [
-          ADVANCED_AUDIO,
+          ...STEP_TRACKS.facts,
           { text: "OBS sends six tracks, so five languages plus the crowd fit.", doc: "audio-routing", evidence: ["six is what OBS sends"] },
         ],
       },
       STEP_SEND_SRT,
       STEP_LABEL,
+      STEP_CONNECT,
       {
         title: "One destination per channel",
-        facts: [ADD_DESTINATION, KEY_CHOICE_STEP, CONNECT_STEPS],
-        shot: {
-          file: "18-destinations.png",
-          alt: "The dashboard's Destinations section, one card per destination with the tracks it carries",
-          chrome: "Dashboard",
-          caption: "Demo install: the five YouTube channels and their tracks in this picture are example names; yours are the ones you add and label.",
-        },
+        facts: [SETUP.ADD_DESTINATION, SETUP.URL_AND_KEY, SETUP.TICK_TRACKS, SETUP.ENABLE_DESTINATION, SETUP.COPY_COSTS],
+        shot: SPORTS_DESTINATIONS_SHOT,
       },
       {
         ...STEP_CHECK,
@@ -173,7 +130,7 @@ export const AUDIENCES = {
     ],
     features: ["link-health", "broadcast-delay", "rollover", "monitoring", "stream-deck"],
     related: ["two-languages-one-broadcast"],
-    mixesAfterStep: 4,
+    mixesAfterStep: 5,
     band: { heading: "Your match feed, in every language.", accent: "language", lede: "Run it on a server you control. Your keys and settings stay on it." },
   },
 
@@ -189,28 +146,24 @@ export const AUDIENCES = {
     crumbLabel: "for churches and events",
     needs: [
       { text: "One audio track for each of {tracks}. OBS sends up to six.", doc: "audio-routing", evidence: ["six is what OBS sends"] },
-      SRT_FACT,
-      KEY_OR_ACCOUNT,
+      SETUP.SRT_NEED,
+      SETUP.KEY_OR_ACCOUNT_NEED,
     ],
     steps: [
-      { title: "Put each of {tracks} on its own track", facts: [ADVANCED_AUDIO] },
-      STEP_SEND_SRT,
+      STEP_TRACKS,
+      STEP_SEND_SRT_WORSHIP,
       STEP_LABEL,
+      STEP_CONNECT,
       {
-        title: "Tick the tracks each destination carries",
-        facts: [ADD_DESTINATION],
-        shot: {
-          file: "18-destinations.png",
-          alt: "The dashboard's Destinations section, one card per destination with the tracks it carries",
-          chrome: "Dashboard",
-          caption: DEMO_CAPTION,
-        },
+        title: "Add a destination for each mix",
+        facts: [SETUP.ADD_DESTINATION, SETUP.URL_AND_KEY, SETUP.TICK_TRACKS, SETUP.ENABLE_DESTINATION, SETUP.COPY_COSTS],
+        shot: { ...SETUP.DESTINATIONS_SHOT, alt: "The dashboard's Destinations section, one card per destination with the tracks it carries" },
       },
       STEP_CHECK,
     ],
     features: ["captions", "scheduled-broadcast", "recurring-events", "storage", "rollover"],
     related: ["two-languages-one-broadcast"],
-    mixesAfterStep: 4,
+    mixesAfterStep: 5,
     band: { heading: "Every room hears its own mix.", accent: "mix", lede: "Run it on a server you control. Your keys and settings stay on it." },
   },
 
@@ -226,7 +179,8 @@ export const AUDIENCES = {
     crumbLabel: "for streamers",
     needs: [
       { text: "One audio track for each of {tracks}. OBS sends up to six.", doc: "audio-routing", evidence: ["six is what OBS sends"] },
-      SRT_FACT,
+      SETUP.SRT_NEED,
+      SETUP.KEY_OR_ACCOUNT_NEED,
       {
         text: "A rendition for the vertical output: it re-encodes video only, and audio passes through untouched.",
         doc: "renditions",
@@ -235,12 +189,29 @@ export const AUDIENCES = {
       },
     ],
     steps: [
-      { title: "Put each of {tracks} on its own track", facts: [ADVANCED_AUDIO] },
-      STEP_SEND_SRT,
+      STEP_TRACKS,
+      STEP_SEND_SRT_STREAMER,
       STEP_LABEL,
+      STEP_CONNECT,
+      {
+        title: "Add a destination for each output",
+        facts: [SETUP.ADD_DESTINATION, SETUP.URL_AND_KEY, SETUP.TICK_TRACKS],
+        shot: { ...SETUP.DESTINATIONS_SHOT, alt: "The dashboard's Destinations section, one card per destination with the tracks it carries" },
+      },
       {
         title: "Add a 9:16 rendition",
         facts: [
+          {
+            text: "Different resolutions per destination are set up on the Renditions page.",
+            doc: "quickstart",
+            evidence: ["Different resolutions per destination", "Renditions"],
+            anchor: "what-to-do-next",
+          },
+          {
+            text: "The rendition editor offers presets as editable starting points; give the rendition both a width and a height in a 9:16 shape, because aspect handling needs both.",
+            doc: "renditions",
+            evidence: ["The rendition editor offers these as editable starting points", "Aspect handling needs both a width and a height"],
+          },
           {
             text: "A 9:16 rendition of a 16:9 ingest is one more entry in the ladder, encoded once and shared.",
             doc: "renditions",
@@ -248,18 +219,12 @@ export const AUDIENCES = {
             anchor: "aspect-handling--one-ladder-rung-not-a-second-pipeline",
           },
           {
-            text: "Blurred fill fills the remainder with a blurred copy of the frame itself.",
+            text: "Choose Blurred fill, which fills the remainder with a blurred copy of the frame itself. The default, Stretch to fit, lets the picture distort.",
             doc: "renditions",
-            evidence: ["Blurred fill"],
+            evidence: ["Blurred fill", "lets the picture distort", "so it stays the default"],
             anchor: "aspect-handling--one-ladder-rung-not-a-second-pipeline",
           },
         ],
-        shot: {
-          file: "06-renditions.png",
-          alt: "The Renditions page, one card per rendition with the destinations it feeds",
-          chrome: "Renditions",
-          caption: "Demo install: the renditions and destinations in this picture are examples; yours are the ones you add.",
-        },
       },
       {
         title: "Point each destination at its own video",
@@ -277,18 +242,13 @@ export const AUDIENCES = {
             anchor: "passthrough-is-a-rendition",
           },
           {
-            text: "Tick the tracks each destination should carry.",
-            doc: "quickstart",
-            evidence: ["tick the ones this destination should carry"],
-            anchor: "6-add-a-destination",
+            text: "Each destination's card on the dashboard shows the rendition it is on, directly above the audio tracks it receives.",
+            doc: "renditions",
+            evidence: ["shows the rendition it is on directly above the audio tracks it receives"],
+            anchor: "a-rendition-only-runs-when-something-needs-it",
           },
+          SETUP.ENABLE_DESTINATION,
         ],
-        shot: {
-          file: "18-destinations.png",
-          alt: "The dashboard's Destinations section, one card per destination showing its video and the tracks it carries",
-          chrome: "Dashboard",
-          caption: DEMO_CAPTION,
-        },
       },
       STEP_CHECK,
     ],
