@@ -169,7 +169,7 @@ func TestLegacyCaptureScriptsCanBuildTheSeederFromOutsideTheModule(t *testing.T)
 		t.Fatalf("no seeder binary at %s: %v", bin, err)
 	}
 	// And the scripts use that step, not the old invocation.
-	for _, name := range []string{"capture-lanes.sh", "capture-media.sh"} {
+	for _, name := range []string{"capture-lanes.sh"} {
 		raw, err := os.ReadFile(filepath.Join(root, "scripts", name))
 		if err != nil {
 			t.Fatal(err)

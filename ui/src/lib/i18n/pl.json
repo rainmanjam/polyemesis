@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "Obecnie ogranicza go pułap pamięci, a nie okno.",
   "clips.noKeyframeYet": "Nie wykryto jeszcze klatki kluczowej, więc początek klipu może być zakłócony.",
   "clips.roughStart": "niedokładny początek",
+  "clips.startNotChecked": "Początek niesprawdzony",
+  "clips.startNotCheckedBody": "Brak zapisanego pomiaru tego, jak ten klip się zaczyna i ile trwa.",
   "media.uploadAria": "Prześlij plik multimedialny",
   "media.dropOrChoose": "Upuść tu plik albo {choose}",
   "media.chooseOne": "wybierz go",

@@ -18,8 +18,7 @@ const scene = process.env.SHOT_SCENE === "sports" ? "sports" : "full";
  * three programmes, a rendition ladder, destinations across every supported
  * platform and a recording library, and pushes live multitrack audio through
  * it. Pointed at an empty install it produces empty screenshots, which is worse
- * than none. scripts/capture-media.sh remains for the narrower single-source
- * arrangement it was written for.
+ * than none.
  */
 export default defineConfig({
   testDir: ".",

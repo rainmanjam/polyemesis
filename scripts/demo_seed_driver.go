@@ -5,8 +5,8 @@
 //
 // WHY THIS IS NOT scripts/seed_demo.go. That one seeds the smallest
 // arrangement that demonstrates one claim — a three-track source and three
-// destinations whose mixes differ — and scripts/capture-media.sh depends on its
-// exact two lines of stdout. This one seeds an INSTALLATION: several
+// destinations whose mixes differ — and scripts/capture-lanes.sh depends on its
+// stdout contract. This one seeds an INSTALLATION: several
 // programmes, a rendition ladder, destinations across every platform the
 // product supports, and a recording library. Widening the old seeder would have
 // changed what the existing capture script photographs, silently, on a run

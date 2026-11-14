@@ -16,7 +16,7 @@ const STATE = "e2e/.auth/state.json";
 
 /* Overridable because something else may have completed first-run already.
  *
- * scripts/capture-media.sh seeds a demo install before Playwright starts, so
+ * The demo rigs seed an install before Playwright starts, so
  * the admin account exists with whatever password the seeder chose. With the
  * value hard-coded here, this file found no "Create account" button, tried to
  * sign in with a password nobody had set, and failed on a missing <nav> — a
@@ -27,7 +27,7 @@ const STATE = "e2e/.auth/state.json";
 const PASSWORD = process.env.E2E_PASSWORD;
 if (!PASSWORD) {
   throw new Error(
-    "E2E_PASSWORD is not set. scripts/capture-media.sh and " +
+    "E2E_PASSWORD is not set. The demo rigs and " +
       "scripts/acceptance-browser.sh each generate one per run; export one " +
       "yourself to drive Playwright directly.",
   );

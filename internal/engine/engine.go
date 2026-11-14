@@ -5222,11 +5222,7 @@ func (e *Engine) DeleteClip(name string) error {
 	if c, err := e.clipCapturer(); err == nil {
 		return c.Delete(name)
 	}
-	path, err := clips.Resolve(e.clipDir(), name)
-	if err != nil {
-		return err
-	}
-	if err := os.Remove(path); err != nil {
+	if err := clips.Remove(e.clipDir(), name); err != nil {
 		return err
 	}
 	e.bus.Publish(events.TypeClips, nil)

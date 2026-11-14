@@ -10,8 +10,8 @@
 #   dashboard-2-programmes.png   lanes appear; each carries its own preview
 #   dashboard-3-programmes.png   the same shape, one lane further
 #
-# WHY THIS EXISTS SEPARATELY FROM capture-media.sh. That script seeds a fixed
-# two-programme install and photographs eighteen pages of it. This one seeds a
+# WHY THIS EXISTS SEPARATELY FROM demo-seed.sh. That script seeds a whole
+# installation and photographs its pages. This one seeds a
 # single install THREE TIMES OVER, adding a programme between shots, because
 # the thing being demonstrated is a threshold rather than a page: Dashboard.tsx
 # draws nothing per-programme with one source and everything per-programme with
@@ -43,10 +43,10 @@ SRV_NAME="polyemesis-lanes-server"
 # tell which stream actually failed.
 SRC_PREFIX="polyemesis-lanes-source"
 
-# A DIFFERENT PORT AND NETWORK FROM capture-media.sh, deliberately. The two
+# A DIFFERENT PORT AND NETWORK FROM demo-seed.sh, deliberately. The two
 # scripts are run back to back while adjusting shots, and sharing either would
 # mean one silently photographing the other's install -- the same "refuse to
-# run against a server this script did not start" failure capture-media.sh
+# run against a server this script did not start" failure demo-seed.sh
 # already carries a guard for.
 SRT_PORT="${SRT_PORT:-6000}"
 
@@ -126,7 +126,7 @@ fi
     -o "$WORK/polyemesis-linux" ./cmd/polyemesis ) || {
   echo "cross-compile for the container failed"; exit 1; }
 docker build -q -t "$IMAGE" -f - "$WORK" >/dev/null <<'DOCKERFILE' || { echo "docker build failed"; exit 1; }
-# 3.24, as demo-seed.sh and capture-media.sh use: polyemesis refuses to start on
+# 3.24, as demo-seed.sh uses: polyemesis refuses to start on
 # the FFmpeg 6.1 that 3.20 ships, and the server exited before the seeder's
 # first request.
 FROM alpine:3.24

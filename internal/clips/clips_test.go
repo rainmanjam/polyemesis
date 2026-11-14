@@ -344,3 +344,174 @@ func TestCloseGivesTheMemoryBack(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 }
+
+// List used to rebuild a Clip from the filename and the file's mtime alone, so
+// every clip it returned had Seconds 0 and KeyframeAligned false: the console
+// read "ROUGH START, 0.0s" on every row. Only Capture's own return value had
+// the real numbers, and nothing was written down for List to read back.
+func TestListReturnsWhatCaptureMeasured(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60})
+	feed(send, 20, 5)
+
+	got, err := c.Capture(10 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if !got.KeyframeAligned || got.Seconds <= 0 {
+		t.Fatalf("test needs an aligned, non-empty capture, got %+v", got)
+	}
+
+	list, err := c.List()
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	if list[0].Seconds != got.Seconds {
+		t.Errorf("listed Seconds = %v, captured %v", list[0].Seconds, got.Seconds)
+	}
+	if list[0].KeyframeAligned != got.KeyframeAligned {
+		t.Errorf("listed KeyframeAligned = %v, captured %v", list[0].KeyframeAligned, got.KeyframeAligned)
+	}
+	if list[0].Note != got.Note {
+		t.Errorf("listed Note = %q, captured %q", list[0].Note, got.Note)
+	}
+}
+
+func TestListKeepsTheRoughStartOfAClipThatHadOne(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60})
+	send(datagram(patPacket(), pmtPacket()))
+	for i := 0; i < 5; i++ {
+		send(datagram(videoPacket(false), audioPacket()))
+	}
+	got, err := c.Capture(3 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if got.KeyframeAligned || got.Note == "" {
+		t.Fatalf("test needs a rough capture with a note, got %+v", got)
+	}
+	list, _ := c.List()
+	if len(list) != 1 || list[0].KeyframeAligned || list[0].Note != got.Note {
+		t.Fatalf("List = %+v, captured %+v", list, got)
+	}
+}
+
+func TestDeleteAndRetentionTakeTheClipsRecordWithIt(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60, MaxClips: 1})
+	feed(send, 10, 3)
+	first, _ := c.Capture(3 * time.Second)
+	send(datagram(videoPacket(true), audioPacket()))
+	second, err := c.Capture(3 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	// Retention (MaxClips 1) removed the first; its record must be gone too.
+	entries, _ := os.ReadDir(c.Dir())
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), first.Name) {
+			t.Fatalf("%q outlived the clip retention removed", e.Name())
+		}
+	}
+	if err := c.Delete(second.Name); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if entries, _ = os.ReadDir(c.Dir()); len(entries) != 0 {
+		t.Fatalf("directory not empty after delete: %v", entries)
+	}
+}
+
+// A clip with no record -- captured before records existed, or whose record
+// failed to write -- must say so rather than claim a start nobody checked.
+func TestListSaysSoWhenAClipWasNeverMeasured(t *testing.T) {
+	dir := t.TempDir()
+	name := "clip-20260101-000000.ts"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list, err := List(dir)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	if list[0].Measured {
+		t.Error("a clip with no record was reported as measured")
+	}
+	if list[0].KeyframeAligned {
+		t.Error("a clip with no record was reported as keyframe aligned: nobody checked")
+	}
+	if list[0].Seconds != 0 {
+		t.Errorf("Seconds = %v for a clip with no record", list[0].Seconds)
+	}
+
+	// A record that cannot be read is the same: unmeasured, not aligned.
+	if err := os.WriteFile(filepath.Join(dir, name+metaExt), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ = List(dir); list[0].Measured || list[0].KeyframeAligned {
+		t.Errorf("an unreadable record was trusted: %+v", list[0])
+	}
+}
+
+func TestMeasuredIsTrueForACaptureAndItsListing(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60})
+	feed(send, 20, 5)
+	got, err := c.Capture(10 * time.Second)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	list, _ := c.List()
+	if !got.Measured || len(list) != 1 || !list[0].Measured {
+		t.Fatalf("captured %+v, listed %+v", got, list)
+	}
+}
+
+// The clips directory holds each clip's record and, mid-capture, temporary
+// files. A record is never listed, counted, sized, served or swept as a clip.
+func TestARecordIsNotAClipToAnyEnumerator(t *testing.T) {
+	dir := t.TempDir()
+	name := "clip-20260101-000000.ts"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMeta(filepath.Join(dir, name), clipMeta{Seconds: 5, KeyframeAligned: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, junk := range []string{name + ".partial", name + metaExt + ".partial"} {
+		if err := os.WriteFile(filepath.Join(dir, junk), []byte("zzzzzzzzzz"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list, err := List(dir)
+	if err != nil || len(list) != 1 || list[0].Name != name {
+		t.Fatalf("List = %+v, %v", list, err)
+	}
+	u, err := UsageOf(Config{Dir: dir}.Normalized())
+	if err != nil || u.Count != 1 || u.UsedBytes != 5 {
+		t.Fatalf("Usage = %+v, %v; a record or temp file was counted", u, err)
+	}
+	for _, n := range []string{name + metaExt, name + ".partial", name + metaExt + ".partial"} {
+		if IsClip(n) {
+			t.Errorf("IsClip(%q) is true", n)
+		}
+		if _, err := Resolve(dir, n); err == nil {
+			t.Errorf("Resolve(%q) would serve it", n)
+		}
+		if err := Remove(dir, n); err == nil {
+			t.Errorf("Remove(%q) accepted a name that is not a clip", n)
+		}
+	}
+}
+
+func TestRetentionCountsClipsNotTheirRecords(t *testing.T) {
+	c, send, _ := testCapturer(t, Config{WindowSeconds: 60, MaxClips: 2})
+	feed(send, 10, 3)
+	for i := 0; i < 2; i++ {
+		send(datagram(videoPacket(true), audioPacket()))
+		if _, err := c.Capture(3 * time.Second); err != nil {
+			t.Fatalf("Capture: %v", err)
+		}
+	}
+	// Two clips and two records on disk: a limit of two clips must not trim.
+	if list, _ := c.List(); len(list) != 2 {
+		t.Fatalf("retention counted records as clips: %d clips left, want 2", len(list))
+	}
+}

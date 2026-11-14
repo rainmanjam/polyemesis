@@ -749,3 +749,53 @@ func TestSavedChatTravelsWithItsRecording(t *testing.T) {
 		t.Error("mirror mode removed the local sidecar")
 	}
 }
+
+// A clip's record (clip-….ts.meta.json, kept by internal/clips) is not a clip.
+// It was gathered with the clips directory and uploaded as an OffloadKindClip
+// item of its own, doubling the clip count and putting JSON in the bucket beside
+// the clips. Only files clips.IsClip accepts are clips; the record stays local
+// with its clip and is never an item, and neither is a half-written one.
+func TestAClipsRecordIsNeverOffloadedAsAClip(t *testing.T) {
+	f := newFixture(t)
+	all, _ := f.store.CreateStorageTarget(f.svc.box, db.StorageTarget{Name: "all", Provider: "r2", Endpoint: "http://h.test", Bucket: "b",
+		AccessKeyID: fakeKeyID, SecretAccessKey: fakeSecret, Enabled: true, OffloadClips: true})
+	f.mems[all] = newMem()
+	f.segment(5*time.Hour, "master", true)
+	f.segment(time.Minute, "newest", true)
+	old := f.now.Add(-time.Hour)
+	const clip = "clips/clip-20261101-120000.ts"
+	others := []string{clip + ".meta.json", clip + ".meta.json.partial", clip + ".partial"}
+	for _, p := range append([]string{clip}, others...) {
+		full := filepath.Join(f.dir, filepath.FromSlash(p))
+		_ = os.MkdirAll(filepath.Dir(full), 0o755)
+		if err := os.WriteFile(full, []byte(p), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(full, old, old)
+	}
+	f.svc.Pass(context.Background())
+
+	if it, ok := f.item(all, clip); !ok || it.State != db.OffloadVerified {
+		t.Fatalf("the clip itself was not offloaded: %+v", it)
+	}
+	for _, p := range others {
+		if _, ok := f.item(all, p); ok {
+			t.Errorf("%s was offloaded as if it were a clip", p)
+		}
+	}
+	items, _ := f.store.ListOffloadItems()
+	n := 0
+	for _, it := range items {
+		if it.Kind == db.OffloadKindClip {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d clip items for one clip", n)
+	}
+	for key := range f.mems[all].objs {
+		if strings.Contains(key, "meta.json") || strings.HasSuffix(key, ".partial") {
+			t.Errorf("object %q reached the bucket", key)
+		}
+	}
+}

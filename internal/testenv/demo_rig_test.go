@@ -491,11 +491,7 @@ func TestEveryCaptureShotGoesThroughSnap(t *testing.T) {
 	if !strings.Contains(spec, "routing — the clip for narrow columns") {
 		t.Error("ui/e2e/capture.spec.ts has no test titled \"routing — the clip for narrow columns\"")
 	}
-	script := read("scripts", "capture-media.sh")
 	for _, name := range []string{"tour.mp4", "tour.webm"} {
-		if strings.Contains(script, name) {
-			t.Errorf("scripts/capture-media.sh still mentions %s", name)
-		}
 		if _, err := os.Stat(filepath.Join(root, "docs", "media", name)); err == nil {
 			t.Errorf("docs/media/%s should be removed", name)
 		}

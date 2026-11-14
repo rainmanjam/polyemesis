@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "The memory ceiling, not the window, is what limits it right now.",
   "clips.noKeyframeYet": "No keyframe has been seen yet, so a clip may start with a glitch.",
   "clips.roughStart": "rough start",
+  "clips.startNotChecked": "Start not checked",
+  "clips.startNotCheckedBody": "There is no saved measurement of how this clip starts or how long it runs.",
   "media.uploadAria": "Upload a media file",
   "media.dropOrChoose": "Drop a file here, or {choose}",
   "media.chooseOne": "choose one",

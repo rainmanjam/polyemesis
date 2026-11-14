@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "Derzeit begrenzt die Speicherobergrenze, nicht das Fenster.",
   "clips.noKeyframeYet": "Es wurde noch kein Keyframe gesehen, ein Clip kann also mit einem Bildfehler beginnen.",
   "clips.roughStart": "unsauberer Anfang",
+  "clips.startNotChecked": "Anfang nicht geprüft",
+  "clips.startNotCheckedBody": "Es gibt keine gespeicherte Messung dazu, wie dieser Clip beginnt oder wie lang er ist.",
   "media.uploadAria": "Mediendatei hochladen",
   "media.dropOrChoose": "Datei hierher ziehen oder {choose}",
   "media.chooseOne": "eine auswählen",

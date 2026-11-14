@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "C'est le plafond mémoire, et non la fenêtre, qui le limite en ce moment.",
   "clips.noKeyframeYet": "Aucune image clé n'a encore été vue, un extrait peut donc commencer par un défaut.",
   "clips.roughStart": "début imparfait",
+  "clips.startNotChecked": "Début non vérifié",
+  "clips.startNotCheckedBody": "Aucune mesure enregistrée n'indique comment cet extrait commence ni combien de temps il dure.",
   "media.uploadAria": "Téléverser un fichier média",
   "media.dropOrChoose": "Déposez un fichier ici ou {choose}",
   "media.chooseOne": "choisissez-en un",

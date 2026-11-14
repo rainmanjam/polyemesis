@@ -2452,6 +2452,8 @@
   "clips.memoryLimits": "現在の制約はウィンドウではなくメモリ上限です。",
   "clips.noKeyframeYet": "まだキーフレームを検出していないため、クリップの冒頭が乱れる可能性があります。",
   "clips.roughStart": "冒頭に乱れ",
+  "clips.startNotChecked": "開始位置は未確認",
+  "clips.startNotCheckedBody": "このクリップの開始位置と長さについて、保存された測定結果はありません。",
   "media.uploadAria": "メディアファイルをアップロード",
   "media.dropOrChoose": "ここにファイルをドロップするか、{choose}",
   "media.chooseOne": "ファイルを選択",

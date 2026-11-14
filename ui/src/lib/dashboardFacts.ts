@@ -168,6 +168,67 @@ export function mergeStatusDestinations(
   return [...kept, ...incoming];
 }
 
+/** One programme's renditions as last reported, and when. */
+export interface HeldRenditions<R> {
+  rows: R[];
+  at: number;
+}
+export type RenditionsBySource<R> = Map<number, HeldRenditions<R>>;
+
+/** How long a programme may stay silent before its renditions are let go. Every
+ *  engine publishes its status every two seconds, so three missed frames means
+ *  the programme is gone, not slow. */
+export const RENDITION_STALE_MS = 6000;
+
+/** The renditions of every programme, held per programme.
+ *
+ * The status socket is install-wide and Engine.Renditions is scoped to the
+ * engine that publishes, so a frame carries only ITS programme's encodes. The
+ * Renditions page lists every programme's renditions, so it reads this fold;
+ * status.renditions stays the frame's own, because the Dashboard's Pipeline card
+ * is about one programme and must not list the others.
+ *
+ * A frame replaces its own programme's rows (an empty list clears them) and
+ * leaves the others'. A programme that has said nothing for RENDITION_STALE_MS
+ * while another one spoke is dropped: a deleted programme's engine stops
+ * publishing, and before this fold the next frame of any engine replaced its
+ * rows within two seconds. A frame that names no programme replaces the lot. */
+export function foldRenditions<R>(
+  held: RenditionsBySource<R>,
+  programme: number | undefined,
+  rows: R[],
+  now: number,
+): RenditionsBySource<R> {
+  if (programme === undefined) return new Map([[0, { rows, at: now }]]);
+  const next: RenditionsBySource<R> = new Map();
+  for (const [id, h] of held) {
+    if (id !== programme && now - h.at <= RENDITION_STALE_MS) next.set(id, h);
+  }
+  next.set(programme, { rows, at: now });
+  return next;
+}
+
+/** Drops the renditions of programmes the server no longer lists. The same map
+ *  back when nothing goes, so an unchanged list costs no render. */
+export function pruneRenditions<R>(
+  held: RenditionsBySource<R>,
+  knownIds: readonly number[],
+): RenditionsBySource<R> {
+  let next: RenditionsBySource<R> | null = null;
+  for (const id of held.keys()) {
+    if (id !== 0 && !knownIds.includes(id)) {
+      next ??= new Map(held);
+      next.delete(id);
+    }
+  }
+  return next ?? held;
+}
+
+/** Every held rendition, in programme order. */
+export function allRenditionRows<R>(held: RenditionsBySource<R>): R[] {
+  return [...held.entries()].sort((a, b) => a[0] - b[0]).flatMap(([, h]) => h.rows);
+}
+
 /** The shape mergeStatusDestinations needs. Deliberately minimal: this fold is
  *  about which programme a row belongs to and nothing else. */
 export interface DestStatusLike {
