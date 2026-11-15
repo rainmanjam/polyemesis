@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "excludes {roles}",
   "route.trackPickAria": "{label} track",
   "route.musicExcluded": "music excluded",
+  "route.musicExclusionIdle": "music exclusion on, nothing to exclude yet",
   "route.musicBeingSent": "music is being sent",
   "route.musicAllowed": "music allowed",
   "route.musicTipExcluded": "Any ingest track marked with the “Music” role is dropped before this destination’s mix is built.",

@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "mengecualikan {roles}",
   "route.trackPickAria": "Trek {label}",
   "route.musicExcluded": "musik dikecualikan",
+  "route.musicExclusionIdle": "pengecualian musik aktif, belum ada yang dikecualikan",
   "route.musicBeingSent": "musik sedang dikirim",
   "route.musicAllowed": "musik diizinkan",
   "route.musicTipExcluded": "Setiap trek ingest yang ditandai dengan peran “Musik” dibuang sebelum mix tujuan ini dibangun.",

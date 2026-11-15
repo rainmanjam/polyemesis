@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "schließt {roles} aus",
   "route.trackPickAria": "Spur: {label}",
   "route.musicExcluded": "Musik ausgeschlossen",
+  "route.musicExclusionIdle": "Musikausschluss an, noch nichts auszuschließen",
   "route.musicBeingSent": "Musik wird gesendet",
   "route.musicAllowed": "Musik erlaubt",
   "route.musicTipExcluded": "Jede Eingangsspur mit der Rolle „Musik“ wird verworfen, bevor der Mix dieses Ziels gebaut wird.",

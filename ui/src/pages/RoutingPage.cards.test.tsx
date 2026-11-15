@@ -3,8 +3,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
-import { DelayCard, DuckingCard, LoudnessCard } from "./RoutingPage";
-import type { Ducking, TrackAnnotation } from "@/lib/types";
+import { DelayCard, DuckingCard, LoudnessCard, MusicRightsCard } from "./RoutingPage";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import type { Ducking, TrackAnnotation, TrackRole } from "@/lib/types";
 
 /* Three controls on the routing editor that told the operator nothing, or the
  * wrong thing, about what they were about to do to a live destination. */
@@ -92,5 +93,44 @@ describe("DuckingCard", () => {
       />,
     );
     expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("MusicRightsCard", () => {
+  // The badge states what is being done, so it must agree with the sentence under it.
+  const card = (excludeRoles: TrackRole[], musicTracks: number[]) =>
+    render(
+      <TooltipProvider>
+        <MusicRightsCard
+          platformName="Twitch"
+          excludeRoles={excludeRoles}
+          musicTracks={musicTracks}
+          onExcludeRoles={noop}
+        />
+      </TooltipProvider>,
+    );
+
+  it("does not say music is excluded while no track is marked as music", () => {
+    // THE BUG (docs/media/02-routing.png): setting on, nothing marked, and the
+    // card showed "music excluded" over "No ingest track is marked as music yet".
+    card(["music"], []);
+    expect(screen.queryByText("music excluded")).toBeNull();
+    expect(screen.getByText("music exclusion on, nothing to exclude yet")).toBeTruthy();
+    expect(screen.getByText(/No ingest track is marked as music yet/)).toBeTruthy();
+  });
+
+  it("says music is excluded once a track is marked as music", () => {
+    card(["music"], [1]);
+    expect(screen.getByText("music excluded")).toBeTruthy();
+    expect(screen.getByText(/is marked as music and is not being sent/)).toBeTruthy();
+  });
+
+  it("says music is allowed when the setting is off, marked track or not", () => {
+    card([], [1]);
+    expect(screen.getByText("music allowed")).toBeTruthy();
+    cleanup();
+    card([], []);
+    expect(screen.getByText("music allowed")).toBeTruthy();
+    expect(screen.queryByText("music excluded")).toBeNull();
   });
 });

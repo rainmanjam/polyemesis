@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "제외: {roles}",
   "route.trackPickAria": "{label} 트랙",
   "route.musicExcluded": "음악 제외됨",
+  "route.musicExclusionIdle": "음악 제외 켜짐, 아직 제외할 항목 없음",
   "route.musicBeingSent": "음악 송출 중",
   "route.musicAllowed": "음악 허용",
   "route.musicTipExcluded": "“음악” 역할이 지정된 입력 트랙은 이 대상의 믹스를 만들기 전에 제외됩니다.",

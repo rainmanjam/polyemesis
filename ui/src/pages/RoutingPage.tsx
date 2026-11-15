@@ -2001,7 +2001,7 @@ function TrackPick({
    a platform that will mute the VOD has to say so where the decision is made.
    ========================================================================== */
 
-function MusicRightsCard({
+export function MusicRightsCard({
   platformName,
   decision,
   excludeRoles,
@@ -2024,11 +2024,18 @@ function MusicRightsCard({
   let statusBadge: ReactNode;
   let statusTip: ReactNode;
   if (excluded) {
-    statusBadge = (
-      <Badge variant="live">
-        <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
-      </Badge>
-    );
+    // The badge states what is being done. With no track marked as music the
+    // setting is on but nothing is dropped, so it must not claim an exclusion.
+    statusBadge =
+      musicTracks.length > 0 ? (
+        <Badge variant="live">
+          <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
+        </Badge>
+      ) : (
+        <Badge variant="outline">
+          <Music className="h-2.5 w-2.5" /> {t("route.musicExclusionIdle")}
+        </Badge>
+      );
     statusTip = (
       <>
         {t("route.musicTipExcluded")}{" "}

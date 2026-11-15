@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "hariç: {roles}",
   "route.trackPickAria": "{label} parçası",
   "route.musicExcluded": "müzik hariç",
+  "route.musicExclusionIdle": "müzik hariç tutma açık, henüz hariç tutulacak bir şey yok",
   "route.musicBeingSent": "müzik gönderiliyor",
   "route.musicAllowed": "müzik serbest",
   "route.musicTipExcluded": "“Müzik” rolüyle işaretlenen her giriş parçası, bu hedefin miksi oluşturulmadan önce çıkarılır.",

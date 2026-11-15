@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "excluye {roles}",
   "route.trackPickAria": "Pista: {label}",
   "route.musicExcluded": "música excluida",
+  "route.musicExclusionIdle": "exclusión de música activa, nada que excluir aún",
   "route.musicBeingSent": "se está enviando música",
   "route.musicAllowed": "música permitida",
   "route.musicTipExcluded": "Cualquier pista de entrada marcada con el rol «Música» se descarta antes de construir la mezcla de este destino.",

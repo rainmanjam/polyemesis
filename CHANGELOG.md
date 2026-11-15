@@ -34,6 +34,11 @@ its first tagged release.
   copies, and the delay buffer's disk guard. On such a mount with less free than a floor, recording now stops and
   uploads, normalised copies or delay spills are refused, where before they went ahead until the volume really filled.
   Volumes where the two block sizes match (ext4, xfs, btrfs and most others), macOS and Windows read exactly as before.
+- **Routing: "music excluded" shown while no track was marked as music.** A destination set to keep music out showed the
+  badge "music excluded" even when no ingest track was marked as music, directly above the line "No ingest track is
+  marked as music yet", so the badge claimed an exclusion that was not happening. The badge now reads "music exclusion
+  on, nothing to exclude yet" until a track is marked as music, and "music excluded" only once one is. The setting,
+  the mix and everything else on the card are unchanged.
 
 ## [0.18.0] — 2026-11-11
 

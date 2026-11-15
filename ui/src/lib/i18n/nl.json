@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "sluit {roles} uit",
   "route.trackPickAria": "{label}-track",
   "route.musicExcluded": "muziek uitgesloten",
+  "route.musicExclusionIdle": "muziekuitsluiting aan, nog niets om uit te sluiten",
   "route.musicBeingSent": "muziek wordt verzonden",
   "route.musicAllowed": "muziek toegestaan",
   "route.musicTipExcluded": "Elke ingesttrack met de rol “Muziek” wordt weggelaten voordat de mix van deze bestemming wordt gebouwd.",

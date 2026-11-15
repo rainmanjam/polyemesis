@@ -2834,6 +2834,7 @@
   "route.badgeExcludes": "исключает: {roles}",
   "route.trackPickAria": "Дорожка: {label}",
   "route.musicExcluded": "музыка исключена",
+  "route.musicExclusionIdle": "исключение музыки включено, исключать пока нечего",
   "route.musicBeingSent": "музыка отправляется",
   "route.musicAllowed": "музыка разрешена",
   "route.musicTipExcluded": "Любая входная дорожка с ролью «Музыка» отбрасывается до того, как собирается микс этого назначения.",
