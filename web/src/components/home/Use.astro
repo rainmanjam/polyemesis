@@ -9,12 +9,13 @@
  * bonded-encoder recipe is docs/SRTLA.md. The Stream Deck blurb is the opening
  * of docs/STREAM-DECK.md.
  *
- * Each recipe links to the nearest page that exists today. Plan 4 adds a page
- * per recipe, and those links move there (listed in the task report), not
- * before: the build fails a link to a page that does not exist. */
+ * Each recipe's "Read the full recipe" link comes from data/recipes.mjs (the
+ * page route), never a typed path; its four step titles here are the same as
+ * that page's. The other links go to the nearest doc. */
 import { PUBLISHED } from "../../data/docs.mjs";
+import { RECIPES } from "../../data/recipes.mjs";
 
-const RECIPES = [
+const GUIDES = [
   {
     tag: "Audio routing · OBS",
     title: "Two languages, one broadcast",
@@ -37,7 +38,7 @@ const RECIPES = [
     steps: [
       ["Run polyemesis and make your admin.", "The Install section above is all of it."],
       ["Point OBS at it.", "Settings, Output, Advanced, Recording: Custom Output (FFmpeg), Output to URL, container mpegts. Press Start Recording."],
-      ["Connect each platform.", "Register an app, paste its credentials into Settings, Platform credentials, then press Connect account. This works for X, Twitch, Kick, YouTube and Facebook."],
+      ["Connect each platform.", "Register an app, paste its credentials into Settings, Platform credentials, then press Connect account. This works for X, Twitch, Kick and YouTube; Facebook is still being verified."],
       ["Add a destination per platform.", "On Destinations, press Add, pick the connected account and enable it."],
     ],
     links: [
@@ -96,7 +97,7 @@ import Fold from "./Fold.astro";
 
     <div class="use-recipes">
       {
-        RECIPES.map((r, i) => (
+        GUIDES.map((r, i) => (
           <article class="use-rec" aria-labelledby={`h-use-${i + 1}`}>
             <p class="use-tag">{r.tag}</p>
             <h3 id={`h-use-${i + 1}`}>{r.title}</h3>
@@ -113,6 +114,7 @@ import Fold from "./Fold.astro";
               </ol>
             </Fold>
             <p class="use-links">
+              <a class="more" href={RECIPES[i].route}>Read the full recipe</a>
               {r.links.map(([href, text]) => (
                 <a class="more" href={href}>{text}</a>
               ))}

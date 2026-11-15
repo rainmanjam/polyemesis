@@ -1,0 +1,67 @@
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+import { RECIPES } from "../data/recipes.mjs";
+
+const here = (rel: string) => fileURLToPath(new URL(rel, import.meta.url));
+const read = (rel: string) => readFileSync(here(rel), "utf8");
+const layout = read("../layouts/RecipePage.astro");
+
+describe("RecipePage.astro", () => {
+  it("is built from the shared parts", () => {
+    for (const name of ["InnerPage", "Steps", "FactList", "DocLinks", "howToLd"]) {
+      expect(layout, name).toMatch(new RegExp(`import[^;]*\\b${name}\\b`));
+    }
+    expect(layout).toMatch(/\blightbox\b/);
+  });
+
+  it("emits the HowTo from the recipe, as JSON-LD", () => {
+    expect(layout).toContain("application/ld+json");
+    expect(layout).toContain("howToLd(recipe)");
+  });
+
+  it("has its sections in order", () => {
+    const ids = [...layout.matchAll(/<section id="([a-z]+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(["needs", "steps", "check", "more"]);
+  });
+
+  it("has no page-level style", () => {
+    expect(layout).not.toContain("<style");
+  });
+
+  it("links the multistream guide on the platforms recipe only", () => {
+    expect(layout).toMatch(/recipe\.slug === "obs-to-five-platforms" && \([\s\S]*\/how-to-multistream-from-obs/);
+    expect(layout.match(/how-to-multistream-from-obs/g)).toHaveLength(1);
+  });
+
+  it("shows a breadcrumb label of its own: the brand in its own case, and no trailing period", () => {
+    expect(layout).toContain("recipe.crumbLabel");
+    expect(layout).not.toMatch(/recipe\.heading\.toLowerCase\(\)/);
+    for (const r of RECIPES as { slug: string; heading: string; crumbLabel: string }[]) {
+      expect(r.crumbLabel, r.slug).not.toMatch(/\.$/);
+      expect(r.crumbLabel.toLowerCase(), r.slug).toBe(r.heading.replace(/\.$/, "").toLowerCase());
+    }
+    expect((RECIPES as { crumbLabel: string }[])[1].crumbLabel).toBe("OBS to five platforms");
+  });
+
+  it("uses the same step ids as the HowTo urls (#step-n)", () => {
+    expect(read("../components/inner/Steps.astro")).toContain('idPrefix = "step"');
+    expect(read("./howto.ts".replace("./", "../lib/"))).toContain("#step-${i + 1}");
+    expect(layout).not.toContain("idPrefix");
+  });
+});
+
+describe("the three recipe pages", () => {
+  for (const r of RECIPES as { slug: string }[]) {
+    it(`${r.slug} only hands its recipe to the layout`, () => {
+      expect(existsSync(here(`../pages/recipes/${r.slug}.astro`))).toBe(true);
+      const src = read(`../pages/recipes/${r.slug}.astro`);
+      expect(src).toContain("RECIPES.");
+      const body = src.split(/^---$/m)[2] ?? "";
+      expect(body.trim()).toMatch(/^<RecipePage recipe=\{[^\n]*\}\s*\/>$/);
+      expect(body).toContain(`"${r.slug}"`);
+    });
+  }
+});

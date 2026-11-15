@@ -1,0 +1,77 @@
+---
+/* One recipe page (/recipes/...): what it needs, the four steps, how to check
+ * it worked and the docs worth reading next. Every sentence comes from
+ * data/recipes.mjs (a Fact tied to its doc). Rules: styles/new-pages.css. */
+import InnerPage from "./InnerPage.astro";
+import Steps from "../components/inner/Steps.astro";
+import FactList from "../components/inner/FactList.astro";
+import DocLinks from "../components/inner/DocLinks.astro";
+import { howToLd, type Recipe } from "../lib/howto";
+
+interface Props {
+  recipe: Recipe;
+}
+
+const { recipe } = Astro.props;
+const index = [
+  { id: "needs", label: "What you need" },
+  { id: "steps", label: "The steps" },
+  { id: "check", label: "Check it worked" },
+  { id: "more", label: "Go deeper" },
+];
+---
+
+<InnerPage
+  title={recipe.title}
+  description={recipe.description}
+  path={recipe.route}
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: recipe.crumbLabel }]}
+  heading={recipe.heading}
+  accent={recipe.accent}
+  lede={recipe.lede}
+  index={index}
+  lightbox
+  band={{
+    heading: "Start from a working install.",
+    accent: "working",
+    lede: "Run it on a server you control. Your keys and settings stay on it.",
+    command: true,
+  }}
+>
+  <Fragment slot="meta">Recipe · {recipe.tag}</Fragment>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="/docs/quickstart">Read the quickstart</a>
+
+  <section id="needs">
+    <h2>What you need</h2>
+    <FactList facts={recipe.needs} />
+  </section>
+
+  <section id="steps">
+    <h2>The steps</h2>
+    <Steps steps={recipe.steps} />
+    {/* HowTo, describing the four steps above and nothing else. Every step text
+        is the visible step's facts joined (howToLd), so the markup cannot
+        describe a page that no longer exists. No totalTime: the page promises
+        no time. */}
+    <script type="application/ld+json" is:inline set:html={JSON.stringify(howToLd(recipe))} />
+  </section>
+
+  <section id="check">
+    <h2>Check it worked</h2>
+    <FactList facts={recipe.check} installRow={false} />
+  </section>
+
+  <section id="more">
+    <h2>Go deeper</h2>
+    <DocLinks slugs={recipe.docs} />
+    {recipe.slug === "obs-to-five-platforms" && (
+      <ul class="rows">
+        <li>
+          <a href="/how-to-multistream-from-obs">How to multistream from OBS</a>
+          <p>The SRT multitrack setup, step by step.</p>
+        </li>
+      </ul>
+    )}
+  </section>
+</InnerPage>

@@ -21,14 +21,36 @@ export function parseLatestRelease(changelog: string): Release | null {
   return match ? { version: match[1], date: match[2] } : null;
 }
 
+/* The release a given version's heading names, or null if the changelog has no
+ * such heading. Used where a page states the date of a release it names. */
+export function releaseOf(changelog: string, version: string): Release | null {
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^## \\[(${escaped})\\]\\s+[—-]\\s+(\\d{4}-\\d{2}-\\d{2})\\s*$`, "m").exec(changelog);
+  return match ? { version: match[1], date: match[2] } : null;
+}
+
 /* The build runs with web/ as its working directory, so the changelog is one
- * level up. Returns null if it cannot be read. */
+ * level up. */
+function readChangelog(): string {
+  return readFileSync(resolve(process.cwd(), "..", "CHANGELOG.md"), "utf8");
+}
+
+/* Returns null if the changelog cannot be read. */
 export function latestRelease(): Release | null {
   try {
-    return parseLatestRelease(readFileSync(resolve(process.cwd(), "..", "CHANGELOG.md"), "utf8"));
+    return parseLatestRelease(readChangelog());
   } catch {
     return null;
   }
+}
+
+/* The release a page says something was filmed on. It throws when the changelog
+ * cannot be read or has no such heading, so a page can never state a date it
+ * did not read. */
+export function filmedRelease(version: string): Release {
+  const release = releaseOf(readChangelog(), version);
+  if (!release) throw new Error(`release.ts: CHANGELOG.md has no release heading for ${version}.`);
+  return release;
 }
 
 /* `v0.18.0, released 2026-11-11`: how a page states maturity, factually. */

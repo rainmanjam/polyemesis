@@ -64,37 +64,56 @@ function plainText(raw: string): string {
  *  cover them. A build check that the list equals the article's headings is
  *  what catches a document that starts using one. */
 export function extractHeadings(markdown: string): DocHeading[] {
-  const slug = uniqueSlugger();
-  const headings: DocHeading[] = [];
-  let fence: string | null = null;
-  let inHtmlBlock = false;
+  return extractHeadingsAt(markdown).map(({ depth, text, slug }) => ({ depth, text, slug }));
+}
 
-  for (const line of markdown.split(/\r?\n/)) {
-    if (inHtmlBlock) {
-      // An HTML block runs to the next blank line; markdown inside it is text.
-      inHtmlBlock = line.trim() !== "";
-      continue;
-    }
-    const open = FENCE_OPEN.exec(line);
-    if (fence) {
-      // A fence closes on the same marker, at least as long, with nothing after.
-      if (open && open[1][0] === fence[0] && open[1].length >= fence.length && line.trim() === open[1]) {
-        fence = null;
-      }
-      continue;
-    }
-    if (open) {
-      fence = open[1];
-      continue;
-    }
-    if (HTML_BLOCK_OPEN.test(line)) {
-      inHtmlBlock = true;
-      continue;
-    }
+/** Where the scan is: inside a fenced block (the opening run of ` or ~), or inside an HTML block. */
+interface Scan {
+  fence: string | null;
+  inHtmlBlock: boolean;
+}
+
+/** A fence closes on the same marker, at least as long, with nothing after. */
+function closesFence(open: RegExpExecArray | null, fence: string, line: string): boolean {
+  return open !== null && open[1][0] === fence[0] && open[1].length >= fence.length && line.trim() === open[1];
+}
+
+/** True when the line belongs to a fence or an HTML block (or opens or closes one), so it cannot be a heading.
+ *  Moves the scan on. */
+function skipsLine(st: Scan, line: string): boolean {
+  if (st.inHtmlBlock) {
+    // An HTML block runs to the next blank line; markdown inside it is text.
+    st.inHtmlBlock = line.trim() !== "";
+    return true;
+  }
+  const open = FENCE_OPEN.exec(line);
+  if (st.fence) {
+    if (closesFence(open, st.fence, line)) st.fence = null;
+    return true;
+  }
+  if (open) {
+    st.fence = open[1];
+    return true;
+  }
+  if (HTML_BLOCK_OPEN.test(line)) {
+    st.inHtmlBlock = true;
+    return true;
+  }
+  return false;
+}
+
+/** The same headings with the 0-based index of the line each one is on. */
+export function extractHeadingsAt(markdown: string): (DocHeading & { line: number })[] {
+  const slug = uniqueSlugger();
+  const headings: (DocHeading & { line: number })[] = [];
+  const st: Scan = { fence: null, inHtmlBlock: false };
+
+  for (const [lineNo, line] of markdown.split(/\r?\n/).entries()) {
+    if (skipsLine(st, line)) continue;
     const match = HEADING.exec(line);
     if (!match) continue;
     const text = plainText(match[2]);
-    headings.push({ depth: match[1].length === 2 ? 2 : 3, text, slug: slug(text) });
+    headings.push({ depth: match[1].length === 2 ? 2 : 3, text, slug: slug(text), line: lineNo });
   }
   return headings;
 }

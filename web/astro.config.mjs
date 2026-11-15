@@ -49,6 +49,13 @@ export const pageSource = {
   "/vs/streamlabs": "src/data/vs/streamlabs.mjs",
   "/multistream": "src/pages/multistream.astro",
   "/twitch-vod-track": "src/pages/twitch-vod-track.astro",
+  "/for/sports-clubs": "src/data/audiences.mjs",
+  "/for/churches-and-events": "src/data/audiences.mjs",
+  "/for/streamers": "src/data/audiences.mjs",
+  "/recipes/two-languages-one-broadcast": "src/data/recipes.mjs",
+  "/recipes/obs-to-five-platforms": "src/data/recipes.mjs",
+  "/recipes/streaming-from-a-backpack": "src/data/recipes.mjs",
+  "/tour": "src/data/tour-page.mjs",
   ...Object.fromEntries(PUBLISHED.map((d) => [`/docs/${d.slug}`, `../docs/${d.file}`])),
 };
 

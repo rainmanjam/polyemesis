@@ -1,0 +1,6 @@
+---
+import RecipePage from "../../layouts/RecipePage.astro";
+import { RECIPES } from "../../data/recipes.mjs";
+---
+
+<RecipePage recipe={RECIPES.find((r) => r.slug === "obs-to-five-platforms")!} />

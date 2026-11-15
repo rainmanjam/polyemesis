@@ -1,0 +1,85 @@
+---
+/* One audience page (/for/...): the routing diagram, what it needs, the setup
+ * as steps, the docs worth reading and where to go next. Every sentence comes
+ * from data/audiences.mjs (a Fact tied to its doc); {tracks}, {dests} and
+ * {trackCount} are filled from the case here. Rules: styles/new-pages.css. */
+import InnerPage from "./InnerPage.astro";
+import RoutingDiagram from "../components/RoutingDiagram.astro";
+import Steps from "../components/inner/Steps.astro";
+import FactList from "../components/inner/FactList.astro";
+import DocLinks from "../components/inner/DocLinks.astro";
+import { AUDIENCES } from "../data/audiences.mjs";
+import { CASES } from "../data/cases.mjs";
+import { fillCase } from "../lib/facts";
+import { destinationNotes, relatedRecipes } from "../lib/audience-next";
+
+type Audience = (typeof AUDIENCES)[keyof typeof AUDIENCES];
+interface Props {
+  audience: Audience;
+}
+
+const { audience: a } = Astro.props;
+const c = CASES[a.key];
+const fill = (t: string) => fillCase(t, c);
+const needs = a.needs.map((f) => ({ ...f, text: fill(f.text) }));
+const steps = a.steps.map((s) => ({ ...s, title: fill(s.title), facts: s.facts.map((f) => ({ ...f, text: fill(f.text) })) }));
+
+// Sports and worship list what each destination hears under the destinations step.
+const notes = a.mixesAfterStep ? { [a.mixesAfterStep]: destinationNotes(c) } : {};
+
+const others = Object.values(AUDIENCES).filter((o) => o.key !== a.key);
+const index = [
+  { id: "diagram", label: "The routing" },
+  { id: "need", label: "What you need" },
+  { id: "setup", label: "Set it up" },
+  { id: "features", label: "Worth knowing" },
+  { id: "next", label: "Next" },
+];
+---
+
+<InnerPage
+  title={a.title}
+  description={a.description}
+  path={a.route}
+  crumbs={[{ label: "polyemesis", href: "/" }, { label: a.crumbLabel }]}
+  heading={a.heading}
+  accent={a.accent}
+  lede={a.lede}
+  index={index}
+  lightbox
+  band={{ ...a.band, command: true, secondary: { label: "Read the quickstart", href: "/docs/quickstart" } }}
+>
+  <a slot="actions" class="btn btn-primary" href="/download">Install polyemesis</a>
+  <a slot="actions" class="btn btn-ghost" href="/#matrix">Try the routing matrix</a>
+
+  <section id="diagram">
+    <h2>Where each track goes</h2>
+    <RoutingDiagram caseKey={a.key} />
+    <p class="fine" data-fine>{c.fine}</p>
+  </section>
+
+  <section id="need">
+    <h2>What you need</h2>
+    <FactList facts={needs} />
+  </section>
+
+  <section id="setup">
+    <h2>Set it up</h2>
+    <Steps steps={steps} notes={notes} />
+  </section>
+
+  <section id="features">
+    <h2>Worth knowing</h2>
+    <DocLinks slugs={a.features} />
+  </section>
+
+  <section id="next">
+    <h2>Next</h2>
+    <ul class="rows">
+      {relatedRecipes(a.related).map((r) => <li><a href={r.href}>{r.title}</a></li>)}
+      {others.map((o) => <li><a href={o.route}>{o.crumbLabel.charAt(0).toUpperCase() + o.crumbLabel.slice(1)}</a></li>)}
+      <li><a href="/docs/quickstart">The quickstart</a></li>
+      <li><a href="/calculator">The bandwidth calculator</a></li>
+    </ul>
+  </section>
+</InnerPage>

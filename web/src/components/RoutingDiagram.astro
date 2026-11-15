@@ -1,0 +1,67 @@
+---
+/* The one routing diagram, used by the homepage and the audience pages.
+ *
+ * Every name comes from cases.mjs through lib/routing-diagram.ts; this file is
+ * markup. The drawing is decorative (aria-hidden) and is shown only where its
+ * container is 640px or wider; the list carries the same routing for everyone,
+ * and stays in the page for assistive technology when the drawing shows. The
+ * rules are in styles/new-pages.css. No script; nothing moves. */
+import { CASES } from "../data/cases.mjs";
+import { DIAGRAM_FONT, DIAGRAM_WIDTH, diagramModel, diagramShapes } from "../lib/routing-diagram";
+
+interface Props {
+  caseKey: "sports" | "worship" | "streamer";
+}
+
+const model = diagramModel(CASES[Astro.props.caseKey]);
+const g = diagramShapes(model);
+---
+
+<figure class="diag">
+  <svg
+    class="diag-svg"
+    aria-hidden="true"
+    focusable="false"
+    font-size={DIAGRAM_FONT}
+    viewBox={`0 0 ${DIAGRAM_WIDTH} ${g.height}`}
+  >
+    {g.videoPaths.map((d) => <path class="l-vid" d={d} />)}
+    <text class="t-vid" x={g.videoLabel.x} y={g.videoLabel.y}>video</text>
+    {g.sourcePaths.map((d) => <path class="l-src" d={d} />)}
+    {g.audioPaths.map((d) => <path class="l-aud" d={d} />)}
+
+    <rect class="bx" x={g.source.x} y={g.source.y} width={g.source.w} height={g.source.h} />
+    <text class="t-name" x={g.sourceName.x} y={g.sourceName.y}>{CASES[Astro.props.caseKey].source.label}</text>
+    <text class="t-sub" x={g.sourceCity.x} y={g.sourceCity.y}>{CASES[Astro.props.caseKey].source.city}</text>
+    {
+      g.tracks.map((b, i) => (
+        <>
+          <rect class="bx bx-aud" x={b.x} y={b.y} width={b.w} height={b.h} />
+          <text class="t-trk" x={g.trackText[i].x} y={g.trackText[i].y}>{model.tracks[i].label}</text>
+        </>
+      ))
+    }
+    {
+      g.dests.map((b, i) => (
+        <>
+          <rect class="bx" x={b.x} y={b.y} width={b.w} height={b.h} />
+          <text class="t-name" x={g.destText[i].x} y={g.destText[i].y}>{model.dests[i].name}</text>
+        </>
+      ))
+    }
+  </svg>
+
+  <ol class="diag-list" role="list" aria-label={`Routing, ${model.source}`}>
+    {
+      model.dests.map((d) => (
+        <li>
+          <b>{d.name}</b>
+          <span class="diag-vh">, </span>
+          <span class="diag-city">{d.city}</span>
+          <span class="diag-vh">: </span>
+          <span class="diag-mix">{d.mix}</span>
+        </li>
+      ))
+    }
+  </ol>
+</figure>

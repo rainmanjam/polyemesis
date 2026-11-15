@@ -21,6 +21,7 @@
  * The labels come from the sports case in cases.mjs, the same example the hero
  * shows first. Names in diagrams are illustrative. */
 import { CASES } from "../../data/cases.mjs";
+import { TOUR_ROUTE } from "../../data/tour-page.mjs";
 import Tour from "./Tour.astro";
 
 /* cases.mjs's typedefs do not resolve for importers, so the two shapes read
@@ -197,6 +198,9 @@ const GRID_BOTTOM = ROW_Y(dests.length - 1) + 18;
     </div>
   </div>
   <Tour />
+  <div class="wrap tour-more">
+    <a class="more" href={TOUR_ROUTE}>Chapters, and the docs behind each</a>
+  </div>
 </section>
 
 <style>
@@ -269,6 +273,9 @@ const GRID_BOTTOM = ROW_Y(dests.length - 1) + 18;
   }
   .step .more {
     margin: 16px 0 0 var(--step-indent);
+  }
+  .tour-more {
+    margin-top: 20px;
   }
 
   /* The diagram under each step (phones, and without JS). */

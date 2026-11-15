@@ -58,6 +58,7 @@
       "site": true,
       "usedBy": [
         "web/src/components/home/FeatureTour.astro",
+        "web/src/data/audiences.mjs",
         "web/src/pages/download.astro"
       ],
       "exception": null,
@@ -226,7 +227,9 @@
       "site": true,
       "usedBy": [
         "web/src/components/home/Why.astro",
-        "web/src/data/install-page.mjs"
+        "web/src/data/audiences.mjs",
+        "web/src/data/install-page.mjs",
+        "web/src/data/setup-facts.mjs"
       ],
       "exception": null,
       "allowFailedWords": []

@@ -1,0 +1,30 @@
+---
+/* A list of facts, each with the doc it comes from, and (by default) a last row
+ * that sends the reader to the install page. Rules: styles/new-pages.css. */
+import { BY_SLUG } from "../../data/docs.mjs";
+import { docHref, type Fact } from "../../lib/facts";
+
+interface Props {
+  facts: Fact[];
+  installRow?: boolean;
+}
+
+const { facts, installRow = true } = Astro.props;
+---
+
+<ul class="rows">
+  {
+    facts.map((f) => (
+      <li class="fact">
+        <span>{f.text}</span> <a class="docrow" href={docHref(f)}>{BY_SLUG.get(f.doc)?.title ?? f.doc}</a>
+      </li>
+    ))
+  }
+  {
+    installRow && (
+      <li class="fact">
+        <span>polyemesis installed and running</span> <a class="docrow" href="/download">Install polyemesis</a>
+      </li>
+    )
+  }
+</ul>

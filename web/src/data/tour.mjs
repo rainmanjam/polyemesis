@@ -26,11 +26,12 @@ export function clock(seconds) {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-/** Seconds as an ISO 8601 duration for <time datetime>, rounded down: 22.2 -> "PT22S", 65 -> "PT1M5S".
+/** Seconds as an ISO 8601 duration for <time datetime>, rounded down: 22.2 -> "PT22S", 65 -> "PT1M5S", 3600 -> "PT1H".
  * @param {number} seconds */
 export function isoDuration(seconds) {
   const whole = Math.floor(seconds);
-  const m = Math.floor(whole / 60);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
   const sec = whole % 60;
-  return `PT${m ? `${m}M` : ""}${sec || !m ? `${sec}S` : ""}`;
+  return `PT${h ? `${h}H` : ""}${m ? `${m}M` : ""}${sec || (!h && !m) ? `${sec}S` : ""}`;
 }

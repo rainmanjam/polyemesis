@@ -13,9 +13,16 @@
  * tour.ts marks the block .is-live and enables the buttons: without it they are
  * rendered disabled, so nothing looks or tabs like a control that does nothing. */
 import { TOUR, clock, isoDuration } from "../../data/tour.mjs";
+
+interface Props {
+  /** The homepage section carries its own page-width wrap. A page that already
+   * sits in a column (/tour) passes false so the padding is not applied twice. */
+  wrap?: boolean;
+}
+const { wrap = true } = Astro.props;
 ---
 
-<div class="wrap tour" data-tour>
+<div class={wrap ? "wrap tour" : "tour"} data-tour>
   <div class="tour-grid">
     <div>
       <div class="frame">

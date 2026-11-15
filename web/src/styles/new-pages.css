@@ -1,0 +1,224 @@
+/* Parts shared by the new pages (audiences, recipes, tour) and by the homepage's
+ * audiences block: the routing diagram.
+ *
+ * THIS FILE LOADS ON EVERY PAGE (global.css imports it). The `.diag*` rules are
+ * used on the homepage on purpose. Every other rule is scoped under
+ * `.inner-main`, so a class name the homepage also uses cannot be restyled
+ * from here; lib/inner-css-isolation.test.ts enforces both. */
+
+/* ---- The routing diagram (RoutingDiagram.astro) ---------------------------
+ * The figure is the container: the drawing is shown only where the room for
+ * it is 640px or more, so its text (13px in a 600-wide viewBox) never scales
+ * under 12px. Below that the same routing is a plain list. */
+.diag {
+  margin: 0;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: diag;
+}
+
+.diag-svg {
+  display: none;
+}
+.diag-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 14px 10px;
+}
+.diag-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+.diag-list li:last-child {
+  border-bottom: 0;
+}
+.diag-list b {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--color-fg);
+}
+.diag-city {
+  font-size: 0.8125rem;
+  color: var(--color-muted);
+}
+.diag-mix {
+  grid-column: 1 / -1;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--color-accent);
+}
+
+/* Wide enough: the drawing replaces the list. The list stays in the page for
+   assistive technology (the drawing is aria-hidden), visually hidden. */
+@container (min-width: 640px) {
+  .diag-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    padding: 8px 14px 14px;
+  }
+  .diag-list {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Separators for assistive technology only (the grid already separates the
+   parts on screen). */
+.diag-vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The text size is the font-size attribute on the svg (DIAGRAM_FONT), not a rule here. */
+.diag-svg text {
+  font-family: var(--font-sans);
+}
+.diag-svg .t-name {
+  font-weight: 600;
+  fill: var(--color-fg);
+}
+.diag-svg .t-sub,
+.diag-svg .t-vid {
+  fill: var(--color-muted);
+}
+.diag-svg .t-trk {
+  fill: var(--color-fg);
+}
+.diag-svg .bx {
+  fill: var(--color-ink);
+  stroke: var(--color-line-strong);
+}
+.diag-svg .bx-aud {
+  stroke: var(--color-accent);
+}
+.diag-svg .l-vid {
+  fill: none;
+  stroke: var(--color-fg);
+  stroke-width: 1.4;
+  opacity: 0.75;
+}
+.diag-svg .l-aud {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1.4;
+  opacity: 0.85;
+}
+.diag-svg .l-src {
+  fill: none;
+  stroke: var(--color-line-strong);
+  stroke-width: 1;
+}
+
+/* ---- Steps, facts, doc links, fine print, chapters ------------------------
+ * Everything below sits under .inner-main: this file loads on every page. */
+.inner-main .steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+}
+.inner-main .step {
+  margin: 0;
+  padding: 0 0 36px 28px;
+  border-left: 1px solid var(--color-line);
+  counter-increment: step;
+}
+.inner-main .step:last-child {
+  padding-bottom: 0;
+}
+.inner-main .step::before {
+  content: counter(step);
+  display: block;
+  margin-bottom: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--color-muted);
+}
+.inner-main .step h3 {
+  margin: 0 0 10px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.inner-main .fact {
+  margin: 0 0 8px;
+  max-width: 62ch;
+  color: var(--color-fg);
+}
+.inner-main .docrow {
+  margin: 0 0 14px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+.inner-main p.docrow a + a {
+  margin-left: 14px;
+}
+.inner-main .step .shot,
+.inner-main .step figure {
+  margin-top: 14px;
+}
+.inner-main .fine {
+  max-width: 60ch;
+  /* The audience pages put it last in a section, against the next heading. The
+     space below matches the one between two steps (54 to 68px measured). */
+  margin: 12px 0 3.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+.inner-main .chapter {
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line);
+}
+.inner-main .chapter > .when {
+  display: block;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+.inner-main .step .mixes {
+  list-style: none;
+  margin: 4px 0 14px;
+  padding: 0;
+  max-width: 62ch;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-muted);
+}
+
+/* The tour page: the player block sits in the page column, so the chapter list
+ * stacks under the video at every width (the homepage's side-by-side layout
+ * needs the full page width). */
+.inner-main .tour {
+  margin-top: 20px;
+}
+.inner-main .tour .tour-grid {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+.inner-main .tour + .fact {
+  margin-top: 24px;
+}
