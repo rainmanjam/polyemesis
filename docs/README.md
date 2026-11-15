@@ -25,7 +25,7 @@ deliberately does not do, and how to get it running. These are the details.
 | [RENDITIONS.md](RENDITIONS.md) | Shared video encodes, ref counting, presets and hardware encoders |
 | [PLATFORMS.md](PLATFORMS.md) | What each platform's published API allows, and the OAuth app setup for the four that sign in |
 | [CONNECTING-PLATFORMS.md](CONNECTING-PLATFORMS.md) | From an installed server to streaming and chat on X, Twitch, Kick, YouTube and Facebook, including where a chat message goes |
-| [SRTLA.md](SRTLA.md) | Bonded IRL encoders (BELABOX, Moblin, IRL Pro) over several links, and stopping the destinations if the backpack goes quiet |
+| [SRTLA.md](SRTLA.md) | Bonded IRL encoders that send SRTLA over several links (tested against BELABOX's reference sender), and stopping the destinations if the backpack goes quiet |
 | [POLLS.md](POLLS.md) | One chat poll asked in every live chat and counted as one result |
 | [SCHEDULED-BROADCAST.md](SCHEDULED-BROADCAST.md) | Going live from a file, on a schedule, with no encoder attached |
 | [MONITORING.md](MONITORING.md) | Prometheus metrics, alerts, and automation with API tokens |

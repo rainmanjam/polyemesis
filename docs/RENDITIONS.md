@@ -99,9 +99,9 @@ URL and key fields and above the encode options. It has two choices:
 - **Copy the source video** is passthrough. It is the first choice, marked
   *recommended*, and it is what a new destination starts on.
 - **Use a shared video encode** is a rendition. Choose it, then pick the
-  rendition from the list that opens under it. The choice is disabled while
-  there are no renditions, and says to create one on the **Renditions** page
-  first.
+  rendition from the list that opens under it. When the renditions have been read
+  and none exists yet, the choice is disabled and says to create one on the
+  **Renditions** page first.
 
 Saving the form stores the choice. Choosing **Copy the source video** again
 puts the destination back on passthrough.

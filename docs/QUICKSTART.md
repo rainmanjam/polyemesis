@@ -83,8 +83,8 @@ SRT publish URL and its publish token straight away, and the server accepts an
 SRT publish for it before you press **Apply**. Check the **protocol** on the
 card. If your encoder can only send RTMP, which carries a single audio track,
 pick **RTMP** and press **Apply**. The URL changes with the protocol.
-**Apply** appears once you change the protocol, and applying restarts that
-source's ingest.
+**Apply** appears once you change any of the source's ingest settings, not only
+the protocol, and applying restarts that source's ingest.
 
 Until you do this, the dashboard says "no programme yet" rather than showing an
 empty pipeline, and anything that acts on a programme — starting a destination,

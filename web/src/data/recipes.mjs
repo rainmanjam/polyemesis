@@ -163,6 +163,7 @@ export const RECIPES = [
         doc: "srtla",
         evidence: ["BELABOX, Moblin and IRL Pro all bond this way"],
       },
+      SETUP.ADD_SOURCE,
       {
         text: "A source on the Sources page whose protocol is SRT: the bonded stream is handed to the SRT listener, which admits a publish only for a source set to SRT.",
         doc: "srtla",

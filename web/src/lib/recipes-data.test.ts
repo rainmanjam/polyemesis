@@ -191,6 +191,13 @@ describe("recipe data", () => {
       expect(f!.evidence).toContain("admits a publish only for a source set to SRT");
     });
 
+    it("tells the backpack reader to add a source, before the step that points the encoder at its token", () => {
+      const r = by("streaming-from-a-backpack");
+      expect(r.needs, "a fresh install has no source").toContain(SETUP.ADD_SOURCE);
+      const tokenStep = r.steps.findIndex((s: { facts: Fact[] }) => s.facts.some((f) => /publish token/.test(f.text)));
+      expect(tokenStep, "the step that uses the token").toBeGreaterThan(-1);
+    });
+
     it("checks the languages recipe by its own tracks, not by a music track and a clean track", () => {
       const check = by("two-languages-one-broadcast").check.map((f: Fact) => f.text).join(" ");
       expect(check).not.toMatch(/music|clean track/i);
