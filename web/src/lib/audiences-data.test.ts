@@ -206,6 +206,17 @@ describe("audience data", () => {
       expect(factsOf(AUDIENCES.worship)).toContain(SETUP.ANY_SRT_ENCODER);
     });
 
+    it("tells the streamer which control assigns the rendition, after the destinations exist and before they are enabled", () => {
+      const t = texts(AUDIENCES.streamer);
+      const control = at(t, /Video treatment/);
+      expect(t[control]).toMatch(/Use a shared video encode/);
+      expect(at(t, /Destinations → Add/)).toBeLessThan(control);
+      expect(control).toBeLessThan(at(t, /Enable each destination/));
+      const f = (factsOf(AUDIENCES.streamer) as Fact[]).find((x) => /Video treatment/.test(x.text));
+      expect(f!.doc).toBe("renditions");
+      expect(f!.anchor).toBe("choosing-a-rendition-on-a-destination");
+    });
+
     it("tells the streamer where to add the rendition, how to shape it and to choose Blurred fill", () => {
       const t = texts(AUDIENCES.streamer).join(" ");
       expect(t).toMatch(/Renditions page/);

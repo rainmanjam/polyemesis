@@ -61,7 +61,7 @@ export const FIRST_RUN = [
   },
   {
     title: "Add a source",
-    text: "A source is one programme: one feed from one encoder. On Sources, add one, pick SRT or RTMP on its card and press Apply. SRT carries every audio track. RTMP shares its port between sources, told apart by the stream key, and carries one audio track unless the publisher sends Enhanced RTMP. The publish URL appears with the protocol; copy it, because it carries the credential that addresses this source.",
+    text: "A source is one programme: one feed from one encoder. On Sources, add one. A new source starts on SRT with its publish URL showing. To use RTMP instead, change the protocol on its card and press Apply. SRT carries every audio track. RTMP shares its port between sources, told apart by the stream key, and carries one audio track unless the publisher sends Enhanced RTMP. Copy the publish URL, because it carries the credential that addresses this source.",
     shot: { file: "05-sources.png", alt: "The Sources page with a source's protocol, publish URL and token", chrome: "Sources: protocol, publish URL and token" },
   },
   {

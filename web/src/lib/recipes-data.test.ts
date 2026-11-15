@@ -182,8 +182,20 @@ describe("recipe data", () => {
       expect(by("two-languages-one-broadcast").steps[0].facts[0].text).toMatch(/Advanced output mode/);
     });
 
-    it("sets the backpack source's protocol to SRT before anything is pointed at it", () => {
-      expect(by("streaming-from-a-backpack").needs.map((f: Fact) => f.text).join(" ")).toMatch(/SRT as its protocol/);
+    it("says the backpack source's protocol must be SRT, and cites the SRTLA guide for it", () => {
+      const needs = by("streaming-from-a-backpack").needs as Fact[];
+      const f = needs.find((n) => /protocol is SRT/.test(n.text));
+      expect(f, "a need that states the protocol").toBeDefined();
+      expect(f!.doc).toBe("srtla");
+      expect(f!.anchor).toBe("setting-it-up");
+      expect(f!.evidence).toContain("admits a publish only for a source set to SRT");
+    });
+
+    it("tells the backpack reader to add a source, before the step that points the encoder at its token", () => {
+      const r = by("streaming-from-a-backpack");
+      expect(r.needs, "a fresh install has no source").toContain(SETUP.ADD_SOURCE);
+      const tokenStep = r.steps.findIndex((s: { facts: Fact[] }) => s.facts.some((f) => /publish token/.test(f.text)));
+      expect(tokenStep, "the step that uses the token").toBeGreaterThan(-1);
     });
 
     it("checks the languages recipe by its own tracks, not by a music track and a clean track", () => {
