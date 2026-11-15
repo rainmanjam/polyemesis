@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { BY_SLUG } from "../data/docs.mjs";
-import { TOUR } from "../data/tour.mjs";
+import { TOUR, TOUR_DEMO_NOTE } from "../data/tour.mjs";
 import { TOUR_PAGE, TOUR_ROUTE } from "../data/tour-page.mjs";
 import { factProblems, type Fact } from "./facts";
 
@@ -14,6 +14,7 @@ const readDoc = (slug: string): string | undefined => {
   return doc ? readFileSync(here(`../../../docs/${doc.file}`), "utf8") : undefined;
 };
 const page = readFileSync(here("../pages/tour.astro"), "utf8");
+const homeBlock = readFileSync(here("../components/home/HowItWorks.astro"), "utf8");
 const notes = TOUR_PAGE.notes as { facts: Fact[]; film: string[]; docs: string[] }[];
 const tourBlock = readFileSync(here("../components/home/Tour.astro"), "utf8");
 
@@ -85,9 +86,19 @@ describe("the film sentences (P4-R15)", () => {
 
 describe("what the page says about the film", () => {
   it("says the destinations are a demo, as docs/media/README.md describes the rig (P4-R16)", () => {
-    expect(page).toContain(
+    expect(TOUR_DEMO_NOTE).toBe(
       "The tour was filmed on a demo install: its five destinations are labelled as YouTube channels and publish to a local receiver, not to YouTube.",
     );
+  });
+
+  it("prints the demo note once, from the player both pages render (not from either page)", () => {
+    expect(tourBlock.match(/\{TOUR_DEMO_NOTE\}/g)).toHaveLength(1);
+    expect(tourBlock).toMatch(/import[^;]*\bTOUR_DEMO_NOTE\b/);
+    expect(page).not.toContain("filmed on a demo install");
+    expect(page).not.toContain("TOUR_DEMO_NOTE");
+    expect(tourBlock).not.toContain("filmed on a demo install");
+    expect(homeBlock).toContain("<Tour />");
+    expect(homeBlock).not.toContain("filmed on a demo install");
   });
 
   it("does not claim the chapter text repeats the captions", () => {
