@@ -2835,6 +2835,8 @@
   "route.trackPickAria": "Pista: {label}",
   "route.musicExcluded": "música excluida",
   "route.musicExclusionIdle": "exclusión de música activa, nada que excluir aún",
+  "route.musicExclusionOn": "exclusión de música activa",
+  "route.musicTracksUnknown": "Aún no se sabe qué pistas de entrada están marcadas como música, así que no se sabe qué deja fuera este destino.",
   "route.musicBeingSent": "se está enviando música",
   "route.musicAllowed": "música permitida",
   "route.musicTipExcluded": "Cualquier pista de entrada marcada con el rol «Música» se descarta antes de construir la mezcla de este destino.",

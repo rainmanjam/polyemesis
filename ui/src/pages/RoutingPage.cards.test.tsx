@@ -98,13 +98,13 @@ describe("DuckingCard", () => {
 
 describe("MusicRightsCard", () => {
   // The badge states what is being done, so it must agree with the sentence under it.
-  const card = (excludeRoles: TrackRole[], musicTracks: number[]) =>
+  const card = (excludeRoles: TrackRole[], musicTracks: number[] | null) =>
     render(
       <TooltipProvider>
         <MusicRightsCard
           platformName="Twitch"
           excludeRoles={excludeRoles}
-          musicTracks={musicTracks}
+          annotations={musicTracks === null ? null : musicTracks.map((track) => ({ track, role: "music" }) as TrackAnnotation)}
           onExcludeRoles={noop}
         />
       </TooltipProvider>,
@@ -123,6 +123,14 @@ describe("MusicRightsCard", () => {
     card(["music"], [1]);
     expect(screen.getByText("music excluded")).toBeTruthy();
     expect(screen.getByText(/is marked as music and is not being sent/)).toBeTruthy();
+  });
+
+  it("makes no claim either way while the annotations are unknown (loading, or the read failed)", () => {
+    card(["music"], null);
+    expect(screen.getByText("music exclusion on")).toBeTruthy();
+    expect(screen.queryByText("music excluded")).toBeNull();
+    expect(screen.queryByText(/nothing to exclude yet/)).toBeNull();
+    expect(screen.getByText(/not known yet/)).toBeTruthy();
   });
 
   it("says music is allowed when the setting is off, marked track or not", () => {

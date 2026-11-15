@@ -2835,6 +2835,8 @@
   "route.trackPickAria": "{label} 音轨",
   "route.musicExcluded": "已排除音乐",
   "route.musicExclusionIdle": "音乐排除已开启，暂无可排除的内容",
+  "route.musicExclusionOn": "音乐排除已开启",
+  "route.musicTracksUnknown": "尚不清楚哪些输入轨道被标记为音乐，因此不清楚此目标会排除什么。",
   "route.musicBeingSent": "正在发送音乐",
   "route.musicAllowed": "允许音乐",
   "route.musicTipExcluded": "任何标为“音乐”角色的输入音轨，都会在构建这个推流目标的混音之前被丢弃。",

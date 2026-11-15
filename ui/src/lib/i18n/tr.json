@@ -2835,6 +2835,8 @@
   "route.trackPickAria": "{label} parçası",
   "route.musicExcluded": "müzik hariç",
   "route.musicExclusionIdle": "müzik hariç tutma açık, henüz hariç tutulacak bir şey yok",
+  "route.musicExclusionOn": "müzik hariç tutma açık",
+  "route.musicTracksUnknown": "Hangi giriş parçalarının müzik olarak işaretlendiği henüz bilinmiyor; bu hedefin neyi dışarıda bıraktığı da bilinmiyor.",
   "route.musicBeingSent": "müzik gönderiliyor",
   "route.musicAllowed": "müzik serbest",
   "route.musicTipExcluded": "“Müzik” rolüyle işaretlenen her giriş parçası, bu hedefin miksi oluşturulmadan önce çıkarılır.",

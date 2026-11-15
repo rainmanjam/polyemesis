@@ -70,6 +70,7 @@ import {
   roleLayoutFor,
   type RoleLayout,
 } from "@/features/routing/presetTrackDefaults";
+import { excludedMusicTracks } from "@/lib/musicExclusion";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -753,6 +754,18 @@ export function RoutingPage() {
     [annotations],
   );
 
+  // The tracks THIS destination's mix leaves out as music: the server applies
+  // excludeRoles to the destination's own programme (Profile.ExcludedTracks),
+  // so this reads that programme's annotations, not the header's. Null until
+  // they are known: the page's own while they describe that programme, else
+  // the layout read from GET /source. A failed read leaves it null.
+  const destAnnotations = useMemo<readonly TrackAnnotation[] | null>(() => {
+    if (editedSourceId === null) return annotationsFrom === null ? null : annotations;
+    if (annotationsFrom === editedSourceId) return annotations;
+    if (destLayout?.sourceId === editedSourceId) return destLayout.annotations;
+    return null;
+  }, [editedSourceId, annotationsFrom, annotations, destLayout]);
+
   // The music-rights table, read off the presets it generated. There is no
   // separate endpoint for it, and deriving both from the same rows is what
   // stops the badge and the preset button from ever disagreeing.
@@ -801,6 +814,7 @@ export function RoutingPage() {
       musicPlatformName: selectedPolicy?.name ?? "",
       musicDecision: selectedPolicy?.policy,
       musicTracks,
+      destAnnotations,
       muteBlocked,
     }),
     [
@@ -821,6 +835,7 @@ export function RoutingPage() {
       trackOptions,
       selectedPolicy,
       musicTracks,
+      destAnnotations,
       muteBlocked,
     ],
   );
@@ -1189,6 +1204,9 @@ interface EditorContext {
   musicPlatformName: string;
   musicDecision?: MusicDecision;
   musicTracks: number[];
+  /** The annotations of the programme the edited destination belongs to, or
+   *  null while they are not known (not read yet, or the read failed). */
+  destAnnotations: readonly TrackAnnotation[] | null;
   /** Why no Mute can apply on this destination (audio copy), translated, or
    *  null. Holds for both mixes: it is the destination that has no volume stage. */
   muteBlocked: string | null;
@@ -1615,7 +1633,7 @@ function ProfileEditor({
         platformName={ctx.musicPlatformName}
         decision={ctx.musicDecision}
         excludeRoles={excludeRoles}
-        musicTracks={ctx.musicTracks}
+        annotations={ctx.destAnnotations}
         onExcludeRoles={(roles) => onPatch({ excludeRoles: roles.length ? roles : null })}
       />
 
@@ -2005,18 +2023,22 @@ export function MusicRightsCard({
   platformName,
   decision,
   excludeRoles,
-  musicTracks,
+  annotations,
   onExcludeRoles,
 }: Readonly<{
   platformName: string;
   decision?: MusicDecision;
   excludeRoles: TrackRole[];
-  musicTracks: number[];
+  /** The destination's own programme's annotations; null while not known. */
+  annotations: readonly TrackAnnotation[] | null;
   onExcludeRoles: (roles: TrackRole[]) => void;
 }>) {
   const t = useT();
   const tn = useTN();
   const excluded = excludeRoles.includes("music");
+  // null: the annotations are not known (loading, or the read failed), and the
+  // card then states the setting only. See excludedMusicTracks.
+  const musicTracks = annotations === null ? null : excludedMusicTracks(excludeRoles, annotations);
   const platformWants = decision?.exclude ?? false;
   const reason = decision?.reason || t("route.musicPolicyFallback");
   const who = platformName || t("route.thisDestinationSPlatform");
@@ -2026,16 +2048,22 @@ export function MusicRightsCard({
   if (excluded) {
     // The badge states what is being done. With no track marked as music the
     // setting is on but nothing is dropped, so it must not claim an exclusion.
-    statusBadge =
-      musicTracks.length > 0 ? (
-        <Badge variant="live">
-          <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
-        </Badge>
-      ) : (
-        <Badge variant="outline">
-          <Music className="h-2.5 w-2.5" /> {t("route.musicExclusionIdle")}
-        </Badge>
-      );
+    // The words carry the state; the badge wraps inside the card rather than
+    // overflowing it in a language with long words.
+    const badgeText =
+      musicTracks === null
+        ? t("route.musicExclusionOn")
+        : musicTracks.length > 0
+          ? t("route.musicExcluded")
+          : t("route.musicExclusionIdle");
+    statusBadge = (
+      <Badge
+        variant={musicTracks !== null && musicTracks.length > 0 ? "live" : "outline"}
+        className="max-w-full whitespace-normal text-left"
+      >
+        <Music className="h-2.5 w-2.5 shrink-0" /> {badgeText}
+      </Badge>
+    );
     statusTip = (
       <>
         {t("route.musicTipExcluded")}{" "}
@@ -2062,6 +2090,8 @@ export function MusicRightsCard({
   let trackNote: ReactNode;
   if (!excluded) {
     trackNote = <>{t("route.everyTrackReaches")}</>;
+  } else if (musicTracks === null) {
+    trackNote = <>{t("route.musicTracksUnknown")}</>;
   } else if (musicTracks.length > 0) {
     trackNote = (
       <>
@@ -2106,7 +2136,7 @@ export function MusicRightsCard({
         </CardTitle>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="cursor-help">
+            <span className="min-w-0 cursor-help">
               {statusBadge}
             </span>
           </TooltipTrigger>

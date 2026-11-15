@@ -2835,6 +2835,8 @@
   "route.trackPickAria": "{label} トラック",
   "route.musicExcluded": "音楽を除外",
   "route.musicExclusionIdle": "音楽の除外はオン、除外するものはまだありません",
+  "route.musicExclusionOn": "音楽の除外はオン",
+  "route.musicTracksUnknown": "どの入力トラックが音楽としてマークされているかまだ分からないため、この宛先が何を除外するかも分かりません。",
   "route.musicBeingSent": "音楽を送信中",
   "route.musicAllowed": "音楽を許可",
   "route.musicTipExcluded": "「音楽」の役割が付いた入力トラックは、この配信先のミックスを作る前に取り除かれます。",
