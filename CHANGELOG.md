@@ -37,8 +37,10 @@ its first tagged release.
 - **Routing: "music excluded" shown while no track was marked as music.** A destination set to keep music out showed the
   badge "music excluded" even when no ingest track was marked as music, directly above the line "No ingest track is
   marked as music yet", so the badge claimed an exclusion that was not happening. The badge now reads "music exclusion
-  on, nothing to exclude yet" until a track is marked as music, and "music excluded" only once one is. The setting,
-  the mix and everything else on the card are unchanged.
+  on, nothing to exclude yet" until a track is marked as music, and "music excluded" only once one is. It looks at the
+  tracks of the programme the destination belongs to, as the server does, not the programme selected in the page
+  header; while those tracks are loading, or cannot be read, it says only "music exclusion on". The setting, the mix
+  and everything else on the card are unchanged.
 
 ## [0.18.0] — 2026-11-11
 

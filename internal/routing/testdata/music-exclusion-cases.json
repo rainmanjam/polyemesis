@@ -1,0 +1,14 @@
+{
+  "about": "Which tracks a destination leaves out as music. Read by internal/routing/music_exclusion_test.go (the server's own policy) and ui/src/lib/musicExclusion.test.ts (the console's excludedMusicTracks). Inputs: the destination's excludeRoles, and ITS OWN programme's tracks with their annotated role and whether the destination routes the track. Expected: the music tracks left out.",
+  "cases": [
+    { "name": "setting on, one music track", "excludeRoles": ["music"], "tracks": [ { "track": 0, "role": "mic", "routed": true }, { "track": 1, "role": "music", "routed": true } ], "excludedMusicTracks": [1] },
+    { "name": "setting on, no music track", "excludeRoles": ["music"], "tracks": [ { "track": 0, "role": "mic", "routed": true }, { "track": 1, "role": "game", "routed": true } ], "excludedMusicTracks": [] },
+    { "name": "setting on, no annotations at all", "excludeRoles": ["music"], "tracks": [], "excludedMusicTracks": [] },
+    { "name": "setting off, music track present", "excludeRoles": [], "tracks": [ { "track": 1, "role": "music", "routed": true } ], "excludedMusicTracks": [] },
+    { "name": "only another role excluded", "excludeRoles": ["mic"], "tracks": [ { "track": 0, "role": "mic", "routed": true }, { "track": 1, "role": "music", "routed": true } ], "excludedMusicTracks": [] },
+    { "name": "music and another role excluded", "excludeRoles": ["music", "mic"], "tracks": [ { "track": 0, "role": "mic", "routed": true }, { "track": 2, "role": "music", "routed": true } ], "excludedMusicTracks": [2] },
+    { "name": "music track the destination does not route still counts", "excludeRoles": ["music"], "tracks": [ { "track": 3, "role": "music", "routed": false }, { "track": 0, "role": "mic", "routed": true } ], "excludedMusicTracks": [3] },
+    { "name": "two music tracks, listed out of order", "excludeRoles": ["music"], "tracks": [ { "track": 4, "role": "music", "routed": true }, { "track": 1, "role": "music", "routed": true } ], "excludedMusicTracks": [1, 4] },
+    { "name": "an unlabelled track is not music", "excludeRoles": ["music"], "tracks": [ { "track": 0, "role": "", "routed": true } ], "excludedMusicTracks": [] }
+  ]
+}
