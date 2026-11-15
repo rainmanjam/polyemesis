@@ -12,8 +12,14 @@ describe("musicRailMark", () => {
     // and no text, in a rail where green means ON AIR everywhere else on the
     // product — so the mark for "this destination excludes music" read as "this
     // destination is live".
-    expect(musicRailMark(true, false)).toEqual({ label: "route.railNoMusic", tone: "muted" });
-    expect(musicRailMark(true, true)).toEqual({ label: "route.railNoMusic", tone: "muted" });
+    //
+    // It states what the console knows. The setting alone reads as the setting
+    // ("music exclusion on"); "music excluded" is said only once a track marked
+    // as music is known to be left out, the same rule as the Music rights card.
+    expect(musicRailMark(true, false)).toEqual({ label: "route.musicExclusionOn", tone: "muted" });
+    expect(musicRailMark(true, true)).toEqual({ label: "route.musicExclusionOn", tone: "muted" });
+    expect(musicRailMark(true, false, true)).toEqual({ label: "route.musicExcluded", tone: "muted" });
+    expect(musicRailMark(true, true, true)).toEqual({ label: "route.musicExcluded", tone: "muted" });
   });
 
   it("warns only where the platform's policy and this destination disagree", () => {
@@ -25,7 +31,7 @@ describe("musicRailMark", () => {
   });
 
   it("uses keys English actually defines, so the rail cannot render a raw key", () => {
-    for (const mark of [musicRailMark(true, false), musicRailMark(false, true)]) {
+    for (const mark of [musicRailMark(true, false), musicRailMark(true, false, true), musicRailMark(false, true)]) {
       expect(en[mark!.label]).toBeTruthy();
     }
   });
@@ -36,7 +42,7 @@ const ROOT = new URL("../../../../", import.meta.url).pathname;
 describe("RoutingPage's destination rail", () => {
   it("draws the mark with its word, not as a bare coloured glyph", () => {
     const src = readFileSync(join(ROOT, "ui/src/pages/RoutingPage.tsx"), "utf8");
-    expect(src).toContain("musicRailMark(guarded, pol?.exclude ?? false)");
+    expect(src).toContain("musicRailMark(guarded, pol?.exclude ?? false, excludedNow)");
     expect(src).toContain("{t(mark.label)}");
     // The unlabelled glyphs this replaced. `text-ok` on a note icon, in a
     // rail whose every other green thing means on air.
@@ -55,6 +61,11 @@ describe("musicRailReason", () => {
       expect(key, `mark for ${guarded}/${policy} has no reason`).not.toBeNull();
       expect(en[key!]).toBeTruthy();
     }
+  });
+
+  it("describes the setting, not an output, until a music track is known to be left out", () => {
+    expect(musicRailReason(true, false)).toBe("route.musicTipExcluded");
+    expect(musicRailReason(true, false, true)).toBe("foundation.route.noMusicReason");
   });
 
   it("gives no reason when no mark is shown", () => {

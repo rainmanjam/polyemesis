@@ -1046,9 +1046,16 @@ export function RoutingPage() {
               const pol = policyFor(d)?.policy;
               const guarded = d.profile.excludeRoles?.includes("music") ?? false;
               // A word, not a colour. See features/routing/musicRail.ts.
-              const mark = musicRailMark(guarded, pol?.exclude ?? false);
+              // "Excluded" only where this page knows a music-marked track is
+              // being left out (the selected destination's own programme, the
+              // same answer as the Music rights card); otherwise the setting.
+              const excludedNow =
+                d.id === selected?.id &&
+                destAnnotations !== null &&
+                excludedMusicTracks(d.profile.excludeRoles ?? [], destAnnotations).length > 0;
+              const mark = musicRailMark(guarded, pol?.exclude ?? false, excludedNow);
               // The reason behind the word, on hover and to a screen reader (B1).
-              const markReason = musicRailReason(guarded, pol?.exclude ?? false);
+              const markReason = musicRailReason(guarded, pol?.exclude ?? false, excludedNow);
               return (
                 <button
                   key={d.id}

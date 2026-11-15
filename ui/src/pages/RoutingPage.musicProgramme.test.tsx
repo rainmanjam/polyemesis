@@ -136,7 +136,7 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     headerSource = withAnn(1, []);
     destSource = withAnn(2, [{ track: 3, role: "music" }]);
     await renderPage();
-    expect(screen.getByText(EXCLUDED)).toBeTruthy();
+    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0);
     expect(screen.queryByText(IDLE)).toBeNull();
   });
 
@@ -144,7 +144,7 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     headerSource = withAnn(1, []);
     destSource = new Promise<SourceInfo>(() => {});
     await renderPage();
-    expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy();
+    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
     expect(screen.queryByText(EXCLUDED)).toBeNull();
     expect(screen.queryByText(IDLE)).toBeNull();
   });
@@ -156,7 +156,7 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       return headerSource;
     });
     await renderPage();
-    expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy();
+    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
     expect(screen.queryByText(EXCLUDED)).toBeNull();
     expect(screen.queryByText(IDLE)).toBeNull();
   });
@@ -201,7 +201,7 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     expect(screen.getByText(IDLE)).toBeTruthy();
 
     await setRole(0, "Music");
-    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy(), { timeout: 4000 });
+    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0), { timeout: 4000 });
 
     await setRole(0, translate("en", "signature.track.noRole"));
     await waitFor(() => expect(screen.getByText(IDLE)).toBeTruthy(), { timeout: 4000 });
@@ -212,7 +212,7 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     headerSource = withAnn(1, []);
     const setServer = serverHoldsOnB([{ track: 3, role: "music" }]);
     await renderPage();
-    expect(screen.getByText(EXCLUDED)).toBeTruthy();
+    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0);
 
     setServer([]); // another tab removed the mark
     await waitFor(() => expect(screen.getByText(IDLE)).toBeTruthy(), { timeout: 5000 });
@@ -228,10 +228,10 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       return withAnn(2, [{ track: 3, role: "music" }]);
     });
     await renderPage();
-    expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy();
+    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
 
     fail = false;
-    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0), { timeout: 5000 });
   }, 15000);
 
   it("drops to the neutral state, not the old answer, when a refresh fails", async () => {
@@ -243,10 +243,10 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       return withAnn(2, [{ track: 3, role: "music" }]);
     });
     await renderPage();
-    expect(screen.getByText(EXCLUDED)).toBeTruthy();
+    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0);
 
     fail = true;
-    await waitFor(() => expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0), { timeout: 5000 });
     expect(screen.queryByText(EXCLUDED)).toBeNull();
   }, 15000);
 
@@ -285,10 +285,10 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2));
 
     await act(async () => pending[1]([{ track: 3, role: "music" }])); // the newer read
-    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0));
     await act(async () => pending[0]([])); // the older read, arriving late
     await act(async () => {});
-    expect(screen.getByText(EXCLUDED), "an older response overwrote the newer answer").toBeTruthy();
+    expect(screen.getAllByText(EXCLUDED).length, "an older response overwrote the newer answer").toBeGreaterThan(0);
     expect(screen.queryByText(IDLE)).toBeNull();
   }, 15000);
 
@@ -305,6 +305,33 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     await act(async () => pending[1]([{ track: 0, role: "music" }])); // the poll: newer
     await act(async () => pending[0]([])); // the save's re-read: older, stale
     await act(async () => {});
-    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0));
   }, 20000);
+
+  /* The destinations list (the rail) beside the card. */
+  const RAIL_NO_MUSIC = translate("en", "route.railNoMusic");
+
+  it("does not say \"no music\" in the list for a destination with no marked music track", async () => {
+    headerSource = withAnn(1, []);
+    serverHoldsOnB([]);
+    await renderPage();
+    expect(screen.queryByText(RAIL_NO_MUSIC), "the list claims no music where nothing is marked").toBeNull();
+    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
+  });
+
+  it("does not say \"no music\" in the list while the destination's marks are unknown", async () => {
+    headerSource = withAnn(1, [{ track: 1, role: "music" }]);
+    destSource = new Promise<SourceInfo>(() => {});
+    await renderPage();
+    expect(screen.queryByText(RAIL_NO_MUSIC)).toBeNull();
+    expect(screen.queryByText(EXCLUDED)).toBeNull();
+  });
+
+  it("says music is excluded in the list once the destination's own programme marks a track", async () => {
+    headerSource = withAnn(1, []);
+    serverHoldsOnB([{ track: 3, role: "music" }]);
+    await renderPage();
+    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThanOrEqual(2); // the list and the card
+    expect(screen.queryByText(RAIL_NO_MUSIC)).toBeNull();
+  });
 });
