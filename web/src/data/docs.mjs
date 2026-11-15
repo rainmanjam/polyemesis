@@ -161,7 +161,7 @@ const DOCS_BY_SECTION = {
      * Output (FFmpeg), not on the Stream tab where everyone looks first. It is
      * also, conveniently, where "OBS SRT" belongs in a sentence. */
     ["SRTLA.md", "SRTLA: bonded IRL encoders over several links",
-      "A native SRTLA receiver for BELABOX, Moblin and IRL Pro: several cellular links bonded into one SRT publish, and an opt-in stop if the backpack goes quiet."],
+      "A native SRTLA receiver for bonded IRL encoders, tested against BELABOX's reference sender: several links, one SRT publish, opt-in stop on ingest loss."],
     ["OBS.md", "OBS SRT setup: multitrack audio to one ingest",
       "Sending OBS multitrack audio over SRT is a Custom Output on the Recording tab, not the Stream tab. Encoder settings that work, plus RTMP fallback."],
     ["TLS.md", "TLS certificates for a self-hosted SRT server",

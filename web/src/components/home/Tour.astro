@@ -12,7 +12,7 @@
  * as a list, but they are drawn as plain text, not as something to press, until
  * tour.ts marks the block .is-live and enables the buttons: without it they are
  * rendered disabled, so nothing looks or tabs like a control that does nothing. */
-import { TOUR, clock, isoDuration } from "../../data/tour.mjs";
+import { TOUR, TOUR_DEMO_NOTE, clock, isoDuration } from "../../data/tour.mjs";
 
 interface Props {
   /** The homepage section carries its own page-width wrap. A page that already
@@ -46,6 +46,7 @@ const { wrap = true } = Astro.props;
         </video>
       </div>
       <p class="tour-cap"><b>Video tour</b> · silent, with captions</p>
+      <p class="tour-cap">{TOUR_DEMO_NOTE}</p>
     </div>
     <div class="tour-side">
       <h3>See it on a real console.</h3>
@@ -93,6 +94,9 @@ const { wrap = true } = Astro.props;
     font-family: var(--font-mono);
     font-size: 0.8125rem;
     color: var(--color-muted);
+  }
+  .tour-cap + .tour-cap {
+    margin-top: 4px;
   }
   .tour-cap b {
     color: var(--color-fg);

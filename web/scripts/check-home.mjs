@@ -72,6 +72,7 @@ import { availableParallelism } from "node:os";
 import { chromium } from "playwright";
 import { CASES, CASE_ORDER } from "../src/data/cases.mjs";
 import { DOCKER_RUN } from "../src/data/install.mjs";
+import { TOUR_DEMO_NOTE } from "../src/data/tour.mjs";
 
 const DIST = resolve(process.env.CHECK_HOME_DIST ?? new URL("../dist/", import.meta.url).pathname);
 const TYPES = {
@@ -721,6 +722,7 @@ async function checkNoScript(page, c) {
         motionOn: document.documentElement.classList.contains("motion-on"),
         pause: [...document.querySelectorAll("[data-hero] [data-pause]")].map((b) => ({ shown: visible(b) && !b.hidden, disabled: b.disabled })),
         chapters: [...document.querySelectorAll("[data-tour] [data-seek]")].map((b) => b.disabled),
+        tourText: document.querySelector("[data-tour]")?.textContent ?? "",
         dockerInInstall: [...document.querySelectorAll("#install pre")].some((p) => p.textContent.includes(docker)),
       };
     },
@@ -749,6 +751,8 @@ async function checkNoScript(page, c) {
   // Controls that only script can drive are not offered with script off: Pause is hidden, the tour's chapter buttons disabled.
   if (m.pause.length === 0) bad("no-script", c.name, "no [data-hero] [data-pause] button in the markup (script un-hides it)");
   else if (m.pause.some((b) => b.shown)) bad("no-script", c.name, "the Pause motion button is shown with script off, where it can do nothing");
+  const demoNotes = m.tourText.split(TOUR_DEMO_NOTE).length - 1;
+  if (demoNotes !== 1) bad("no-script", c.name, `the rendered video tour block carries the demo-install sentence ${demoNotes} times, expected once`);
   if (m.chapters.length === 0) bad("no-script", c.name, "no [data-tour] [data-seek] chapter buttons in the markup");
   else if (m.chapters.some((d) => !d)) bad("no-script", c.name, "the video tour's chapter buttons are enabled with script off, where they can do nothing");
 }
