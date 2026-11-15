@@ -90,6 +90,22 @@ Every destination stays on passthrough with no action from you. This feature is
 strictly additive: if you never create a rendition, nothing about your install
 changes.
 
+## Choosing a rendition on a destination
+
+A destination selects its rendition with the **Video treatment** control. It is
+on the **Add destination** and **Edit destination** forms, below the platform's
+URL and key fields and above the encode options. It has two choices:
+
+- **Copy the source video** is passthrough. It is the first choice, marked
+  *recommended*, and it is what a new destination starts on.
+- **Use a shared video encode** is a rendition. Choose it, then pick the
+  rendition from the list that opens under it. The choice is disabled while
+  there are no renditions, and says to create one on the **Renditions** page
+  first.
+
+Saving the form stores the choice. Choosing **Copy the source video** again
+puts the destination back on passthrough.
+
 ## A rendition only runs when something needs it
 
 The encode starts when the **first enabled consumer** selects the rendition, and
