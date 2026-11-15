@@ -126,7 +126,7 @@ export const RECIPES = [
       },
       {
         title: "Add a destination per platform",
-        facts: [SETUP.ADD_DESTINATION, SETUP.URL_AND_KEY, SETUP.TICK_TRACKS, SETUP.ENABLE_DESTINATION],
+        facts: [SETUP.ADD_DESTINATION, SETUP.PICK_ACCOUNT, SETUP.TICK_TRACKS, SETUP.ENABLE_DESTINATION],
         shot: {
           ...SETUP.DESTINATIONS_SHOT,
           alt: "The dashboard's Destinations section: five YouTube destinations, each live",

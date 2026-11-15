@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { AUDIENCES } from "../data/audiences.mjs";
 import { BY_SLUG } from "../data/docs.mjs";
+import * as SETUP from "../data/setup-facts.mjs";
 import { RECIPES, RECIPE_ROUTES } from "../data/recipes.mjs";
 import { factProblems, type Fact } from "./facts";
 
@@ -158,6 +159,8 @@ describe("recipe data", () => {
       const step = by("obs-to-five-platforms").steps[3].facts.map((f: Fact) => f.text);
       const account = step.findIndex((x: string) => /connected account/i.test(x));
       const enable = step.findIndex((x: string) => /enable/i.test(x));
+      expect(by("obs-to-five-platforms").steps[3].facts, "the shared pick-the-account fact").toContain(SETUP.PICK_ACCOUNT);
+      expect(step.findIndex((x: string) => /Destinations → Add/.test(x)), "add first").toBeLessThan(account);
       expect(account, "a fact that picks the connected account").toBeGreaterThan(-1);
       expect(enable, "a fact that enables the destination").toBeGreaterThan(-1);
       expect(account).toBeLessThan(enable);

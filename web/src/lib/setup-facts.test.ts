@@ -37,6 +37,7 @@ const SHARED_ACTIONS: [string, RegExp, Fact][] = [
   ["Connect account", /Connect account/, SETUP.PASTE_CREDENTIALS],
   ["Destinations → Add", /Destinations → Add/, SETUP.ADD_DESTINATION],
   ["the destination's URL and key", /stream key from the platform's (own )?dashboard/, SETUP.URL_AND_KEY],
+  ["picking the connected account", /pick the account you connected|connected account under/i, SETUP.PICK_ACCOUNT],
   ["tick the tracks", /tick the ones/i, SETUP.TICK_TRACKS],
   ["enable it", /^Enable (the|each) destination/, SETUP.ENABLE_DESTINATION],
   ["measured after routing", /measured after routing/, SETUP.METERS_AFTER_ROUTING],

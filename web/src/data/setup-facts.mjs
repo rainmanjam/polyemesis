@@ -215,6 +215,14 @@ export const ADD_DESTINATION = {
   evidence: ["Destinations → Add", "pick one, and the form takes on that platform's limits"],
   anchor: "6-add-a-destination",
 };
+/** The account route's own step, after the account is connected: where it is chosen on a destination.
+ *  @type {Fact} */
+export const PICK_ACCOUNT = {
+  text: "Under Connected account, pick the account you connected for that platform.",
+  doc: "connecting-platforms",
+  evidence: ["Destinations → Add", "pick the connected account under Connected account"],
+  anchor: "the-same-four-steps-on-every-platform",
+};
 /** A destination's key comes from the platform's dashboard or from a connected account: either works.
  *  @type {Fact} */
 export const URL_AND_KEY = {
