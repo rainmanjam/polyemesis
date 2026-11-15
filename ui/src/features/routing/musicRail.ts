@@ -15,6 +15,13 @@ import type { TranslationKey } from "@/lib/i18n";
  *  `guarded` is what the destination's own profile does: the music role is
  *  excluded from its mix. `policyExcludes` is what the platform's music-rights
  *  row asks for. The interesting case is the second without the first.
+ *
+ *  `excludedNow` is whether a track marked as music is known to be left out by
+ *  this destination (the Music rights card's answer: lib/musicExclusion.ts, read
+ *  from the destination's own programme). A guarded destination without it says
+ *  only that the setting is on: "no music" beside a destination whose programme
+ *  has no music-marked track, or whose marks are not known, would claim an
+ *  output the console cannot vouch for.
  */
 export interface MusicMark {
   label: TranslationKey;
@@ -22,8 +29,14 @@ export interface MusicMark {
   tone: "muted" | "warn";
 }
 
-export function musicRailMark(guarded: boolean, policyExcludes: boolean): MusicMark | null {
-  if (guarded) return { label: "route.railNoMusic", tone: "muted" };
+export function musicRailMark(
+  guarded: boolean,
+  policyExcludes: boolean,
+  excludedNow = false,
+): MusicMark | null {
+  if (guarded) {
+    return { label: excludedNow ? "route.musicExcluded" : "route.musicExclusionOn", tone: "muted" };
+  }
   if (policyExcludes) return { label: "route.railMusicOn", tone: "warn" };
   return null;
 }
@@ -33,8 +46,12 @@ export function musicRailMark(guarded: boolean, policyExcludes: boolean): MusicM
  *  A word tells an operator what the destination does; this says why, in the
  *  profile's own terms, so "no music" never stands alone with nothing behind it
  *  (B1). Null exactly when musicRailMark is null. */
-export function musicRailReason(guarded: boolean, policyExcludes: boolean): TranslationKey | null {
-  if (guarded) return "foundation.route.noMusicReason";
+export function musicRailReason(
+  guarded: boolean,
+  policyExcludes: boolean,
+  excludedNow = false,
+): TranslationKey | null {
+  if (guarded) return excludedNow ? "foundation.route.noMusicReason" : "route.musicTipExcluded";
   if (policyExcludes) return "foundation.route.musicOnReason";
   return null;
 }
