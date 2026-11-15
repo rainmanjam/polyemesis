@@ -51,6 +51,7 @@ describe("the features data", () => {
     expect(row).toMatch(/tested against BELABOX's reference sender/i);
     expect(row).toMatch(/ordinary SRT publish/);
     expect(row).toMatch(/several links/);
+    expect(row).toMatch(/BELABOX's reference sender, srtla_send/);
   });
 
   it("describes the SRTLA guide in the docs index as the guide does: tested against srtla_send, no encoder named as supported", () => {
@@ -58,6 +59,8 @@ describe("the features data", () => {
     expect(d).not.toMatch(/Moblin|IRL Pro/);
     expect(d).not.toMatch(/works? with|supports?|compatible/i);
     expect(d).toMatch(/tested against BELABOX's reference sender/);
+    expect(d).not.toMatch(/silence/i);
+    expect(d).toMatch(/stop on ingest loss/);
     expect(d.length).toBeLessThanOrEqual(155);
   });
 

@@ -120,7 +120,7 @@ export const INPUTS = [
   [
     "SRTLA",
     "as SRT",
-    "Bonded IRL encoders that send SRTLA over several links; arrives as an ordinary SRT publish. Tested against BELABOX's reference sender",
+    "Bonded IRL encoders that send SRTLA over several links; arrives as an ordinary SRT publish; tested against BELABOX's reference sender, srtla_send",
   ],
 ];
 
