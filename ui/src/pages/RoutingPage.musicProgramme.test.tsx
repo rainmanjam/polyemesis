@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 
 import { RoutingPage } from "./RoutingPage";
@@ -122,31 +122,50 @@ async function renderPage() {
 
 const EXCLUDED = translate("en", "route.musicExcluded");
 const IDLE = translate("en", "route.musicExclusionIdle");
+const ON = translate("en", "route.musicExclusionOn");
+const RAIL_NO_MUSIC = translate("en", "route.railNoMusic");
+
+/** The Music rights card, found as the nearest ancestor of its own switch that
+ *  also holds its heading. Assertions about the card go through this so the
+ *  Destinations list beside it can never satisfy them. */
+function musicCard(): HTMLElement {
+  let el = screen.getByLabelText(translate("en", "route.keepMusicOut")).parentElement;
+  while (el && !within(el).queryByText(translate("en", "routing.overview.musicRights"))) el = el.parentElement;
+  if (!el) throw new Error("the Music rights card was not found");
+  return el;
+}
+/** The Studio B destination's row in the Destinations list. */
+function listRow(): HTMLElement {
+  return screen.getByRole("button", { name: /Studio B to YouTube/ });
+}
+const inCard = () => within(musicCard());
+const inRow = () => within(listRow());
 
 describe("the music badge on a two-programme install (destination on Studio B, header on Studio A)", () => {
   it("does not say music is excluded when only the header's programme has a music track", async () => {
     headerSource = withAnn(1, [{ track: 1, role: "music" }]);
     destSource = withAnn(2, []);
     await renderPage();
-    expect(screen.queryByText(EXCLUDED), "Studio A's music was counted for Studio B's destination").toBeNull();
-    expect(screen.getByText(IDLE)).toBeTruthy();
+    expect(inCard().queryByText(EXCLUDED), "Studio A's music was counted for Studio B's destination").toBeNull();
+    expect(inCard().getByText(IDLE)).toBeTruthy();
+    expect(inRow().queryByText(EXCLUDED)).toBeNull();
   });
 
   it("says music is excluded when the destination's own programme has the music track", async () => {
     headerSource = withAnn(1, []);
     destSource = withAnn(2, [{ track: 3, role: "music" }]);
     await renderPage();
-    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0);
-    expect(screen.queryByText(IDLE)).toBeNull();
+    expect(inCard().getByText(EXCLUDED)).toBeTruthy();
+    expect(inCard().queryByText(IDLE)).toBeNull();
   });
 
   it("claims nothing while the destination's programme has not been read", async () => {
     headerSource = withAnn(1, []);
     destSource = new Promise<SourceInfo>(() => {});
     await renderPage();
-    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
-    expect(screen.queryByText(EXCLUDED)).toBeNull();
-    expect(screen.queryByText(IDLE)).toBeNull();
+    expect(inCard().getByText(ON)).toBeTruthy();
+    expect(inCard().queryByText(EXCLUDED)).toBeNull();
+    expect(inCard().queryByText(IDLE)).toBeNull();
   });
 
   it("claims nothing when that read fails", async () => {
@@ -156,9 +175,9 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       return headerSource;
     });
     await renderPage();
-    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
-    expect(screen.queryByText(EXCLUDED)).toBeNull();
-    expect(screen.queryByText(IDLE)).toBeNull();
+    expect(inCard().getByText(ON)).toBeTruthy();
+    expect(inCard().queryByText(EXCLUDED)).toBeNull();
+    expect(inCard().queryByText(IDLE)).toBeNull();
   });
 
   /* Marks that change AFTER the card first read them. */
@@ -185,7 +204,7 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     if (!screen.queryByLabelText(roleAria)) {
       await act(async () => fireEvent.click(screen.getByRole("button", { name: translate("en", "route.labelTracks") })));
     }
-    const trigger = await screen.findByLabelText(translate("en", "signature.track.roleAria", { n: track + 1 }));
+    const trigger = await screen.findByLabelText(roleAria);
     await act(async () => {
       fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
       fireEvent.click(trigger);
@@ -193,30 +212,32 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     const opt = await screen.findByRole("option", { name: role });
     await act(async () => fireEvent.click(opt));
   }
+  const NO_ROLE = translate("en", "signature.track.noRole");
 
   it("follows an in-page edit on a programme other than the seed's, both ways", async () => {
     headerSource = withAnn(1, []);
     serverHoldsOnB([]);
     await renderPage();
-    expect(screen.getByText(IDLE)).toBeTruthy();
+    expect(inCard().getByText(IDLE)).toBeTruthy();
 
     await setRole(0, "Music");
-    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0), { timeout: 4000 });
+    await waitFor(() => expect(inCard().getByText(EXCLUDED)).toBeTruthy(), { timeout: 4000 });
 
-    await setRole(0, translate("en", "signature.track.noRole"));
-    await waitFor(() => expect(screen.getByText(IDLE)).toBeTruthy(), { timeout: 4000 });
-    expect(screen.queryByText(EXCLUDED)).toBeNull();
+    await setRole(0, NO_ROLE);
+    await waitFor(() => expect(inCard().getByText(IDLE)).toBeTruthy(), { timeout: 4000 });
+    expect(inCard().queryByText(EXCLUDED)).toBeNull();
   }, 15000);
 
   it("catches up with a change made elsewhere on the page's own refresh", async () => {
     headerSource = withAnn(1, []);
     const setServer = serverHoldsOnB([{ track: 3, role: "music" }]);
     await renderPage();
-    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0);
+    expect(inCard().getByText(EXCLUDED)).toBeTruthy();
 
     setServer([]); // another tab removed the mark
-    await waitFor(() => expect(screen.getByText(IDLE)).toBeTruthy(), { timeout: 5000 });
-    expect(screen.queryByText(EXCLUDED), "a removed mark still reads as excluded").toBeNull();
+    await waitFor(() => expect(inCard().getByText(IDLE)).toBeTruthy(), { timeout: 5000 });
+    expect(inCard().queryByText(EXCLUDED), "a removed mark still reads as excluded").toBeNull();
+    expect(inRow().queryByText(EXCLUDED)).toBeNull();
   }, 15000);
 
   it("retries a failed read, and says nothing while it is failing", async () => {
@@ -228,10 +249,10 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       return withAnn(2, [{ track: 3, role: "music" }]);
     });
     await renderPage();
-    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
+    expect(inCard().getByText(ON)).toBeTruthy();
 
     fail = false;
-    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0), { timeout: 5000 });
+    await waitFor(() => expect(inCard().getByText(EXCLUDED)).toBeTruthy(), { timeout: 5000 });
   }, 15000);
 
   it("drops to the neutral state, not the old answer, when a refresh fails", async () => {
@@ -243,16 +264,18 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       return withAnn(2, [{ track: 3, role: "music" }]);
     });
     await renderPage();
-    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0);
+    expect(inCard().getByText(EXCLUDED)).toBeTruthy();
 
     fail = true;
-    await waitFor(() => expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0), { timeout: 5000 });
-    expect(screen.queryByText(EXCLUDED)).toBeNull();
+    await waitFor(() => expect(inCard().getByText(ON)).toBeTruthy(), { timeout: 5000 });
+    expect(inCard().queryByText(EXCLUDED)).toBeNull();
   }, 15000);
 
-  /* A late response must not overwrite a newer answer. */
+  /* Reads that overlap, run slowly, or finish out of order. */
 
-  /** Reads of Studio B that wait for the test to answer them, oldest first. */
+  /** Reads of Studio B: the first `immediate` answer at once with no marks, the
+   *  rest wait for the test. `pending` holds a resolver per waiting read, in the
+   *  order the page issued them. */
   function deferredReadsOfB(immediate: number) {
     const pending: ((marks: unknown[]) => void)[] = [];
     let issued = 0;
@@ -262,13 +285,13 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       if (issued <= immediate) return Promise.resolve(withAnn(2, []));
       return new Promise<SourceInfo>((resolve) => pending.push((marks) => resolve(withAnn(2, marks))));
     });
+    (api.putAnnotations as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     return pending;
   }
+  const MUSIC = [{ track: 0, role: "music" }];
 
-  it("keeps the newer answer when an older read of the programme answers last", async () => {
+  it("applies a read that takes longer than one poll interval when it returns", async () => {
     headerSource = withAnn(1, []);
-    // The page's first two reads of Studio B (the selection's and the poll's)
-    // are both left unanswered.
     const pending = deferredReadsOfB(0);
     render(
       <LiveDataContext.Provider value={live()}>
@@ -282,56 +305,90 @@ describe("the music badge on a two-programme install (destination on Studio B, h
       </LiveDataContext.Provider>,
     );
     await screen.findByLabelText(translate("en", "route.keepMusicOut"));
-    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(pending.length).toBe(1));
+    // Longer than the 2 s poll: no second read is started while this one is out.
+    await act(async () => new Promise((r) => setTimeout(r, 2600)));
+    expect(pending.length, "a poll started a second read while one was in flight").toBe(1);
 
-    await act(async () => pending[1]([{ track: 3, role: "music" }])); // the newer read
-    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0));
-    await act(async () => pending[0]([])); // the older read, arriving late
-    await act(async () => {});
-    expect(screen.getAllByText(EXCLUDED).length, "an older response overwrote the newer answer").toBeGreaterThan(0);
-    expect(screen.queryByText(IDLE)).toBeNull();
+    await act(async () => pending[0](MUSIC));
+    await waitFor(() => expect(inCard().getByText(EXCLUDED)).toBeTruthy());
   }, 15000);
 
-  it("keeps the newer answer when a save's re-read is overtaken by a poll", async () => {
+  it("ends on the newest of three overlapping reads however they finish", async () => {
     headerSource = withAnn(1, []);
-    // Two immediate reads (selection, first poll), then every read waits.
-    const pending = deferredReadsOfB(2);
-    await renderPage();
-    expect(screen.getByText(IDLE)).toBeTruthy();
+    const pending = deferredReadsOfB(0); // 1: the selection's read, left slow
+    await renderPage().catch(() => {});
+    await setRole(0, "Music"); // saves, then re-reads: 2
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+    await setRole(0, NO_ROLE); // saves, then re-reads: 3
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(3), { timeout: 4000 });
 
-    await setRole(0, "Music");
-    // The save lands and its re-read is issued, then a poll issues another.
-    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2), { timeout: 8000 });
-    await act(async () => pending[1]([{ track: 0, role: "music" }])); // the poll: newer
-    await act(async () => pending[0]([])); // the save's re-read: older, stale
+    await act(async () => pending[2]([])); // newest, no marks
+    await waitFor(() => expect(inCard().getByText(IDLE)).toBeTruthy());
+    await act(async () => pending[0](MUSIC)); // oldest, arriving last
+    await act(async () => pending[1](MUSIC)); // older still
     await act(async () => {});
-    await waitFor(() => expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThan(0));
+    expect(inCard().getByText(IDLE), "an older response overwrote the newest").toBeTruthy();
+    expect(inCard().queryByText(EXCLUDED)).toBeNull();
+  }, 20000);
+
+  it("keeps the newer answer when a save's re-read overtakes a slow read", async () => {
+    headerSource = withAnn(1, []);
+    const pending = deferredReadsOfB(0); // 1: slow
+    await renderPage().catch(() => {});
+    await setRole(0, "Music");
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+    await act(async () => pending[1](MUSIC)); // the re-read
+    await waitFor(() => expect(inCard().getByText(EXCLUDED)).toBeTruthy());
+    await act(async () => pending[0]([])); // the slow read, stale, last
+    await act(async () => {});
+    expect(inCard().getByText(EXCLUDED), "a stale slow read overwrote the re-read").toBeTruthy();
+  }, 20000);
+
+  it("stays neutral through a second edit until a read after ITS save lands", async () => {
+    headerSource = withAnn(1, []);
+    const pending = deferredReadsOfB(1); // the selection's read answers at once
+    await renderPage();
+    await setRole(0, "Music"); // first save, then its re-read: pending[0]
+    await waitFor(() => expect(pending.length).toBe(1), { timeout: 4000 });
+    await setRole(0, NO_ROLE); // second edit, while that re-read is out
+
+    await act(async () => pending[0](MUSIC)); // the first re-read lands
+    await act(async () => {});
+    expect(inCard().getByText(ON), "the first re-read ended the unsaved state of the second edit").toBeTruthy();
+    expect(inCard().queryByText(EXCLUDED)).toBeNull();
+
+    await waitFor(() => expect(pending.length).toBe(2), { timeout: 4000 }); // the second save's re-read
+    expect(inCard().getByText(ON)).toBeTruthy();
+    await act(async () => pending[1]([]));
+    await waitFor(() => expect(inCard().getByText(IDLE)).toBeTruthy());
   }, 20000);
 
   /* The destinations list (the rail) beside the card. */
-  const RAIL_NO_MUSIC = translate("en", "route.railNoMusic");
 
   it("does not say \"no music\" in the list for a destination with no marked music track", async () => {
     headerSource = withAnn(1, []);
     serverHoldsOnB([]);
     await renderPage();
-    expect(screen.queryByText(RAIL_NO_MUSIC), "the list claims no music where nothing is marked").toBeNull();
-    expect(screen.getAllByText(translate("en", "route.musicExclusionOn")).length).toBeGreaterThan(0);
+    expect(inRow().queryByText(RAIL_NO_MUSIC), "the list claims no music where nothing is marked").toBeNull();
+    expect(inRow().getByText(ON)).toBeTruthy();
   });
 
   it("does not say \"no music\" in the list while the destination's marks are unknown", async () => {
     headerSource = withAnn(1, [{ track: 1, role: "music" }]);
     destSource = new Promise<SourceInfo>(() => {});
     await renderPage();
-    expect(screen.queryByText(RAIL_NO_MUSIC)).toBeNull();
-    expect(screen.queryByText(EXCLUDED)).toBeNull();
+    expect(inRow().queryByText(RAIL_NO_MUSIC)).toBeNull();
+    expect(inRow().queryByText(EXCLUDED)).toBeNull();
+    expect(inRow().getByText(ON)).toBeTruthy();
   });
 
-  it("says music is excluded in the list once the destination's own programme marks a track", async () => {
+  it("says music is excluded in the list and on the card once the destination's own programme marks a track", async () => {
     headerSource = withAnn(1, []);
     serverHoldsOnB([{ track: 3, role: "music" }]);
     await renderPage();
-    expect(screen.getAllByText(EXCLUDED).length).toBeGreaterThanOrEqual(2); // the list and the card
-    expect(screen.queryByText(RAIL_NO_MUSIC)).toBeNull();
+    expect(inRow().getByText(EXCLUDED)).toBeTruthy();
+    expect(inCard().getByText(EXCLUDED)).toBeTruthy();
+    expect(inRow().queryByText(RAIL_NO_MUSIC)).toBeNull();
   });
 });

@@ -383,9 +383,20 @@ export function RoutingPage() {
   // debounce window (#497). Without it, adding the source id to the request
   // would only have moved the mis-scoped write rather than prevented it.
   const editedSourceRef = useRef<number | null>(null);
+  // Reads of the edited programme's layout (see readDestLayout): the sequence
+  // issued, the last one applied, the reads still out per programme, the read
+  // sequence a finished save sets as the floor "unsaved" ends above, and which
+  // edit the page is on, so a save finishing behind a newer edit does not end it.
+  const layoutReadSeq = useRef(0);
+  const lastAppliedSeq = useRef(0);
+  const readsInFlight = useRef(new Map<number, number>());
+  const pendingFloor = useRef<number | null>(null);
+  const editGen = useRef(0);
   const annotate = useCallback((track: number, next: Partial<TrackAnnotation>) => {
     annotationsEdited.current = true;
     editedSourceRef.current = editedSourceId;
+    editGen.current++;
+    pendingFloor.current = null; // a new edit: no read counts as after its save yet
     setMarksPending(editedSourceId);
     setAnnotations((prev) => {
       const existing = prev.some((a) => a.track === track);
@@ -408,7 +419,11 @@ export function RoutingPage() {
     // the source id present and simply wrong.
     if (editedSourceRef.current !== editedSourceId) return;
     const timer = window.setTimeout(() => {
+      const gen = editGen.current;
       const reconcile = () => {
+        // A newer edit is already waiting on its own save: its reconcile ends
+        // the unsaved state, not this one.
+        if (gen !== editGen.current) return;
         // What the server holds now is what the music card shows, and not
         // before: re-read the programme, then stop saying "pending".
         if (editedSourceId === null) return setMarksPending(null);
@@ -557,24 +572,25 @@ export function RoutingPage() {
   // layout rather than keeping the last one: the music card then states only
   // the setting instead of an answer it can no longer vouch for, and the next
   // refresh (the page's existing 2 s poll, below) tries again.
-  // Each read takes a sequence number and only the latest issued may answer:
-  // an older response that arrives after a newer one (two polls in flight, or
-  // a poll racing the re-read after a save) is dropped, not shown.
-  const layoutReadSeq = useRef(0);
-  // Set when a save finishes: the first read issued after it, and any later
-  // one that is answered, shows what the server holds, so "pending" ends there.
-  const pendingFloor = useRef<number | null>(null);
+  // Each read takes a sequence number. A response is applied if it is newer
+  // than the last one applied: an older response arriving after a newer one
+  // (a slow read overtaken by a save's re-read) is dropped, but a read that
+  // simply takes longer than a poll still lands, because the poll does not
+  // start another read for a programme while one is in flight (readsInFlight).
   const settlePending = (mine: number) => {
     if (pendingFloor.current !== null && mine > pendingFloor.current) {
       pendingFloor.current = null;
       setMarksPending(null);
     }
   };
-  const readDestLayout = useCallback(async (sid: number) => {
+  const readDestLayout = useCallback(async (sid: number, poll = false) => {
+    if (poll && (readsInFlight.current.get(sid) ?? 0) > 0) return;
     const mine = ++layoutReadSeq.current;
+    readsInFlight.current.set(sid, (readsInFlight.current.get(sid) ?? 0) + 1);
     try {
       const s = await api.source(sid);
-      if (layoutReadSeq.current !== mine || latestLayoutSource.current !== sid) return;
+      if (mine <= lastAppliedSeq.current || latestLayoutSource.current !== sid) return;
+      lastAppliedSeq.current = mine;
       const next: RoleLayout = {
         sourceId: sid,
         annotations: s.annotations ?? [],
@@ -587,10 +603,13 @@ export function RoutingPage() {
     } catch {
       // No layout, no role defaults: the server's slots stand. A failed read
       // is not worth a toast on a page that works without it.
-      if (layoutReadSeq.current === mine && latestLayoutSource.current === sid) {
+      if (mine > lastAppliedSeq.current && latestLayoutSource.current === sid) {
+        lastAppliedSeq.current = mine;
         setDestLayout(null);
         settlePending(mine);
       }
+    } finally {
+      readsInFlight.current.set(sid, (readsInFlight.current.get(sid) ?? 1) - 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settlePending only touches refs and a state setter
   }, []);
@@ -740,7 +759,7 @@ export function RoutingPage() {
     let cancelled = false;
     const read = () => {
       // The music card's marks ride this same poll rather than a second one.
-      if (loudSourceId !== null) void readDestLayoutRef.current(loudSourceId);
+      if (loudSourceId !== null) void readDestLayoutRef.current(loudSourceId, true);
       return autoApi
         .loudness<LoudnessFeed>(loudSourceId)
         .then((f) => {
