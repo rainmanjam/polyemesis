@@ -19,6 +19,8 @@ interface Case {
   excludeRoles: TrackRole[];
   tracks: { track: number; role: TrackRole; routed: boolean }[];
   excludedMusicTracks: number[];
+  /** The server refuses these annotations outright; nothing to compare. */
+  serverRefuses?: boolean;
 }
 
 const cases: Case[] = JSON.parse(
@@ -27,10 +29,10 @@ const cases: Case[] = JSON.parse(
 
 describe("excludedMusicTracks against the server's cases", () => {
   it("read the fixture", () => {
-    expect(cases.length, "fixture parsed to too few cases").toBeGreaterThanOrEqual(5);
+    expect(cases.length, "fixture parsed to too few cases").toBeGreaterThanOrEqual(10);
   });
 
-  for (const c of cases) {
+  for (const c of cases.filter((x) => !x.serverRefuses)) {
     it(c.name, () => {
       const annotations = c.tracks.map((t) => ({ track: t.track, role: t.role }) as TrackAnnotation);
       expect(excludedMusicTracks(c.excludeRoles, annotations)).toEqual(
