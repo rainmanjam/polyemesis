@@ -30,7 +30,9 @@ The step from the STP to `deck.glb` was done once by hand and is not recorded. T
 
 The committed model was compressed after `build.py` made it, in a way three.js's `GLTFLoader` reads with no decoder (the site's Content-Security-Policy has no `wasm-unsafe-eval`, so Draco, Meshopt and Basis cannot run). `compress.sh` does it in four steps: `prune` (unused accessors), `weld` (merges bitwise-identical vertices), `wrap-nodes.py` (see below), then `quantize` to 16-bit positions, 8-bit normals and 12-bit texture coordinates (`KHR_mesh_quantization`). It uses `@gltf-transform/cli@4.4.1` through `npx`; that tool is not a dependency of `web/`.
 
-`quantize` moves each mesh's scale and offset into its node's transform. `scene.ts` moves the key and dial nodes, adds children to them and reads their position, so `wrap-nodes.py` first makes each `key*` and `dial*` node a plain parent (same name, same translation) with an unnamed child that holds the mesh; the quantisation transform lands on the child. A test pins this.
+`quantize` moves each mesh's scale and offset into its node's transform. `scene.ts` moves the key and dial nodes, adds children to them and reads their position, so `wrap-nodes.py` first makes each `key*` and `dial*` node a plain parent (same name, same translation) with an unnamed child that holds the mesh; the quantisation transform lands on the child. A test pins this and the nodes' translations.
+
+The model's texture coordinates were dropped by `prune` (no material has a texture, so nothing reads them), which leaves `--quantize-texcoord` nothing to act on. The camera framing in `scene.ts` samples every Nth vertex of the body, so welding or re-exporting changes which vertices it samples and shifts the picture by a few pixels (about 4 px at 732 px wide for this compression).
 
 The input is the model as committed before the compression, `main` at `32c8d0c2`: 2,930,116 bytes, SHA-256 `bbc517f71c090afe90aa0b711bc10d8875f3897f3972a578f102541a97625eff` (`git show 32c8d0c2:web/public/models/stream-deck-plus.glb`). The step is not idempotent on its own output (the wrap step expects a mesh on each key node), so always start from that input:
 
