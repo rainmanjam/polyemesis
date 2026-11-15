@@ -1087,11 +1087,24 @@ export function RoutingPage() {
                 >
                   <span className="flex w-full items-center gap-1 text-[12px] font-medium">
                     <span className="min-w-0 break-words">{d.name}</span>
+                  </span>
+                  {/* The summary and the chip share the second line; the chip
+                      drops below it, right-aligned, when they do not fit, and
+                      wraps inside its own box in a long-worded language. */}
+                  <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span
+                      className={cn(
+                        "min-w-0 break-words font-mono text-sm",
+                        railTextClass("muted", d.id === selected?.id),
+                      )}
+                    >
+                      {routing?.summary ?? "—"}
+                    </span>
                     {mark && (
                       <span
                         title={markReason ? t(markReason) : undefined}
                         className={cn(
-                          "ml-auto flex shrink-0 items-center gap-1 text-sm",
+                          "ml-auto flex max-w-full items-center gap-1 text-sm",
                           railTextClass(mark.tone, d.id === selected?.id),
                         )}
                       >
@@ -1102,14 +1115,6 @@ export function RoutingPage() {
                         <span className="sr-only">{markReason ? t(markReason) : ""}</span>
                       </span>
                     )}
-                  </span>
-                  <span
-                    className={cn(
-                      "break-words font-mono text-sm",
-                      railTextClass("muted", d.id === selected?.id),
-                    )}
-                  >
-                    {routing?.summary ?? "—"}
                   </span>
                 </button>
               );

@@ -81,3 +81,35 @@ describe("the rail mark's reason reaches the accessible name, not only a hover t
     expect(src).toMatch(/<span className="sr-only">\{markReason \? t\(markReason\) : ""\}<\/span>/);
   });
 });
+
+/* The chip is longer than the "no music" it replaced ("music exclusion on"), and
+ * in the 16rem rail beside the name it broke every name onto two lines. The name
+ * keeps the first line to itself; the chip shares the second line with the
+ * routing summary and wraps below it, inside its own box, when it does not fit. */
+describe("the destination row's layout", () => {
+  const src = readFileSync(join(ROOT, "ui/src/pages/RoutingPage.tsx"), "utf8");
+  const row = src.slice(src.indexOf("{list.map(({ destination: d, routing }) => {"), src.indexOf("{/* ---------- editor ---------- */}"));
+
+  it("puts the name alone on the first line, with the wrapping it always had", () => {
+    expect(row).toMatch(
+      /<span className="flex w-full items-center gap-1 text-\[12px\] font-medium">\s*<span className="min-w-0 break-words">\{d\.name\}<\/span>\s*<\/span>/,
+    );
+  });
+
+  it("draws the chip after the summary, on the second line, not beside the name", () => {
+    expect(row.indexOf("{mark && (")).toBeGreaterThan(row.indexOf("{routing?.summary"));
+    expect(row).toContain("flex w-full flex-wrap items-center");
+  });
+
+  it("lets the chip wrap inside its own box instead of squeezing or overflowing", () => {
+    const chip = row.slice(row.indexOf("{mark && ("));
+    expect(chip).toContain("max-w-full");
+    expect(chip).not.toMatch(/ml-auto flex shrink-0/);
+  });
+
+  it("keeps the chip inside the row's single button, as text and not a focus stop", () => {
+    const chip = row.slice(row.indexOf("{mark && ("));
+    expect(chip.slice(0, chip.indexOf("</button>"))).not.toMatch(/<(button|a)\b/);
+    expect(row.match(/<button\b/g)?.length).toBe(1);
+  });
+});
