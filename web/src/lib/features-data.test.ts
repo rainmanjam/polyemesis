@@ -44,6 +44,15 @@ describe("the features data", () => {
     for (const row of INPUTS) expect(row).toHaveLength(3);
   });
 
+  it("states SRTLA compatibility as docs/SRTLA.md does: tested against srtla_send, no encoder presented as supported", () => {
+    const row = INPUTS.find((r) => r[0] === "SRTLA")!.join(" ");
+    expect(row).not.toMatch(/works? with|supports?|compatible/i);
+    expect(row).not.toMatch(/Moblin|IRL Pro/);
+    expect(row).toMatch(/tested against BELABOX's reference sender/i);
+    expect(row).toMatch(/ordinary SRT publish/);
+    expect(row).toMatch(/several links/);
+  });
+
   it("has four recording verbs and a non-empty list for each fact set", () => {
     expect(RECORDING_VERBS.map((v) => v.verb)).toEqual(["Record", "Offload", "Transcribe", "Clip"]);
     for (const list of [FAILOVER_FACTS, CHAT_FACTS, DECK_FACTS]) expect(list.length).toBeGreaterThan(0);
