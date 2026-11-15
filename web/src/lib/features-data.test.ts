@@ -53,6 +53,14 @@ describe("the features data", () => {
     expect(row).toMatch(/several links/);
   });
 
+  it("describes the SRTLA guide in the docs index as the guide does: tested against srtla_send, no encoder named as supported", () => {
+    const d = BY_SLUG.get("srtla")!.description;
+    expect(d).not.toMatch(/Moblin|IRL Pro/);
+    expect(d).not.toMatch(/works? with|supports?|compatible/i);
+    expect(d).toMatch(/tested against BELABOX's reference sender/);
+    expect(d.length).toBeLessThanOrEqual(155);
+  });
+
   it("has four recording verbs and a non-empty list for each fact set", () => {
     expect(RECORDING_VERBS.map((v) => v.verb)).toEqual(["Record", "Offload", "Transcribe", "Clip"]);
     for (const list of [FAILOVER_FACTS, CHAT_FACTS, DECK_FACTS]) expect(list.length).toBeGreaterThan(0);
