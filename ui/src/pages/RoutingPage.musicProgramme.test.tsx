@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 
 import { RoutingPage } from "./RoutingPage";
@@ -160,4 +160,93 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     expect(screen.queryByText(EXCLUDED)).toBeNull();
     expect(screen.queryByText(IDLE)).toBeNull();
   });
+
+  /* Marks that change AFTER the card first read them. */
+
+  /** The server's copy of Studio B's marks: what GET /source answers and what
+   *  PUT /source/annotations last wrote. */
+  function serverHoldsOnB(initial: unknown[]) {
+    let held = initial;
+    sourceRead.mockImplementation(async (id: number | null) =>
+      id === 2 ? withAnn(2, held) : headerSource,
+    );
+    (api.putAnnotations as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (list: unknown[], sid: number | null) => {
+        if (sid === 2) held = list;
+      },
+    );
+    return (next: unknown[]) => {
+      held = next;
+    };
+  }
+
+  async function setRole(track: number, role: string) {
+    const roleAria = translate("en", "signature.track.roleAria", { n: track + 1 });
+    if (!screen.queryByLabelText(roleAria)) {
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: translate("en", "route.labelTracks") })));
+    }
+    const trigger = await screen.findByLabelText(translate("en", "signature.track.roleAria", { n: track + 1 }));
+    await act(async () => {
+      fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+      fireEvent.click(trigger);
+    });
+    const opt = await screen.findByRole("option", { name: role });
+    await act(async () => fireEvent.click(opt));
+  }
+
+  it("follows an in-page edit on a programme other than the seed's, both ways", async () => {
+    headerSource = withAnn(1, []);
+    serverHoldsOnB([]);
+    await renderPage();
+    expect(screen.getByText(IDLE)).toBeTruthy();
+
+    await setRole(0, "Music");
+    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy(), { timeout: 4000 });
+
+    await setRole(0, translate("en", "signature.track.noRole"));
+    await waitFor(() => expect(screen.getByText(IDLE)).toBeTruthy(), { timeout: 4000 });
+    expect(screen.queryByText(EXCLUDED)).toBeNull();
+  }, 15000);
+
+  it("catches up with a change made elsewhere on the page's own refresh", async () => {
+    headerSource = withAnn(1, []);
+    const setServer = serverHoldsOnB([{ track: 3, role: "music" }]);
+    await renderPage();
+    expect(screen.getByText(EXCLUDED)).toBeTruthy();
+
+    setServer([]); // another tab removed the mark
+    await waitFor(() => expect(screen.getByText(IDLE)).toBeTruthy(), { timeout: 5000 });
+    expect(screen.queryByText(EXCLUDED), "a removed mark still reads as excluded").toBeNull();
+  }, 15000);
+
+  it("retries a failed read, and says nothing while it is failing", async () => {
+    headerSource = withAnn(1, []);
+    let fail = true;
+    sourceRead.mockImplementation(async (id: number | null) => {
+      if (id !== 2) return headerSource;
+      if (fail) throw new Error("boom");
+      return withAnn(2, [{ track: 3, role: "music" }]);
+    });
+    await renderPage();
+    expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy();
+
+    fail = false;
+    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy(), { timeout: 5000 });
+  }, 15000);
+
+  it("drops to the neutral state, not the old answer, when a refresh fails", async () => {
+    headerSource = withAnn(1, []);
+    let fail = false;
+    sourceRead.mockImplementation(async (id: number | null) => {
+      if (id !== 2) return headerSource;
+      if (fail) throw new Error("boom");
+      return withAnn(2, [{ track: 3, role: "music" }]);
+    });
+    await renderPage();
+    expect(screen.getByText(EXCLUDED)).toBeTruthy();
+
+    fail = true;
+    await waitFor(() => expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy(), { timeout: 5000 });
+    expect(screen.queryByText(EXCLUDED)).toBeNull();
+  }, 15000);
 });

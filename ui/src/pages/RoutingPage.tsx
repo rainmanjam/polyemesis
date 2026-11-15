@@ -386,6 +386,7 @@ export function RoutingPage() {
   const annotate = useCallback((track: number, next: Partial<TrackAnnotation>) => {
     annotationsEdited.current = true;
     editedSourceRef.current = editedSourceId;
+    setMarksPending(editedSourceId);
     setAnnotations((prev) => {
       const existing = prev.some((a) => a.track === track);
       const merged = existing
@@ -407,10 +408,22 @@ export function RoutingPage() {
     // the source id present and simply wrong.
     if (editedSourceRef.current !== editedSourceId) return;
     const timer = window.setTimeout(() => {
+      const reconcile = () => {
+        // What the server holds now is what the music card shows, and not
+        // before: re-read the programme, then stop saying "pending".
+        if (editedSourceId === null) return setMarksPending(null);
+        void readDestLayoutRef.current(editedSourceId).then(() =>
+          setMarksPending((p) => (p === editedSourceId ? null : p)),
+        );
+      };
       api
         .putAnnotations(annotations, editedSourceId)
-        .then(() => setAnnotationsStored(true))
+        .then(() => {
+          setAnnotationsStored(true);
+          reconcile();
+        })
         .catch((err) => {
+          reconcile();
           // A build without the route is not a failure worth a toast on every
           // keystroke — it is a capability this server does not have.
           if (err instanceof ApiError && (err.status === 404 || err.status === 405)) {
@@ -535,26 +548,41 @@ export function RoutingPage() {
   // annotations and tracks are the header programme's; a preset is applied
   // against the destination's (#497), so its role defaults must be too.
   const [destLayout, setDestLayout] = useState<RoleLayout | null>(null);
-  useEffect(() => {
-    if (editedSourceId === null) return;
-    let cancelled = false;
-    api
-      .source(editedSourceId)
-      .then((s) => {
-        if (cancelled) return;
-        setDestLayout({
-          sourceId: editedSourceId,
-          annotations: s.annotations ?? [],
-          tracks: layoutTrackIndices(s.tracks),
-        });
-      })
+  // The programme whose marks the operator has edited on this page and that the
+  // server has not been seen to hold yet (typed, saving, or not yet re-read).
+  // The music card says nothing about it until then: the layout it would read
+  // is the one from before the edit.
+  const [marksPending, setMarksPending] = useState<number | null>(null);
+  const latestLayoutSource = useRef<number | null>(null);
+  // Reads the edited destination's programme's layout. A failed read drops the
+  // layout rather than keeping the last one: the music card then states only
+  // the setting instead of an answer it can no longer vouch for, and the next
+  // refresh (the page's existing 2 s poll, below) tries again.
+  const readDestLayout = useCallback(async (sid: number) => {
+    try {
+      const s = await api.source(sid);
+      if (latestLayoutSource.current !== sid) return;
+      const next: RoleLayout = {
+        sourceId: sid,
+        annotations: s.annotations ?? [],
+        tracks: layoutTrackIndices(s.tracks),
+      };
+      // Keep the previous object when nothing changed, so the preset pickers
+      // that read it do not recompute on every poll.
+      setDestLayout((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    } catch {
       // No layout, no role defaults: the server's slots stand. A failed read
       // is not worth a toast on a page that works without it.
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [editedSourceId]);
+      if (latestLayoutSource.current === sid) setDestLayout(null);
+    }
+  }, []);
+  const readDestLayoutRef = useRef(readDestLayout);
+  readDestLayoutRef.current = readDestLayout;
+  useEffect(() => {
+    latestLayoutSource.current = editedSourceId;
+    if (editedSourceId === null) return;
+    void readDestLayout(editedSourceId);
+  }, [editedSourceId, readDestLayout]);
   // What each preset picker shows and a preset is applied with: the server's
   // defaults, replaced by the track annotated with the picker's role ON THE
   // EDITED DESTINATION'S PROGRAMME, with the operator's own picks over both.
@@ -692,8 +720,10 @@ export function RoutingPage() {
   useEffect(() => {
     if (!hasSelection) return;
     let cancelled = false;
-    const read = () =>
-      autoApi
+    const read = () => {
+      // The music card's marks ride this same poll rather than a second one.
+      if (loudSourceId !== null) void readDestLayoutRef.current(loudSourceId);
+      return autoApi
         .loudness<LoudnessFeed>(loudSourceId)
         .then((f) => {
           if (cancelled) return;
@@ -716,6 +746,7 @@ export function RoutingPage() {
         .catch(() => {
           if (!cancelled) setLoudNow(Date.now());
         });
+    };
     void read();
     const timer = window.setInterval(read, 2000);
     return () => {
@@ -756,15 +787,17 @@ export function RoutingPage() {
 
   // The tracks THIS destination's mix leaves out as music: the server applies
   // excludeRoles to the destination's own programme (Profile.ExcludedTracks),
-  // so this reads that programme's annotations, not the header's. Null until
-  // they are known: the page's own while they describe that programme, else
-  // the layout read from GET /source. A failed read leaves it null.
+  // so this reads that programme's annotations, not the header's: the layout
+  // read from GET /source, re-read on the page's 2 s poll and after each save,
+  // so it is at most about 2 s behind a change made elsewhere. Null (the card
+  // states only the setting) until the first read, after a failed read, and
+  // while an edit made here is not yet on the server.
   const destAnnotations = useMemo<readonly TrackAnnotation[] | null>(() => {
     if (editedSourceId === null) return annotationsFrom === null ? null : annotations;
-    if (annotationsFrom === editedSourceId) return annotations;
+    if (marksPending === editedSourceId) return null;
     if (destLayout?.sourceId === editedSourceId) return destLayout.annotations;
     return null;
-  }, [editedSourceId, annotationsFrom, annotations, destLayout]);
+  }, [editedSourceId, annotationsFrom, annotations, destLayout, marksPending]);
 
   // The music-rights table, read off the presets it generated. There is no
   // separate endpoint for it, and deriving both from the same rows is what

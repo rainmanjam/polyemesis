@@ -39,8 +39,10 @@ its first tagged release.
   marked as music yet", so the badge claimed an exclusion that was not happening. The badge now reads "music exclusion
   on, nothing to exclude yet" until a track is marked as music, and "music excluded" only once one is. It looks at the
   tracks of the programme the destination belongs to, as the server does, not the programme selected in the page
-  header; while those tracks are loading, or cannot be read, it says only "music exclusion on". The setting, the mix
-  and everything else on the card are unchanged.
+  header, and re-reads them on the page's 2-second refresh and after each save, so it is at most about two seconds
+  behind a change made in another tab or through the API; while those tracks are loading, cannot be read, or an edit
+  made here is not yet saved, it says only "music exclusion on". The setting, the mix and everything else on the card
+  are unchanged.
 
 ## [0.18.0] — 2026-11-11
 
