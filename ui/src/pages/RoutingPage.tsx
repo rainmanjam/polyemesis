@@ -412,9 +412,8 @@ export function RoutingPage() {
         // What the server holds now is what the music card shows, and not
         // before: re-read the programme, then stop saying "pending".
         if (editedSourceId === null) return setMarksPending(null);
-        void readDestLayoutRef.current(editedSourceId).then(() =>
-          setMarksPending((p) => (p === editedSourceId ? null : p)),
-        );
+        pendingFloor.current = layoutReadSeq.current;
+        void readDestLayoutRef.current(editedSourceId);
       };
       api
         .putAnnotations(annotations, editedSourceId)
@@ -558,10 +557,24 @@ export function RoutingPage() {
   // layout rather than keeping the last one: the music card then states only
   // the setting instead of an answer it can no longer vouch for, and the next
   // refresh (the page's existing 2 s poll, below) tries again.
+  // Each read takes a sequence number and only the latest issued may answer:
+  // an older response that arrives after a newer one (two polls in flight, or
+  // a poll racing the re-read after a save) is dropped, not shown.
+  const layoutReadSeq = useRef(0);
+  // Set when a save finishes: the first read issued after it, and any later
+  // one that is answered, shows what the server holds, so "pending" ends there.
+  const pendingFloor = useRef<number | null>(null);
+  const settlePending = (mine: number) => {
+    if (pendingFloor.current !== null && mine > pendingFloor.current) {
+      pendingFloor.current = null;
+      setMarksPending(null);
+    }
+  };
   const readDestLayout = useCallback(async (sid: number) => {
+    const mine = ++layoutReadSeq.current;
     try {
       const s = await api.source(sid);
-      if (latestLayoutSource.current !== sid) return;
+      if (layoutReadSeq.current !== mine || latestLayoutSource.current !== sid) return;
       const next: RoleLayout = {
         sourceId: sid,
         annotations: s.annotations ?? [],
@@ -570,11 +583,16 @@ export function RoutingPage() {
       // Keep the previous object when nothing changed, so the preset pickers
       // that read it do not recompute on every poll.
       setDestLayout((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      settlePending(mine);
     } catch {
       // No layout, no role defaults: the server's slots stand. A failed read
       // is not worth a toast on a page that works without it.
-      if (latestLayoutSource.current === sid) setDestLayout(null);
+      if (layoutReadSeq.current === mine && latestLayoutSource.current === sid) {
+        setDestLayout(null);
+        settlePending(mine);
+      }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settlePending only touches refs and a state setter
   }, []);
   const readDestLayoutRef = useRef(readDestLayout);
   readDestLayoutRef.current = readDestLayout;

@@ -249,4 +249,62 @@ describe("the music badge on a two-programme install (destination on Studio B, h
     await waitFor(() => expect(screen.getByText(translate("en", "route.musicExclusionOn"))).toBeTruthy(), { timeout: 5000 });
     expect(screen.queryByText(EXCLUDED)).toBeNull();
   }, 15000);
+
+  /* A late response must not overwrite a newer answer. */
+
+  /** Reads of Studio B that wait for the test to answer them, oldest first. */
+  function deferredReadsOfB(immediate: number) {
+    const pending: ((marks: unknown[]) => void)[] = [];
+    let issued = 0;
+    sourceRead.mockImplementation((id: number | null) => {
+      if (id !== 2) return Promise.resolve(headerSource);
+      issued++;
+      if (issued <= immediate) return Promise.resolve(withAnn(2, []));
+      return new Promise<SourceInfo>((resolve) => pending.push((marks) => resolve(withAnn(2, marks))));
+    });
+    return pending;
+  }
+
+  it("keeps the newer answer when an older read of the programme answers last", async () => {
+    headerSource = withAnn(1, []);
+    // The page's first two reads of Studio B (the selection's and the poll's)
+    // are both left unanswered.
+    const pending = deferredReadsOfB(0);
+    render(
+      <LiveDataContext.Provider value={live()}>
+        <TooltipProvider>
+          <MemoryRouter initialEntries={["/routing/21"]}>
+            <Routes>
+              <Route path="/routing/:id" element={<RoutingPage />} />
+            </Routes>
+          </MemoryRouter>
+        </TooltipProvider>
+      </LiveDataContext.Provider>,
+    );
+    await screen.findByLabelText(translate("en", "route.keepMusicOut"));
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2));
+
+    await act(async () => pending[1]([{ track: 3, role: "music" }])); // the newer read
+    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy());
+    await act(async () => pending[0]([])); // the older read, arriving late
+    await act(async () => {});
+    expect(screen.getByText(EXCLUDED), "an older response overwrote the newer answer").toBeTruthy();
+    expect(screen.queryByText(IDLE)).toBeNull();
+  }, 15000);
+
+  it("keeps the newer answer when a save's re-read is overtaken by a poll", async () => {
+    headerSource = withAnn(1, []);
+    // Two immediate reads (selection, first poll), then every read waits.
+    const pending = deferredReadsOfB(2);
+    await renderPage();
+    expect(screen.getByText(IDLE)).toBeTruthy();
+
+    await setRole(0, "Music");
+    // The save lands and its re-read is issued, then a poll issues another.
+    await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2), { timeout: 8000 });
+    await act(async () => pending[1]([{ track: 0, role: "music" }])); // the poll: newer
+    await act(async () => pending[0]([])); // the save's re-read: older, stale
+    await act(async () => {});
+    await waitFor(() => expect(screen.getByText(EXCLUDED)).toBeTruthy());
+  }, 20000);
 });
