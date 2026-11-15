@@ -1,6 +1,6 @@
 # Stream Deck + model scripts
 
-The homepage shows a 3D Stream Deck +. The model is `web/public/models/stream-deck-plus.glb` (about 2.9 MB). That file is the artefact of record; these scripts are how it was slimmed and split.
+The homepage shows a 3D Stream Deck +. The model is `web/public/models/stream-deck-plus.glb` (about 1.3 MB). That file is the artefact of record; these scripts are how it was slimmed and split, then compressed.
 
 ## Where the model comes from
 
@@ -25,6 +25,20 @@ The step from the STP to `deck.glb` was done once by hand and is not recorded. T
 - `build.py` splits the model's parts and slims them, using the face rectangles in `faces.json` (the eight keys `k00`..`k13` in two rows of four, the strip and the four dials). The last argument is the smallest feature kept, in millimetres (2 was used).
 - `regen.sh` runs `build.py` on `work/deck.glb` and writes the model. It exits 2 with a pointer to this file when `work/deck.glb` is missing.
 - `probes/bl_*.py` are the seven Blender scripts used to inspect and measure the CAD when `faces.json` was derived. They are not needed to rebuild.
+
+## Compression (no decoder)
+
+The committed model was compressed after `build.py` made it, in a way three.js's `GLTFLoader` reads with no decoder (the site's Content-Security-Policy has no `wasm-unsafe-eval`, so Draco, Meshopt and Basis cannot run). `compress.sh` does it in four steps: `prune` (unused accessors), `weld` (merges bitwise-identical vertices), `wrap-nodes.py` (see below), then `quantize` to 16-bit positions, 8-bit normals and 12-bit texture coordinates (`KHR_mesh_quantization`). It uses `@gltf-transform/cli@4.4.1` through `npx`; that tool is not a dependency of `web/`.
+
+`quantize` moves each mesh's scale and offset into its node's transform. `scene.ts` moves the key and dial nodes, adds children to them and reads their position, so `wrap-nodes.py` first makes each `key*` and `dial*` node a plain parent (same name, same translation) with an unnamed child that holds the mesh; the quantisation transform lands on the child. A test pins this.
+
+The input is the model as committed before the compression, `main` at `32c8d0c2`: 2,930,116 bytes, SHA-256 `bbc517f71c090afe90aa0b711bc10d8875f3897f3972a578f102541a97625eff` (`git show 32c8d0c2:web/public/models/stream-deck-plus.glb`). The step is not idempotent on its own output (the wrap step expects a mesh on each key node), so always start from that input:
+
+```
+bash web/scripts/stream-deck-model/compress.sh in.glb web/public/models/stream-deck-plus.glb
+```
+
+Result: 1,300,724 bytes (welding takes 92,966 vertices to 78,801).
 
 ## Regenerating
 
