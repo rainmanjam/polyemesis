@@ -78,10 +78,13 @@ anything can publish to.
 Open the **Sources** page and add one. The dialog asks for a name and nothing
 else.
 
-Then pick its **protocol** on the card — **SRT** for multitrack, **RTMP** for a
-single audio track — and press **Apply**. A source is created with no protocol
-chosen, which is deliberate: nothing is listening for it yet, so the card shows
-a publish token and no publish URL. The URL appears when the protocol does.
+A new source starts on **SRT**, the protocol for multitrack. Its card shows the
+SRT publish URL and its publish token straight away, and the server accepts an
+SRT publish for it before you press **Apply**. Check the **protocol** on the
+card. If your encoder can only send RTMP, which carries a single audio track,
+pick **RTMP** and press **Apply**. The URL changes with the protocol.
+**Apply** appears once you change the protocol, and applying restarts that
+source's ingest.
 
 Until you do this, the dashboard says "no programme yet" rather than showing an
 empty pipeline, and anything that acts on a programme — starting a destination,
@@ -90,8 +93,8 @@ telling you which step you are on, not an error.
 
 ## 4. Point OBS at it
 
-The **Sources** page shows the publish URL for the source you just created, once
-its protocol is set. Copy it — it looks like this, and the `streamid` is that
+The **Sources** page shows the publish URL for the source you just created. Copy
+it — it looks like this, and the `streamid` is that
 source's publish token, which is what tells polyemesis which source you are:
 
 ```
@@ -145,8 +148,23 @@ labels belong to the feed, so every destination sees the same set.
   point: your main channel gets mic + music, the second-language stream gets
   mic + commentary, the podcast feed gets mic only.
 
-Enable it. Video is copied, not re-encoded, so this costs almost nothing — add
-as many as you have upstream bandwidth for.
+Start it with the **Start** button on its card. That is what enabling a
+destination means: the server stores that it should be running and acts on it.
+There is no separate enable switch on the form. A destination you have started
+before any stream arrives stays on and waits; it starts sending once the stream
+is arriving and its tracks are known. Video is copied, not re-encoded, so this
+costs almost nothing — add as many as you have upstream bandwidth for.
+
+### Start, and Go live
+
+The **Start** button on a card starts that one destination. **Go live** on the
+dashboard opens a sheet that does the same for several at once. The sheet says
+"Review each destination, then start the ones that are ready." A destination is
+ready when its programme is on this install; otherwise its row says **Blocked**.
+The other rows say **Not started**, **Starting**, **Live** or **Failed**. The
+button reads **Go live · N ready**. Pressing it starts, one after another, each
+ready destination that is not already started, exactly as **Start** on that card
+would. A destination that is already started is left alone.
 
 ## 7. Watch that it is actually right
 
