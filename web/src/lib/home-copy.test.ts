@@ -183,3 +183,13 @@ describe("homepage claims match the code (T12)", () => {
   it("makes sending and moderating in the chat conditional on the platform", () =>
     expect(homeFile("FeatureTour.astro")).toMatch(/Send and moderate from the same place wherever the platform allows it/));
 });
+
+describe("a new source's first step (quickstart, 3)", () => {
+  it("does not tell the reader of a new source to press Apply before publishing, nor to enable a destination", () => {
+    const install = homeFile("Install.astro");
+    expect(install).toMatch(/starts on SRT/);
+    expect(install).not.toMatch(/pick SRT or RTMP on its card and press Apply/);
+    for (const m of install.matchAll(/[^.\n]*\bApply\b[^.\n]*\./g)) expect(m[0]).toMatch(/RTMP/);
+    for (const [name, src] of homeFiles()) expect(src, name).not.toMatch(/\benable it\b/i);
+  });
+});

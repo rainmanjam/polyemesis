@@ -240,7 +240,7 @@ export const TICK_TRACKS = {
 };
 /** @type {Fact} */
 export const ENABLE_DESTINATION = {
-  text: "Enable each destination: press Start on its card.",
+  text: "Start each destination with the Start button on its card.",
   doc: "quickstart",
   evidence: ["Start it with the Start button on its card", "That is what enabling a destination means"],
   anchor: "6-add-a-destination",
