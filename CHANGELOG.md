@@ -8,6 +8,17 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.18.1] — 2026-11-15
+
+### Changed
+
+- **Internal cleanup across the server and the console.** The SonarCloud findings raised against 0.18.0 are resolved:
+  long functions are split into named helpers, long parameter lists become structs, and several console elements use
+  their native HTML forms. No behaviour change intended. The text of an X post (title, description, then hashtags;
+  refused over 280 characters, never truncated) is unchanged and is now documented and tested.
+
 ### Fixed
 
 - **Renditions: "Not encoding" while a programme's renditions were encoding.** On a server with more than one programme,
@@ -33,6 +44,8 @@ its first tagged release.
   stops and the Recordings page says why), the uploads Save floor, the room playlist media needs for its normalised
   copies, and the delay buffer's disk guard. On such a mount with less free than a floor, recording now stops and
   uploads, normalised copies or delay spills are refused, where before they went ahead until the volume really filled.
+  The `disk.low` alert's absolute floor and the `polyemesis_recording_free_bytes` and `polyemesis_recording_total_bytes`
+  gauges read the same figure and drop with it; the alert's percentage test is unaffected.
   Volumes where the two block sizes match (ext4, xfs, btrfs and most others), macOS and Windows read exactly as before.
 - **Routing: "music excluded" shown while no track was marked as music.** A destination set to keep music out showed the
   badge "music excluded" even when no ingest track was marked as music, directly above the line "No ingest track is
@@ -7807,7 +7820,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/rainmanjam/polyemesis/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/rainmanjam/polyemesis/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/rainmanjam/polyemesis/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/rainmanjam/polyemesis/compare/v0.15.0...v0.16.0

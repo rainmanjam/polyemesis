@@ -252,6 +252,46 @@ switch it back on. The older binary's API rejects a request that sends the key
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.18.1
+
+**Nothing to do on most hosts.** This release fixes four wrong readings in the
+console. One of them, free disk space, also decides when recording stops and
+when uploads or delay spills are refused; see the next paragraph. No default
+and no setting changes.
+
+**Check one thing if recordings, uploads or the delay buffer sit on a Linux
+volume whose I/O block size is larger than its allocation unit.** Free space on
+such a volume read many times too large, so the free-space floors tripped far
+too late, if at all. They now see the true figure: with less free than a floor,
+recording stops, and uploads, normalised playlist copies and delay spills are
+refused, where 0.18.0 went ahead until the volume really filled. A refused
+delay spill drops that segment, so the delayed output loses that stretch. The
+`disk.low` alert's absolute floor and the `polyemesis_recording_free_bytes` and
+`polyemesis_recording_total_bytes` gauges read the same figure, so on such a
+volume they drop by the same ratio and an alert of your own built on them may
+fire; the alert's percentage test is unaffected. Look at the Disk card on the
+Recordings page after upgrading. Linux volumes where the two block sizes match
+(ext4, xfs, btrfs and most others), macOS and Windows read as before.
+
+**New clips get a record file.** Each clip captured from now on is saved with a
+small `….ts.meta.json` beside it holding its length, whether it starts on a
+keyframe, and its note. Clips captured before the upgrade have none and show
+"Start not checked". `GET /clips` and the reply to `POST /clips` gain a
+`measured` field. No field is renamed or removed; for a clip with a record,
+`seconds`, `keyframeAligned` and `note` now carry the measured values, where
+0.18.0 always listed zero, false and empty. The stream report's clip lengths
+change the same way.
+
+**No schema change, and a 0.18.0 binary opens a 0.18.1 database.** The schema
+version stays 1. If you go back to 0.18.0, it lists clips as before and ignores
+the record files, but it leaves a clip's record behind when the clip is deleted
+or expires, and with clip offload on it uploads the record files to the bucket
+as well (the local files stay). Restoring your backup does not touch the clips
+folder, so delete the `.meta.json` files there yourself if stranded records or
+bucket copies matter to you. Records stranded this way are not cleaned up by a
+later upgrade, and their bucket copies stay until your bucket's lifecycle rule
+removes them.
+
 ### Upgrading to 0.18.0
 
 **Nothing to do.** No default changes: the new `ingest.autostopped` alert is
