@@ -159,11 +159,13 @@ costs almost nothing — add as many as you have upstream bandwidth for.
 
 The **Start** button on a card starts that one destination. **Go live** on the
 dashboard opens a sheet that does the same for several at once. The sheet says
-"Review each destination, then start the ones that are ready." A destination is
-ready when its programme is on this install; otherwise its row says **Blocked**.
-The other rows say **Not started**, **Starting**, **Live** or **Failed**. The
-button reads **Go live · N ready**. Pressing it starts, one after another, each
-ready destination that is not already started, exactly as **Start** on that card
+"Review each destination, then start the ones that are ready." Each row has two
+marks. Under **Readiness**, a destination whose programme is on this install
+shows **Ready**, and one without a source shows "No source for this
+destination". A destination that is already **Live** shows nothing there. Under
+**Progress**, a row shows **Not started**, **Starting**, **Live** or **Failed**,
+or **Blocked** when it has no source. The button reads **Go live · N ready**. Pressing it starts, one after another,
+each ready destination that is not already started, exactly as **Start** on that card
 would. A destination that is already started is left alone.
 
 ## 7. Watch that it is actually right

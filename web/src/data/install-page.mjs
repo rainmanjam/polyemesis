@@ -70,7 +70,7 @@ export const FIRST_RUN = [
   },
   {
     title: "Add a destination",
-    text: "On Destinations, press Add and pick the platform. Paste its URL and stream key, or pick a connected account and let polyemesis fetch them. Tick the tracks this destination should carry, then enable it.",
+    text: "On Destinations, press Add and pick the platform. Paste its URL and stream key, or pick a connected account and let polyemesis fetch them. Tick the tracks this destination should carry, then press Start on its card.",
     shot: { file: "18-destinations.png", alt: "The Destinations page, one card per destination with its tracks", chrome: "Destinations: one card per destination, tracks per card" },
   },
   {

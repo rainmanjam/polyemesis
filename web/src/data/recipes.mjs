@@ -165,7 +165,7 @@ export const RECIPES = [
       },
       SETUP.ADD_SOURCE,
       {
-        text: "A source on the Sources page whose protocol is SRT: the bonded stream is handed to the SRT listener, which admits a publish only for a source set to SRT.",
+        text: "That source's protocol must be SRT, because the bonded stream is handed to the SRT listener, which admits a publish only for a source set to SRT.",
         doc: "srtla",
         evidence: ["check that its protocol is SRT", "admits a publish only for a source set to SRT"],
         anchor: "setting-it-up",

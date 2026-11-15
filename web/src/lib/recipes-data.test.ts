@@ -150,7 +150,7 @@ describe("recipe data", () => {
         const t = texts(by(slug));
         const add = at(t, /Destinations → Add/);
         expect(add, `${slug}: adds a destination`).toBeGreaterThan(-1);
-        const enable = t.findIndex((x, i) => i >= add && /enable/i.test(x));
+        const enable = t.findIndex((x, i) => i >= add && /^Start (the|each) destination/.test(x));
         expect(enable, `${slug}: a fact that enables it, at or after the add`).toBeGreaterThanOrEqual(add);
       }
     });
@@ -158,7 +158,7 @@ describe("recipe data", () => {
     it("picks the connected account before it enables the destination", () => {
       const step = by("obs-to-five-platforms").steps[3].facts.map((f: Fact) => f.text);
       const account = step.findIndex((x: string) => /connected account/i.test(x));
-      const enable = step.findIndex((x: string) => /enable/i.test(x));
+      const enable = step.findIndex((x: string) => /^Start (the|each) destination/.test(x));
       expect(by("obs-to-five-platforms").steps[3].facts, "the shared pick-the-account fact").toContain(SETUP.PICK_ACCOUNT);
       expect(step.findIndex((x: string) => /Destinations → Add/.test(x)), "add first").toBeLessThan(account);
       expect(account, "a fact that picks the connected account").toBeGreaterThan(-1);
@@ -184,7 +184,7 @@ describe("recipe data", () => {
 
     it("says the backpack source's protocol must be SRT, and cites the SRTLA guide for it", () => {
       const needs = by("streaming-from-a-backpack").needs as Fact[];
-      const f = needs.find((n) => /protocol is SRT/.test(n.text));
+      const f = needs.find((n) => /protocol must be SRT/.test(n.text));
       expect(f, "a need that states the protocol").toBeDefined();
       expect(f!.doc).toBe("srtla");
       expect(f!.anchor).toBe("setting-it-up");
