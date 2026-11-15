@@ -20,6 +20,11 @@ export const TOUR = {
   ],
 };
 
+/** The one line both the homepage and /tour print under the video, so they cannot drift.
+ * It is how docs/media/README.md describes the demo rig. */
+export const TOUR_DEMO_NOTE =
+  "The tour was filmed on a demo install: its five destinations are labelled as YouTube channels and publish to a local receiver, not to YouTube.";
+
 /** Seconds as m:ss, rounded down: 58.6 -> "0:58". @param {number} seconds */
 export function clock(seconds) {
   const whole = Math.floor(seconds);

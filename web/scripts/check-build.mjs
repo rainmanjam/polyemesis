@@ -1510,6 +1510,10 @@ const DROPPED = {
     },
   ],
   "/docs": [
+    {
+      cut: "for belabox, moblin and irl pro: several cellular links bonded into one srt publish, and an opt-in stop if the backpack goes quiet.",
+      why: "The owner's decision of 2026-11-14 to state compatibility as docs/SRTLA.md does: the description no longer names BELABOX, Moblin and IRL Pro as if supported, and says the receiver was tested against BELABOX's reference sender.",
+    },
     { cut: "documentation", why: "The old eyebrow word 'Documentation' ran into the h1 text; the page has a breadcrumb instead, and the h1 itself is kept." },
     {
       cut: "getting it running the routing operating it automating it understanding it",

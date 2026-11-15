@@ -70,6 +70,7 @@ import {
   roleLayoutFor,
   type RoleLayout,
 } from "@/features/routing/presetTrackDefaults";
+import { excludedMusicTracks } from "@/lib/musicExclusion";
 import {
   DEFAULT_DUCK_ATTACK_MS,
   DEFAULT_DUCK_RATIO,
@@ -382,9 +383,21 @@ export function RoutingPage() {
   // debounce window (#497). Without it, adding the source id to the request
   // would only have moved the mis-scoped write rather than prevented it.
   const editedSourceRef = useRef<number | null>(null);
+  // Reads of the edited programme's layout (see readDestLayout): the sequence
+  // issued, the last one applied, the reads still out per programme, the read
+  // sequence a finished save sets as the floor "unsaved" ends above, and which
+  // edit the page is on, so a save finishing behind a newer edit does not end it.
+  const layoutReadSeq = useRef(0);
+  const lastAppliedSeq = useRef(0);
+  const readsInFlight = useRef(new Map<number, number>());
+  const pendingFloor = useRef<number | null>(null);
+  const editGen = useRef(0);
   const annotate = useCallback((track: number, next: Partial<TrackAnnotation>) => {
     annotationsEdited.current = true;
     editedSourceRef.current = editedSourceId;
+    editGen.current++;
+    pendingFloor.current = null; // a new edit: no read counts as after its save yet
+    setMarksPending(editedSourceId);
     setAnnotations((prev) => {
       const existing = prev.some((a) => a.track === track);
       const merged = existing
@@ -406,10 +419,25 @@ export function RoutingPage() {
     // the source id present and simply wrong.
     if (editedSourceRef.current !== editedSourceId) return;
     const timer = window.setTimeout(() => {
+      const gen = editGen.current;
+      const reconcile = () => {
+        // A newer edit is already waiting on its own save: its reconcile ends
+        // the unsaved state, not this one.
+        if (gen !== editGen.current) return;
+        // What the server holds now is what the music card shows, and not
+        // before: re-read the programme, then stop saying "pending".
+        if (editedSourceId === null) return setMarksPending(null);
+        pendingFloor.current = layoutReadSeq.current;
+        void readDestLayoutRef.current(editedSourceId);
+      };
       api
         .putAnnotations(annotations, editedSourceId)
-        .then(() => setAnnotationsStored(true))
+        .then(() => {
+          setAnnotationsStored(true);
+          reconcile();
+        })
         .catch((err) => {
+          reconcile();
           // A build without the route is not a failure worth a toast on every
           // keystroke — it is a capability this server does not have.
           if (err instanceof ApiError && (err.status === 404 || err.status === 405)) {
@@ -534,26 +562,64 @@ export function RoutingPage() {
   // annotations and tracks are the header programme's; a preset is applied
   // against the destination's (#497), so its role defaults must be too.
   const [destLayout, setDestLayout] = useState<RoleLayout | null>(null);
-  useEffect(() => {
-    if (editedSourceId === null) return;
-    let cancelled = false;
-    api
-      .source(editedSourceId)
-      .then((s) => {
-        if (cancelled) return;
-        setDestLayout({
-          sourceId: editedSourceId,
-          annotations: s.annotations ?? [],
-          tracks: layoutTrackIndices(s.tracks),
-        });
-      })
+  // The programme whose marks the operator has edited on this page and that the
+  // server has not been seen to hold yet (typed, saving, or not yet re-read).
+  // The music card says nothing about it until then: the layout it would read
+  // is the one from before the edit.
+  const [marksPending, setMarksPending] = useState<number | null>(null);
+  const latestLayoutSource = useRef<number | null>(null);
+  // Reads the edited destination's programme's layout. A failed read drops the
+  // layout rather than keeping the last one: the music card then states only
+  // the setting instead of an answer it can no longer vouch for, and the next
+  // refresh (the page's existing 2 s poll, below) tries again.
+  // Each read takes a sequence number. A response is applied if it is newer
+  // than the last one applied: an older response arriving after a newer one
+  // (a slow read overtaken by a save's re-read) is dropped, but a read that
+  // simply takes longer than a poll still lands, because the poll does not
+  // start another read for a programme while one is in flight (readsInFlight).
+  const settlePending = (mine: number) => {
+    if (pendingFloor.current !== null && mine > pendingFloor.current) {
+      pendingFloor.current = null;
+      setMarksPending(null);
+    }
+  };
+  const readDestLayout = useCallback(async (sid: number, poll = false) => {
+    if (poll && (readsInFlight.current.get(sid) ?? 0) > 0) return;
+    const mine = ++layoutReadSeq.current;
+    readsInFlight.current.set(sid, (readsInFlight.current.get(sid) ?? 0) + 1);
+    try {
+      const s = await api.source(sid);
+      if (mine <= lastAppliedSeq.current || latestLayoutSource.current !== sid) return;
+      lastAppliedSeq.current = mine;
+      const next: RoleLayout = {
+        sourceId: sid,
+        annotations: s.annotations ?? [],
+        tracks: layoutTrackIndices(s.tracks),
+      };
+      // Keep the previous object when nothing changed, so the preset pickers
+      // that read it do not recompute on every poll.
+      setDestLayout((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      settlePending(mine);
+    } catch {
       // No layout, no role defaults: the server's slots stand. A failed read
       // is not worth a toast on a page that works without it.
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [editedSourceId]);
+      if (mine > lastAppliedSeq.current && latestLayoutSource.current === sid) {
+        lastAppliedSeq.current = mine;
+        setDestLayout(null);
+        settlePending(mine);
+      }
+    } finally {
+      readsInFlight.current.set(sid, (readsInFlight.current.get(sid) ?? 1) - 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settlePending only touches refs and a state setter
+  }, []);
+  const readDestLayoutRef = useRef(readDestLayout);
+  readDestLayoutRef.current = readDestLayout;
+  useEffect(() => {
+    latestLayoutSource.current = editedSourceId;
+    if (editedSourceId === null) return;
+    void readDestLayout(editedSourceId);
+  }, [editedSourceId, readDestLayout]);
   // What each preset picker shows and a preset is applied with: the server's
   // defaults, replaced by the track annotated with the picker's role ON THE
   // EDITED DESTINATION'S PROGRAMME, with the operator's own picks over both.
@@ -691,8 +757,10 @@ export function RoutingPage() {
   useEffect(() => {
     if (!hasSelection) return;
     let cancelled = false;
-    const read = () =>
-      autoApi
+    const read = () => {
+      // The music card's marks ride this same poll rather than a second one.
+      if (loudSourceId !== null) void readDestLayoutRef.current(loudSourceId, true);
+      return autoApi
         .loudness<LoudnessFeed>(loudSourceId)
         .then((f) => {
           if (cancelled) return;
@@ -715,6 +783,7 @@ export function RoutingPage() {
         .catch(() => {
           if (!cancelled) setLoudNow(Date.now());
         });
+    };
     void read();
     const timer = window.setInterval(read, 2000);
     return () => {
@@ -752,6 +821,20 @@ export function RoutingPage() {
     () => annotations.filter((a) => a.role === "music").map((a) => a.track),
     [annotations],
   );
+
+  // The tracks THIS destination's mix leaves out as music: the server applies
+  // excludeRoles to the destination's own programme (Profile.ExcludedTracks),
+  // so this reads that programme's annotations, not the header's: the layout
+  // read from GET /source, re-read on the page's 2 s poll and after each save,
+  // so it is at most about 2 s behind a change made elsewhere. Null (the card
+  // states only the setting) until the first read, after a failed read, and
+  // while an edit made here is not yet on the server.
+  const destAnnotations = useMemo<readonly TrackAnnotation[] | null>(() => {
+    if (editedSourceId === null) return annotationsFrom === null ? null : annotations;
+    if (marksPending === editedSourceId) return null;
+    if (destLayout?.sourceId === editedSourceId) return destLayout.annotations;
+    return null;
+  }, [editedSourceId, annotationsFrom, annotations, destLayout, marksPending]);
 
   // The music-rights table, read off the presets it generated. There is no
   // separate endpoint for it, and deriving both from the same rows is what
@@ -801,6 +884,7 @@ export function RoutingPage() {
       musicPlatformName: selectedPolicy?.name ?? "",
       musicDecision: selectedPolicy?.policy,
       musicTracks,
+      destAnnotations,
       muteBlocked,
     }),
     [
@@ -821,6 +905,7 @@ export function RoutingPage() {
       trackOptions,
       selectedPolicy,
       musicTracks,
+      destAnnotations,
       muteBlocked,
     ],
   );
@@ -980,9 +1065,16 @@ export function RoutingPage() {
               const pol = policyFor(d)?.policy;
               const guarded = d.profile.excludeRoles?.includes("music") ?? false;
               // A word, not a colour. See features/routing/musicRail.ts.
-              const mark = musicRailMark(guarded, pol?.exclude ?? false);
+              // "Excluded" only where this page knows a music-marked track is
+              // being left out (the selected destination's own programme, the
+              // same answer as the Music rights card); otherwise the setting.
+              const excludedNow =
+                d.id === selected?.id &&
+                destAnnotations !== null &&
+                excludedMusicTracks(d.profile.excludeRoles ?? [], destAnnotations).length > 0;
+              const mark = musicRailMark(guarded, pol?.exclude ?? false, excludedNow);
               // The reason behind the word, on hover and to a screen reader (B1).
-              const markReason = musicRailReason(guarded, pol?.exclude ?? false);
+              const markReason = musicRailReason(guarded, pol?.exclude ?? false, excludedNow);
               return (
                 <button
                   key={d.id}
@@ -995,11 +1087,24 @@ export function RoutingPage() {
                 >
                   <span className="flex w-full items-center gap-1 text-[12px] font-medium">
                     <span className="min-w-0 break-words">{d.name}</span>
+                  </span>
+                  {/* The summary and the chip share the second line; the chip
+                      drops below it, right-aligned, when they do not fit, and
+                      wraps inside its own box in a long-worded language. */}
+                  <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span
+                      className={cn(
+                        "min-w-0 break-words font-mono text-sm",
+                        railTextClass("muted", d.id === selected?.id),
+                      )}
+                    >
+                      {routing?.summary ?? "—"}
+                    </span>
                     {mark && (
                       <span
                         title={markReason ? t(markReason) : undefined}
                         className={cn(
-                          "ml-auto flex shrink-0 items-center gap-1 text-sm",
+                          "ml-auto flex max-w-full items-center gap-1 text-sm",
                           railTextClass(mark.tone, d.id === selected?.id),
                         )}
                       >
@@ -1010,14 +1115,6 @@ export function RoutingPage() {
                         <span className="sr-only">{markReason ? t(markReason) : ""}</span>
                       </span>
                     )}
-                  </span>
-                  <span
-                    className={cn(
-                      "break-words font-mono text-sm",
-                      railTextClass("muted", d.id === selected?.id),
-                    )}
-                  >
-                    {routing?.summary ?? "—"}
                   </span>
                 </button>
               );
@@ -1189,6 +1286,9 @@ interface EditorContext {
   musicPlatformName: string;
   musicDecision?: MusicDecision;
   musicTracks: number[];
+  /** The annotations of the programme the edited destination belongs to, or
+   *  null while they are not known (not read yet, or the read failed). */
+  destAnnotations: readonly TrackAnnotation[] | null;
   /** Why no Mute can apply on this destination (audio copy), translated, or
    *  null. Holds for both mixes: it is the destination that has no volume stage. */
   muteBlocked: string | null;
@@ -1615,7 +1715,7 @@ function ProfileEditor({
         platformName={ctx.musicPlatformName}
         decision={ctx.musicDecision}
         excludeRoles={excludeRoles}
-        musicTracks={ctx.musicTracks}
+        annotations={ctx.destAnnotations}
         onExcludeRoles={(roles) => onPatch({ excludeRoles: roles.length ? roles : null })}
       />
 
@@ -2001,22 +2101,26 @@ function TrackPick({
    a platform that will mute the VOD has to say so where the decision is made.
    ========================================================================== */
 
-function MusicRightsCard({
+export function MusicRightsCard({
   platformName,
   decision,
   excludeRoles,
-  musicTracks,
+  annotations,
   onExcludeRoles,
 }: Readonly<{
   platformName: string;
   decision?: MusicDecision;
   excludeRoles: TrackRole[];
-  musicTracks: number[];
+  /** The destination's own programme's annotations; null while not known. */
+  annotations: readonly TrackAnnotation[] | null;
   onExcludeRoles: (roles: TrackRole[]) => void;
 }>) {
   const t = useT();
   const tn = useTN();
   const excluded = excludeRoles.includes("music");
+  // null: the annotations are not known (loading, or the read failed), and the
+  // card then states the setting only. See excludedMusicTracks.
+  const musicTracks = annotations === null ? null : excludedMusicTracks(excludeRoles, annotations);
   const platformWants = decision?.exclude ?? false;
   const reason = decision?.reason || t("route.musicPolicyFallback");
   const who = platformName || t("route.thisDestinationSPlatform");
@@ -2024,9 +2128,22 @@ function MusicRightsCard({
   let statusBadge: ReactNode;
   let statusTip: ReactNode;
   if (excluded) {
+    // The badge states what is being done. With no track marked as music the
+    // setting is on but nothing is dropped, so it must not claim an exclusion.
+    // The words carry the state; the badge wraps inside the card rather than
+    // overflowing it in a language with long words.
+    const badgeText =
+      musicTracks === null
+        ? t("route.musicExclusionOn")
+        : musicTracks.length > 0
+          ? t("route.musicExcluded")
+          : t("route.musicExclusionIdle");
     statusBadge = (
-      <Badge variant="live">
-        <Music className="h-2.5 w-2.5" /> {t("route.musicExcluded")}
+      <Badge
+        variant={musicTracks !== null && musicTracks.length > 0 ? "live" : "outline"}
+        className="max-w-full whitespace-normal text-left"
+      >
+        <Music className="h-2.5 w-2.5 shrink-0" /> {badgeText}
       </Badge>
     );
     statusTip = (
@@ -2055,6 +2172,8 @@ function MusicRightsCard({
   let trackNote: ReactNode;
   if (!excluded) {
     trackNote = <>{t("route.everyTrackReaches")}</>;
+  } else if (musicTracks === null) {
+    trackNote = <>{t("route.musicTracksUnknown")}</>;
   } else if (musicTracks.length > 0) {
     trackNote = (
       <>
@@ -2099,7 +2218,7 @@ function MusicRightsCard({
         </CardTitle>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="cursor-help">
+            <span className="min-w-0 cursor-help">
               {statusBadge}
             </span>
           </TooltipTrigger>

@@ -17,6 +17,26 @@ const read = (p: string) => readFileSync(p, "utf8");
 const REGEN =
   "blender -b --python web/scripts/stream-deck-model/build.py -- web/scripts/stream-deck-model/work/deck.glb web/scripts/stream-deck-model/faces.json web/public/models/stream-deck-plus.glb 2";
 
+/* The wrapped key and dial nodes' translations, recorded from the committed model (scene.ts moves
+ * these nodes from here), so a re-export that moves a key fails. */
+const NODE_TRANSLATIONS: Record<string, number[]> = {
+  dial0: [-0.044201236218214035, 0.010747134685516357, 0.017340868711471558],
+  key00: [-0.04437196999788284, 0.0676470398902893, -0.045966215431690216],
+  key01: [-0.014790688641369343, 0.0676465556025505, -0.04596705734729767],
+  key02: [0.01479070633649826, 0.06764611601829529, -0.045967813581228256],
+  key03: [0.044372234493494034, 0.0676456019282341, -0.045968666672706604],
+  key10: [-0.044111717492341995, 0.05152076482772827, -0.03227578476071358],
+  key11: [-0.014703870750963688, 0.05152132362127304, -0.03227492794394493],
+  key12: [0.014703827910125256, 0.05152187868952751, -0.032274071127176285],
+  key13: [0.04411139711737633, 0.051522500813007355, -0.03227311372756958],
+};
+
+/** The committed model's JSON chunk. */
+function readGlb(): { json: any } {
+  const buf = readFileSync(join(repo, "web", "public", "models", "stream-deck-plus.glb"));
+  return { json: JSON.parse(buf.subarray(20, 20 + buf.readUInt32LE(12)).toString("utf8")) };
+}
+
 function walk(root: string): string[] {
   const out: string[] = [];
   for (const e of readdirSync(root, { withFileTypes: true })) {
@@ -73,7 +93,45 @@ describe("stream-deck-model scripts", () => {
   it("the committed model exists and stays small", () => {
     const glb = join(repo, "web", "public", "models", "stream-deck-plus.glb");
     expect(existsSync(glb)).toBe(true);
-    expect(statSync(glb).size).toBeLessThanOrEqual(3_500_000);
+    expect(statSync(glb).size).toBeLessThanOrEqual(1_320_000);
+  });
+
+  it("the model needs no decoder: no Draco, Meshopt or Basis, which the site's policy could not run", () => {
+    const { json } = readGlb();
+    for (const list of [json.extensionsUsed, json.extensionsRequired]) {
+      for (const bad of ["KHR_draco_mesh_compression", "EXT_meshopt_compression", "KHR_texture_basisu"]) {
+        expect(list ?? [], bad).not.toContain(bad);
+      }
+    }
+    expect(json.extensionsRequired ?? []).toEqual(["KHR_mesh_quantization"]);
+  });
+
+  it("keeps every node and material name scene.ts looks up, and the key and dial nodes unscaled", () => {
+    const { json } = readGlb();
+    const names = new Map<string, any>(json.nodes.filter((n: any) => n.name).map((n: any) => [n.name, n]));
+    const wanted = ["body_main", "body_stand", "dial0", ...[0, 1].flatMap((r) => [0, 1, 2, 3].map((c) => `key${r}${c}`))];
+    for (const w of wanted) expect(names.has(w), w).toBe(true);
+    // scene.ts moves these nodes, reads their position and adds children to them: the quantisation
+    // transform must sit on an unnamed child, never on the node itself.
+    for (const w of wanted.filter((n) => !n.startsWith("body"))) {
+      const n = names.get(w);
+      expect(n.translation, w).toEqual(NODE_TRANSLATIONS[w]);
+      expect(n.scale, w).toBeUndefined();
+      expect(n.mesh, w).toBeUndefined();
+      expect(n.children?.length, w).toBe(1);
+      expect(json.nodes[n.children[0]].mesh, w).toBeTypeOf("number");
+    }
+    const mats = json.materials.map((m: any) => m.name);
+    for (const m of ["mat_0", "mat_7", "plate", "dialcap"]) expect(mats, m).toContain(m);
+    expect(mats).toHaveLength(10);
+  });
+
+  it("README records the compression command and the SHA-256 of its input", () => {
+    const readme = read(join(dir, "README.md"));
+    expect(readme).toContain("bash web/scripts/stream-deck-model/compress.sh");
+    expect(readme).toContain("@gltf-transform/cli@4.4.1");
+    expect(readme).toContain("bbc517f71c090afe90aa0b711bc10d8875f3897f3972a578f102541a97625eff");
+    for (const f of ["compress.sh", "wrap-nodes.py"]) expect(existsSync(join(dir, f)), f).toBe(true);
   });
 
   it("build.py is not named build2 and documents the real command", () => {

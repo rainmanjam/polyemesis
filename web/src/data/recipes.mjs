@@ -164,6 +164,12 @@ export const RECIPES = [
         evidence: ["BELABOX, Moblin and IRL Pro all bond this way"],
       },
       SETUP.ADD_SOURCE,
+      {
+        text: "That source's protocol must be SRT, because the bonded stream is handed to the SRT listener, which admits a publish only for a source set to SRT.",
+        doc: "srtla",
+        evidence: ["check that its protocol is SRT", "admits a publish only for a source set to SRT"],
+        anchor: "setting-it-up",
+      },
       { text: "One UDP port open to the server.", doc: "srtla", evidence: ["udp"] },
       {
         text: "The receiver was tested against BELABOX's reference sender, srtla_send. BELABOX hardware, Moblin and IRL Pro have not been tested against it yet; they speak the same protocol and are expected to work.",

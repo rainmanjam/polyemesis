@@ -35,6 +35,16 @@ describe("the install page takes its commands from install.mjs", () => {
     expect(page).toContain("`${CLONE}\\n${COMPOSE_UP}`");
   });
 
+  it("does not tell the reader of a new source to press Apply before publishing", () => {
+    const step = FIRST_RUN.find((s: { title: string }) => s.title === "Add a source")!;
+    expect(step.text).toMatch(/starts on SRT/);
+    expect(step.text).not.toMatch(/add one, pick SRT or RTMP on its card and press Apply/);
+    expect(step.text).not.toMatch(/appears with the protocol/);
+    // Apply is for changing the protocol, so it must be tied to RTMP.
+    for (const m of step.text.matchAll(/[^.]*\bApply\b[^.]*\./g)) expect(m[0]).toMatch(/RTMP/);
+    expect(page).not.toMatch(/A fresh install has none/);
+  });
+
   it("agrees with the homepage Install section", () => {
     for (const name of ["DOCKER_RUN", "CLONE", "COMPOSE_UP", "INSTALL_SCRIPT"]) {
       expect(homeInstall, name).toMatch(new RegExp(`\\b${name}\\b`));

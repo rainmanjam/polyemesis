@@ -47,9 +47,9 @@ export const OBS_TRACK_TICKS = {
 
 /** @type {Fact} */
 export const ADD_SOURCE = {
-  text: "On the Sources page, add a source, pick SRT as its protocol and press Apply.",
+  text: "On the Sources page, add a source; it starts on SRT, the protocol for multitrack. Check its protocol on the card.",
   doc: "quickstart",
-  evidence: ["Open the Sources page and add one", "press Apply"],
+  evidence: ["Open the Sources page and add one", "A new source starts on SRT", "Check the protocol on the card"],
   anchor: "3-create-a-source",
 };
 /** @type {Fact} */
@@ -240,9 +240,9 @@ export const TICK_TRACKS = {
 };
 /** @type {Fact} */
 export const ENABLE_DESTINATION = {
-  text: "Enable each destination.",
+  text: "Start each destination with the Start button on its card.",
   doc: "quickstart",
-  evidence: ["Enable it"],
+  evidence: ["Start it with the Start button on its card", "That is what enabling a destination means"],
   anchor: "6-add-a-destination",
 };
 /** Said where the video is passed through, never where a rendition re-encodes it.

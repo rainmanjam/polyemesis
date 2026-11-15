@@ -17,7 +17,12 @@ the same.
 2. Open that port as **UDP** in your firewall. In Docker, publish it, for
    example `-p 5000:5000/udp`; the commented line in `docker-compose.yml`
    shows where.
-3. In the encoder, choose SRTLA and enter this server's address, the SRTLA port,
+3. On the programme's source card, check that its **protocol** is **SRT**. If
+   it shows anything else, choose **SRT** and press **Apply**. The receiver
+   hands the merged stream to the same SRT listener a direct SRT publish uses,
+   and that listener admits a publish only for a source set to SRT. For a source
+   in any other mode the bonded stream is refused.
+4. In the encoder, choose SRTLA and enter this server's address, the SRTLA port,
    and the programme's **publish token** as the stream ID. This is the same
    token you would use for plain SRT, shown on the programme's source card.
 

@@ -236,6 +236,12 @@ export const AUDIENCES = {
             anchor: "the-problem",
           },
           {
+            text: "On each destination's form, find Video treatment: choose Use a shared video encode, then pick the 9:16 rendition from the list under it.",
+            doc: "renditions",
+            evidence: ["Video treatment", "Use a shared video encode", "pick the rendition from the list that opens under it"],
+            anchor: "choosing-a-rendition-on-a-destination",
+          },
+          {
             text: "Every other destination stays on passthrough, which copies the source video, until you point it at a rendition.",
             doc: "renditions",
             evidence: ["Every destination stays on passthrough", "copies the source video"],

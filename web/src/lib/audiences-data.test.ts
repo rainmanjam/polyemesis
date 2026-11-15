@@ -159,14 +159,14 @@ describe("audience data", () => {
       }
     });
 
-    it("adds a destination, ticks its tracks and enables it, in that order", () => {
+    it("adds a destination, ticks its tracks and starts it, in that order", () => {
       for (const a of audiences) {
         const t = texts(a);
         const add = at(t, /Destinations → Add/);
         expect(add, `${a.key}: adds a destination`).toBeGreaterThan(-1);
         const tick = t.findIndex((x, i) => i > add && /tick the ones/i.test(x));
         expect(tick, `${a.key}: ticks its tracks after the add`).toBeGreaterThan(add);
-        const enable = t.findIndex((x, i) => i > tick && /\benable\b/i.test(x));
+        const enable = t.findIndex((x, i) => i > tick && /^Start (the|each) destination/.test(x));
         expect(enable, `${a.key}: enables it after the ticks`).toBeGreaterThan(tick);
       }
     });
@@ -204,6 +204,17 @@ describe("audience data", () => {
 
     it("says where the church's non-OBS encoder stands, since its example source is a hardware encoder", () => {
       expect(factsOf(AUDIENCES.worship)).toContain(SETUP.ANY_SRT_ENCODER);
+    });
+
+    it("tells the streamer which control assigns the rendition, after the destinations exist and before they are enabled", () => {
+      const t = texts(AUDIENCES.streamer);
+      const control = at(t, /Video treatment/);
+      expect(t[control]).toMatch(/Use a shared video encode/);
+      expect(at(t, /Destinations → Add/)).toBeLessThan(control);
+      expect(control).toBeLessThan(at(t, /^Start each destination/));
+      const f = (factsOf(AUDIENCES.streamer) as Fact[]).find((x) => /Video treatment/.test(x.text));
+      expect(f!.doc).toBe("renditions");
+      expect(f!.anchor).toBe("choosing-a-rendition-on-a-destination");
     });
 
     it("tells the streamer where to add the rendition, how to shape it and to choose Blurred fill", () => {
