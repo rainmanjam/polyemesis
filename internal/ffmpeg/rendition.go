@@ -504,7 +504,7 @@ func RenditionArgs(s RenditionSpec) []string {
 		args = append(args, "-vaapi_device", dev)
 	}
 
-	args = append(args, RelayConsumerInput(s.InRelayURL, RelayQueue)...)
+	args = append(args, RelayConsumerInput(s.InRelayURL)...)
 
 	// The overlay image is a second -i, and it goes AFTER the relay so the relay
 	// stays input 0. That is what keeps `-map 0:a -c:a copy` below correct

@@ -90,7 +90,7 @@ func ConformedFeedArgs(inURL, outURL string, offsetSeconds float64, primary []Au
 
 	args := CommonArgs(LogWarning, false)
 	args = append(args, ProgressArgs()...)
-	args = append(args, RelayConsumerInput(inURL, RelayQueue)...)
+	args = append(args, RelayConsumerInput(inURL)...)
 	args = append(args, "-map", "0")
 	switch {
 	case len(conform) == 0:

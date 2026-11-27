@@ -218,7 +218,7 @@ func TestASwitchRecoversAQuietRealFeedWhoseFirstWakeWasLost(t *testing.T) {
 func TestARelayConsumerInputCarriesNoReadTimeout(t *testing.T) {
 	// Any argument naming a timeout, in any spelling (timeout=, -rw_timeout,
 	// -stimeout, -timeout): case-insensitive and anywhere in the input args.
-	for _, a := range ffmpeg.RelayConsumerInput("udp://127.0.0.1:5000", ffmpeg.RelayQueue) {
+	for _, a := range ffmpeg.RelayConsumerInput("udp://127.0.0.1:5000") {
 		if strings.Contains(strings.ToLower(a), "timeout") {
 			t.Errorf("RelayConsumerInput carries a timeout argument %q", a)
 		}

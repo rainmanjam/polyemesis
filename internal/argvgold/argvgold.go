@@ -45,6 +45,7 @@ func Check(t testing.TB, name string, argv []string, roots ...string) {
 	if strings.HasSuffix(name, "_loglevel_debug") && !hasPair(argv, "-loglevel", "debug") {
 		t.Errorf("%s ignores POLYEMESIS_FFMPEG_LOGLEVEL=debug: %q", name, argv)
 	}
+	RejectInputSideOutputOnly(t, name, argv)
 	var b strings.Builder
 	for _, a := range argv {
 		b.WriteString(strconv.Quote(a))
@@ -96,6 +97,32 @@ func hasPair(argv []string, flag, val string) bool {
 		}
 	}
 	return false
+}
+
+// outputOnly are options FFmpeg refuses before an -i. Each was once accepted
+// there, so a golden file written before the change could carry one unnoticed.
+var outputOnly = []string{
+	// FFmpeg 9.1 (8d8c3fd81383): "cannot be applied to input url", exit 234.
+	// A no-op on the input side since 7.0, so dropping it changes nothing on
+	// the versions polyemesis supports.
+	"-thread_queue_size",
+}
+
+// RejectInputSideOutputOnly fails if argv puts an outputOnly option before any
+// input's -i, which is where FFmpeg reads it as an input option.
+func RejectInputSideOutputOnly(t testing.TB, name string, argv []string) {
+	t.Helper()
+	last := -1
+	for i, a := range argv {
+		if a == "-i" {
+			last = i
+		}
+	}
+	for i := 0; i < last; i++ {
+		if slices.Contains(outputOnly, argv[i]) {
+			t.Errorf("%s gives %s as an input option (before an -i), which FFmpeg 9.1 refuses: %q", name, argv[i], argv)
+		}
+	}
 }
 
 // RequireRelayConsumer fails unless argv reads the relay hub with the input

@@ -341,7 +341,7 @@ export function ExpertPanel() {
                   id="expert-in"
                   spellCheck={false}
                   className="mt-1 font-mono"
-                  placeholder="-thread_queue_size 2048"
+                  placeholder="-err_detect ignore_err"
                   value={draft.inputArgs}
                   onChange={(e) => edit({ inputArgs: e.target.value })}
                 />

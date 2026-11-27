@@ -325,7 +325,16 @@ func TestSynthArgsCarryNoStreamTitleTheMuxerWouldDrop(t *testing.T) {
 func TestSilenceArgsInputOrderIsLoadBearing(t *testing.T) {
 	args := SilenceArgs(baseSilence())
 
-	iRelay := indexOf(args, "-thread_queue_size")
+	iRelay := -1
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-i" && strings.HasPrefix(args[i+1], "udp://") {
+			iRelay = i
+			break
+		}
+	}
+	if iRelay < 0 {
+		t.Fatalf("no relay -i: %s", join(args))
+	}
 	fIdx := indexOf(args, "-f")
 	if fIdx < 0 || args[fIdx+1] != "lavfi" {
 		t.Fatalf("expected a -f lavfi input: %s", join(args))
@@ -338,10 +347,10 @@ func TestSilenceArgsInputOrderIsLoadBearing(t *testing.T) {
 	if args[fIdx+2] != "-i" {
 		t.Errorf("-f lavfi must sit immediately before its own -i: %s", join(args))
 	}
-	// -thread_queue_size belongs to the live relay only; the synthetic source
-	// has no jitter to absorb.
-	if countArg(args, "-thread_queue_size") != 1 {
-		t.Errorf("want exactly one -thread_queue_size (the relay's): %s", join(args))
+	// Neither input carries -thread_queue_size: FFmpeg 9.1 refuses it on the
+	// input side, and it did nothing there from 7.0 on.
+	if countArg(args, "-thread_queue_size") != 0 {
+		t.Errorf("want no -thread_queue_size: %s", join(args))
 	}
 }
 

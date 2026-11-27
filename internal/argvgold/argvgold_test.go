@@ -108,7 +108,7 @@ func TestLogLevelInstallsTheOverrideAndRestoresTheDefault(t *testing.T) {
 }
 
 func TestRequireRelayConsumerAcceptsTheSharedOptionsAndNamesWhatIsMissing(t *testing.T) {
-	good := append(ffmpeg.RelayConsumerInput("udp://127.0.0.1:1", ffmpeg.RelayQueue), "-map", "0")
+	good := append(ffmpeg.RelayConsumerInput("udp://127.0.0.1:1"), "-map", "0")
 	r := &recorder{}
 	RequireRelayConsumer(r, "good", good)
 	if len(r.errs) != 0 {
@@ -117,7 +117,7 @@ func TestRequireRelayConsumerAcceptsTheSharedOptionsAndNamesWhatIsMissing(t *tes
 
 	for name, argv := range map[string][]string{
 		"no input":         {"-map", "0"},
-		"hand-written":     {"-fflags", "+genpts", "-thread_queue_size", "1024", "-i", "udp://127.0.0.1:1"},
+		"hand-written":     {"-fflags", "+genpts", "-i", "udp://127.0.0.1:1"},
 		"options after -i": {"-i", "udp://127.0.0.1:1", "-analyzeduration", "1", "-probesize", "1", "-scan_all_pmts", "0", "-dts_delta_threshold", "31536000"},
 	} {
 		bad := &recorder{}
@@ -125,6 +125,30 @@ func TestRequireRelayConsumerAcceptsTheSharedOptionsAndNamesWhatIsMissing(t *tes
 		if len(bad.errs) == 0 {
 			t.Errorf("%s: a consumer without the shared options was accepted", name)
 		}
+	}
+}
+
+// FFmpeg 9.1 refuses -thread_queue_size before an -i (exit 234), and every relay
+// consumer carried one, so on 9.1 nothing that reads the relay started. The
+// option is still valid on the output side, so only the input side is refused.
+func TestAnInputSideThreadQueueSizeIsRefusedAndAnOutputSideOneIsNot(t *testing.T) {
+	for name, argv := range map[string][]string{
+		"before the only -i":   {"-thread_queue_size", "1024", "-i", "udp://127.0.0.1:1", "-f", "null", "-"},
+		"before the second -i": {"-i", "a.ts", "-thread_queue_size", "8", "-f", "lavfi", "-i", "anullsrc", "-f", "null", "-"},
+	} {
+		r := &recorder{}
+		RejectInputSideOutputOnly(r, name, argv)
+		if len(r.errs) != 1 {
+			t.Errorf("%s: want one refusal, got %v", name, r.errs)
+		}
+	}
+
+	ok := &recorder{}
+	RejectInputSideOutputOnly(ok, "output side", []string{"-i", "a.ts", "-thread_queue_size", "8", "-f", "null", "-"})
+	shared := append(ffmpeg.RelayConsumerInput("udp://127.0.0.1:1"), "-map", "0", "-f", "null", "-")
+	RejectInputSideOutputOnly(ok, "the shared prologue", shared)
+	if len(ok.errs) != 0 {
+		t.Errorf("refused an argv FFmpeg 9.1 accepts: %v", ok.errs)
 	}
 }
 
