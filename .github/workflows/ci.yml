@@ -247,7 +247,7 @@ jobs:
       # the full suite.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code != 'true'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         if: needs.changes.outputs.code != 'true'
         with:
           go-version-file: go.mod
@@ -288,7 +288,7 @@ jobs:
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
@@ -742,7 +742,7 @@ jobs:
           echo "::notice title=test: ${{ matrix.os }}::this check did no work -- every changed path was documentation. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
@@ -1842,7 +1842,7 @@ jobs:
           echo "::notice title=streamdeck end to end::this check did no work -- no changed path can reach the Stream Deck plugin or the server. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         if: needs.changes.outputs.code == 'true' && needs.changes.outputs.deck == 'true'
         with:
           go-version-file: go.mod
@@ -2076,7 +2076,7 @@ jobs:
           echo "::notice title=cross-compile all release targets::this check did no work -- every changed path was documentation. See the 'which changes' job."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
@@ -2301,7 +2301,7 @@ jobs:
         suite: ${{ fromJSON(needs.container-suites.outputs.suites) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version-file: go.mod
           cache: ${{ github.ref == 'refs/heads/main' }}
@@ -2536,7 +2536,7 @@ jobs:
       # on each one rather than checked once at the top.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: needs.changes.outputs.code == 'true'
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         if: needs.changes.outputs.code == 'true'
         with:
           go-version-file: go.mod
