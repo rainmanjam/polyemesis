@@ -20,7 +20,7 @@ genuinely hard or is the Go project's own code.
 |---|---|---|---|
 | `modernc.org/sqlite` | v1.57.0 | BSD-3-Clause | SQLite, transpiled to pure Go. The reason the binary needs no cgo |
 | `github.com/go-chi/chi/v5` | v5.3.2 | MIT | HTTP router. `net/http`-shaped, no framework |
-| `github.com/gorilla/websocket` | v1.5.3 | BSD-2-Clause | WebSocket for live status, levels, logs, chat |
+| `github.com/gorilla/websocket` | v1.5.4-0.20240701034025-d67f41855da4 | BSD-2-Clause | WebSocket for live status, levels, logs, chat |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | MIT | Session token signing |
 | `golang.org/x/crypto` | v0.55.0 | BSD-3-Clause | bcrypt, NaCl secretbox, ACME |
 | `golang.org/x/sys` | v0.47.0 | BSD-3-Clause | Process groups, disk stats, Windows job objects |
