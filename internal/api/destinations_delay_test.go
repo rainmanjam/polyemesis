@@ -25,7 +25,8 @@ import (
 // exist, so the ingest is never measured; the engine starts destinations
 // provisionally once probing has failed probeGiveUp times WHILE THE RELAY IS
 // FLOWING. So datagrams go into the hub for the whole setup, and keep going
-// in the background so each line has something buffered.
+// in the background so each line has something buffered. The fixture returns
+// only once every line holds something, so a caller may stop the feed at once.
 func delayServer(t *testing.T, n int) (s *Server, h http.Handler, sign func(*http.Request), ids []int64) {
 	t.Helper()
 	s, h, sign, ids, _ = delayServerFeed(t, n)
@@ -83,10 +84,39 @@ func delayServerFeed(t *testing.T, n int) (s *Server, h http.Handler, sign func(
 		ids = append(ids, created.Destination.ID)
 		postJSON(t, h, sign, "/api/v1/destinations/"+itoa(created.Destination.ID)+"/start", nil)
 	}
+	// "buffering" is also what an EMPTY line reports (it is simply "not
+	// draining, not releasing"), so the phase alone does not promise the tail
+	// this fixture exists to provide. A caller that stops the feed straight
+	// away -- TestIngestLossStopLetsABroadcastDelayTailPlayOut does -- could
+	// drain a line no datagram had reached yet: Drain closes at once on an
+	// empty line, the destination leaves Status, and the phase reads "". Seen
+	// on a loaded Windows runner as `phase "", want draining`.
 	for _, id := range ids {
 		waitPhase(t, s, id, engine.DelayBuffering, 3*time.Minute)
+		waitHeld(t, s, id, 3*time.Minute)
 	}
 	return s, h, sign, ids, stopFeed
+}
+
+// waitHeld waits until destination id's delay line holds at least one
+// datagram, in memory or spilled to disk.
+func waitHeld(t *testing.T, s *Server, id int64, within time.Duration) {
+	t.Helper()
+	held := func() bool {
+		for _, d := range s.mgr.DestinationStatuses() {
+			if d.ID == id && d.Delay != nil {
+				return d.Delay.MemBytes+d.Delay.DiskBytes > 0
+			}
+		}
+		return false
+	}
+	deadline := time.Now().Add(within)
+	for !held() {
+		if time.Now().After(deadline) {
+			t.Fatalf("destination %d's delay line never held anything (phase %q)", id, phaseOf(s, id))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func phaseOf(s *Server, id int64) string {
