@@ -7,7 +7,7 @@ toolchain go1.27.4
 require (
 	github.com/bluenviron/gortmplib v1.0.6
 	github.com/datarhei/gosrt v0.13.0
-	github.com/eclipse/paho.golang v0.23.0
+	github.com/eclipse/paho.golang v0.24.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.4-0.20240701034025-d67f41855da4
@@ -21,7 +21,7 @@ require (
 	golang.org/x/text v0.44.0
 	golang.org/x/tools v0.53.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
