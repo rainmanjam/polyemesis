@@ -8,7 +8,16 @@ its first tagged release.
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- **WebSocket frames polyemesis sends now carry a properly random mask key** (GO-2026-6278, GHSA-w67g-5rqw-f597).
+  `github.com/gorilla/websocket` v1.5.3 masked each outgoing client frame with a key from `math/rand` instead of
+  `crypto/rand`. That covered the connections polyemesis opens itself: Twitch EventSub and chat activity, and the
+  OBS bridge. The fix has no tagged upstream release, so the module moves to the upstream commit that makes it
+  (`v1.5.4-0.20240701034025-d67f41855da4`, 14 commits past v1.5.3). Those commits also bring two small changes to
+  the console's own live socket: a request that says `Connection: upgrade` but has no `Upgrade: websocket` header is
+  now refused with 426 instead of 400 (browsers always send both, and a plain GET is still a 400), and a socket
+  proxy for the OBS bridge is now handled by `golang.org/x/net/proxy` instead of a bundled copy of it.
 
 ## [0.18.1] — 2026-11-15
 

@@ -47,7 +47,7 @@ Fourteen, deliberately. Each one earns its place below.
 | `github.com/eclipse/paho.golang` | v0.23.0 | `internal/mqtt` |
 | `github.com/go-chi/chi/v5` | v5.3.2 | `internal/api` |
 | `github.com/golang-jwt/jwt/v5` | v5.3.1 | `internal/auth` |
-| `github.com/gorilla/websocket` | v1.5.3 | `internal/api` |
+| `github.com/gorilla/websocket` | v1.5.4-0.20240701034025-d67f41855da4 | `internal/api` |
 | `github.com/shirou/gopsutil/v4` | v4.26.7 | `internal/stats` |
 | `golang.org/x/crypto` | v0.55.0 | `internal/secrets`, `internal/db`, `internal/tlsx` |
 | `golang.org/x/net` | v0.58.0 | `internal/tlsx` (IDNA), `internal/srtserver` |
@@ -238,6 +238,13 @@ back in.
 One file, `internal/api/ws.go`: the live stats/event feed that drives the UI.
 Gorilla was un-archived and is maintained again. `nhooyr.io/websocket` /
 `coder/websocket` would also work; there is no reason to churn.
+
+It is pinned to an untagged upstream commit, not a release: v1.5.3 masks outgoing
+client frames with `math/rand` (GO-2026-6278), and the fix (`d67f41855da4`, "Use
+crypto/rand for mask key") has not been tagged. v1.5.1 also has the fix, but v1.5.2
+is retracted and v1.5.3 is upstream backing out of that line, so going back is the
+wrong direction. Move to the first tagged release that contains `d67f41855da4` as
+soon as there is one.
 
 ### `github.com/shirou/gopsutil/v4`
 
