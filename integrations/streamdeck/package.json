@@ -17,16 +17,16 @@
     "pack": "node scripts/pack.mjs"
   },
   "dependencies": {
-    "@elgato/streamdeck": "3.0.4",
-    "@elgato/utils": "0.6.2"
+    "@elgato/streamdeck": "3.0.6",
+    "@elgato/utils": "0.7.0"
   },
   "devDependencies": {
-    "@elgato/cli": "1.10.4",
+    "@elgato/cli": "1.10.5",
     "@types/node": "24.19.2",
-    "@vitest/coverage-v8": "5.1.0",
+    "@vitest/coverage-v8": "5.1.1",
     "esbuild": "0.28.2",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.1"
   },
   "overrides": {
     "ejs": "7.0.2",
