@@ -35,7 +35,7 @@
     "jsdom": "^31.0.1",
     "playwright": "1.65.1",
     "vitest": "^5.1.1",
-    "wrangler": "4.166.0"
+    "wrangler": "4.167.0"
   },
   "//overrides": "lodash-es is pulled in by chevrotain, which mermaid 12 added. Versions up to 4.17.23 carry GHSA-r5fr-rjxr-66jc (code injection via _.template) and GHSA-f23m-r3pf-42rh (prototype pollution in _.unset/_.omit); 4.18.1 is clean. chevrotain has not moved, and npm audit fix would downgrade mermaid back to 11 rather than fix the dependency. The override DEDUPES -- one lodash-es at 4.18.1, no nested copy -- so nothing is shadowed. REMOVE THIS once chevrotain ships a release depending on >=4.18.1.",
   "overrides": {
