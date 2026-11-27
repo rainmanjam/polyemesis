@@ -252,6 +252,29 @@ switch it back on. The older binary's API rejects a request that sends the key
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.18.2
+
+**Nothing to do on most hosts.** No default and no setting changes. The schema
+version stays 1, so a 0.18.1 binary opens a 0.18.2 database and going back needs
+no restore.
+
+**Moving to FFmpeg 9.1? Upgrade polyemesis first.** On FFmpeg 9.1, 0.18.1 and
+earlier start none of their outputs: every destination, recording, rendition,
+meter and playout exits at once with "cannot be applied to input url". 0.18.2
+runs on 8.x, 9.0 and 9.1 alike. The same applies to a rollback: going back to
+0.18.1 on a host that has 9.1 takes everything off air. Homebrew already ships
+9.1. The Docker images are not affected: they ship 8.1 (8.0 in the VA-API image).
+
+**Check one thing if you use expert arguments.** If a destination's expert
+input arguments include `-thread_queue_size`, remove it before moving to FFmpeg
+9.1; that destination will not start otherwise. The console's example in that
+field used to suggest it. On the output side it is still accepted.
+
+**Only for a WebSocket client you wrote yourself:** a request to `/api/v1/ws`
+that says `Connection: upgrade` but has no `Upgrade: websocket` header is now
+refused with 426 instead of 400. Browsers and standard WebSocket libraries send
+both headers, and a plain GET is still a 400.
+
 ### Upgrading to 0.18.1
 
 **Nothing to do on most hosts.** This release fixes four wrong readings in the

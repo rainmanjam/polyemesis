@@ -8,6 +8,17 @@ its first tagged release.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.18.2] — 2026-11-27
+
+### Changed
+
+- **Dependency updates** (#1138), with no behaviour change intended: the Go modules `golang.org/x/crypto`, `x/net`,
+  `x/term` and `x/text`, the embedded SQLite driver `modernc.org/sqlite`, and the RTMP library `gortmplib`; the
+  console's, the site's and the Stream Deck plugin's JavaScript packages; and the Go image the Docker images are built
+  from.
+
 ### Fixed
 
 - **FFmpeg 9.1: nothing that reads the programme would start.** Every FFmpeg child that reads polyemesis's internal
@@ -7840,7 +7851,8 @@ Stated here rather than discovered later. None is a bug; each is a boundary.
 - **Instagram Live cannot work** and is marked unsupported rather than shipped
   as a preset that never connects.
 
-[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/rainmanjam/polyemesis/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/rainmanjam/polyemesis/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/rainmanjam/polyemesis/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/rainmanjam/polyemesis/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/rainmanjam/polyemesis/compare/v0.16.0...v0.17.0
