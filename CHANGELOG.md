@@ -8,6 +8,17 @@ its first tagged release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **FFmpeg 9.1: nothing that reads the programme would start.** Every FFmpeg child that reads polyemesis's internal
+  relay (destinations, recordings, renditions, the meters and loudness monitor, the source selector, silence and the
+  HLS/DASH playout) was started with `-thread_queue_size` in front of its input. FFmpeg 9.1 (released 2026-11-20)
+  removed that input option, so each one exited at once with "cannot be applied to input url" (exit 234). The option
+  is gone from every command: it had done nothing on the input side since FFmpeg 7.0, so on 8.x and 9.0 the commands
+  behave exactly as before. If you added `-thread_queue_size` to a destination's expert input arguments yourself,
+  remove it before moving to 9.1; on the output side it is still accepted. The console's example in that field now
+  shows a different option.
+
 ### Security
 
 - **WebSocket frames polyemesis sends now carry a properly random mask key** (GO-2026-6278, GHSA-w67g-5rqw-f597).

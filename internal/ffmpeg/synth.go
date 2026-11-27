@@ -137,7 +137,7 @@ func SilenceArgs(s SilenceSpec) []string {
 
 	args := CommonArgs(LogWarning, false)
 	args = append(args, ProgressArgs()...)
-	args = append(args, RelayConsumerInput(s.InRelayURL, RelayQueue)...)
+	args = append(args, RelayConsumerInput(s.InRelayURL)...)
 	args = append(args, SilenceInputArgs(s.Channels, s.SampleRate)...)
 	args = append(args,
 		// No '?' on the video map. This tier is only started for an ingest that

@@ -100,7 +100,7 @@ func Args(s Spec) []string {
 	// ffmpeg.ProgressArgs; ffmpeg.MetersArgs does the same for the ingest meter.
 	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, false)
 	args = append(args, "-nostats")
-	args = append(args, ffmpeg.RelayConsumerInput(s.RelayURL, ffmpeg.RelayMeterQueue)...)
+	args = append(args, ffmpeg.RelayConsumerInput(s.RelayURL)...)
 	return append(args,
 		"-filter_complex", graph,
 		"-map", "["+analyserOut+"]",

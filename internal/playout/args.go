@@ -100,7 +100,7 @@ func VariantArgs(s VariantSpec) []string {
 
 	args := ffmpeg.CommonArgs(ffmpeg.LogWarning, false)
 	args = append(args, ffmpeg.ProgressArgs()...)
-	args = append(args, ffmpeg.RelayConsumerInput(s.RelayURL, ffmpeg.RelayQueue)...)
+	args = append(args, ffmpeg.RelayConsumerInput(s.RelayURL)...)
 	args = append(args, hlsOutput(s)...)
 	if s.DASH {
 		args = append(args, dashOutput(s)...)

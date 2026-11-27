@@ -5,8 +5,6 @@
 "-nostats"
 "-fflags"
 "+genpts"
-"-thread_queue_size"
-"512"
 "-analyzeduration"
 "15000000"
 "-probesize"

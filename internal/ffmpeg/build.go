@@ -934,21 +934,18 @@ func RelayInputURL(base string) string {
 	return base + sep + "fifo_size=" + strconv.Itoa(relayFIFOPackets) + "&overrun_nonfatal=1"
 }
 
-// Input queue sizes for a relay consumer's -thread_queue_size.
-const (
-	// RelayQueue is for every consumer that decodes or muxes the whole programme:
-	// the relay is a live source, and a large input queue absorbs scheduler
-	// jitter that would otherwise show up as dropped frames.
-	RelayQueue = 1024
-	// RelayMeterQueue is for the two analysers (MetersArgs and the loudness
-	// monitor), which decode audio only and discard it: they keep the smaller
-	// queue they were measured with.
-	RelayMeterQueue = 512
-)
-
 // RelayConsumerInput is the input prologue of every child that reads the relay
-// hub: genpts, the input queue, the probe limits and timestamp options of
-// RelayInputArgs, and the relay URL as -i.
+// hub: genpts, the probe limits and timestamp options of RelayInputArgs, and the
+// relay URL as -i.
+//
+// NO -thread_queue_size, and none may come back on the input side. It was here
+// (1024, or 512 for the meters) and did nothing from FFmpeg 7.0 on: the threaded
+// rewrite (d119ae2fd82a) left the input option parsed but unused. FFmpeg 9.1
+// removed it (8d8c3fd81383, "remove stale -thread_queue_size input option"), and
+// on 9.1 an input-side -thread_queue_size is a parse error -- exit 234, "cannot
+// be applied to input url" -- so every child that reads the relay failed to
+// start. The option still exists on the OUTPUT side. argvgold.Check refuses an
+// input-side one in every golden argv.
 //
 // ONE PROLOGUE FOR EVERY READER. Five of the nine consumers (the rendition, the
 // silence synthesiser, the playout variants, the loudness monitor and the
@@ -961,8 +958,8 @@ const (
 //
 // The caller puts its own flags (-vaapi_device, -nostats, the progress args)
 // before this, and everything that follows -i after.
-func RelayConsumerInput(url string, queue int) []string {
-	args := []string{"-fflags", "+genpts", "-thread_queue_size", strconv.Itoa(queue)}
+func RelayConsumerInput(url string) []string {
+	args := []string{"-fflags", "+genpts"}
 	args = append(args, relayInputArgsFor(url)...)
 	return append(args, "-i", RelayInputURL(url))
 }
@@ -1370,7 +1367,7 @@ func DestinationArgs(s DestSpec) []string {
 	// commonArgsLive.
 	args := commonArgsLive()
 	args = append(args, ProgressArgs()...)
-	args = append(args, RelayConsumerInput(s.RelayURL, RelayQueue)...)
+	args = append(args, RelayConsumerInput(s.RelayURL)...)
 
 	// The copy path branches BEFORE -filter_complex, and it has to. A graph
 	// that is compiled and never mapped is not ignored: FFmpeg 8.1.2 answers
@@ -1602,7 +1599,7 @@ func RecorderArgs(s RecorderSpec) []string {
 	}
 	args := CommonArgs(LogWarning, false)
 	args = append(args, ProgressArgs()...)
-	args = append(args, RelayConsumerInput(s.RelayURL, RelayQueue)...)
+	args = append(args, RelayConsumerInput(s.RelayURL)...)
 	args = append(args,
 		"-map", "0",
 		"-c", "copy",
@@ -1658,7 +1655,7 @@ func PreviewArgs(s PreviewSpec) []string {
 
 	args := CommonArgs(LogWarning, false)
 	args = append(args, ProgressArgs()...)
-	args = append(args, RelayConsumerInput(s.RelayURL, RelayQueue)...)
+	args = append(args, RelayConsumerInput(s.RelayURL)...)
 	args = append(args,
 		"-map", "0:v:0",
 		"-map", fmt.Sprintf("0:a:%d?", s.AudioTrack), // '?' => tolerate a video-only ingest
@@ -1827,7 +1824,7 @@ func MetersArgs(s MetersSpec) []string {
 		// whole life: \r-terminated updates and never a \n.
 		"-nostats",
 	)
-	args = append(args, RelayConsumerInput(s.RelayURL, RelayMeterQueue)...)
+	args = append(args, RelayConsumerInput(s.RelayURL)...)
 	args = append(args,
 		"-filter_complex", strings.Join(chains, ";"),
 		"-map", "[mout]",

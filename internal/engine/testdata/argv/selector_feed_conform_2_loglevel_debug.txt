@@ -7,8 +7,6 @@
 "pipe:1"
 "-fflags"
 "+genpts"
-"-thread_queue_size"
-"1024"
 "-analyzeduration"
 "15000000"
 "-probesize"
