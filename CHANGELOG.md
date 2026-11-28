@@ -10,6 +10,21 @@ its first tagged release.
 
 Nothing yet.
 
+## [0.18.3] — 2026-11-28
+
+### Changed
+
+- **Dependency updates** (#1143, #1145, #1141), with no behaviour change intended: the Go modules
+  `github.com/eclipse/paho.golang` (MQTT) and `modernc.org/sqlite`; the console's charts and icons (recharts,
+  lucide-react) and its linter; the site's framework (astro) and build tooling; and the SonarCloud scanner used in CI.
+
+### Fixed
+
+- **Shutdown could still be reading the database after it had closed it.** When a destination with a broadcast delay
+  finished playing out its tail just as polyemesis was stopping, that destination's last status update could still be
+  reading the database after shutdown had closed it. Shutdown now waits for it. The read only fetches the destination
+  list, so nothing was lost; on Windows it could leave the database file open past shutdown.
+
 ## [0.18.2] — 2026-11-27
 
 ### Changed

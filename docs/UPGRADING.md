@@ -252,6 +252,12 @@ switch it back on. The older binary's API rejects a request that sends the key
 > you are coming from 0.6.0 or earlier, the 0.7.0 note below — including its
 > **mandatory** remediation — is work you still have to do.
 
+### Upgrading to 0.18.3
+
+**Nothing to do.** No default and no setting changes. The schema version stays
+1, so a 0.18.2 binary opens a 0.18.3 database and going back needs no restore.
+Both run on FFmpeg 8.x, 9.0 and 9.1.
+
 ### Upgrading to 0.18.2
 
 **Nothing to do on most hosts.** No default and no setting changes. The schema
