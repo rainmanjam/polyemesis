@@ -711,6 +711,11 @@ type Engine struct {
 	// Nil in production, one nil check per preview start.
 	beforeHubRead func()
 
+	// beforeDrainStatus runs in finishDrain just before its closing
+	// publishStatus, the store read that must not outlive Stop. A test parks
+	// the drain goroutine there to prove Stop waits for it. Nil in production.
+	beforeDrainStatus func()
+
 	ctx    context.Context // NOSONAR godre:S8242: the engine's lifetime ctx, WithCancel of Start's ctx; StopWithin cancels it and waits on wg for every background loop it started
 	cancel context.CancelFunc
 	wg     sync.WaitGroup

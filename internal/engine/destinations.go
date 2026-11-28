@@ -371,6 +371,12 @@ func (e *Engine) sortDestLocked(sets *stopSets, id int64, d *destination, p dest
 			e.draining = map[int64]*destination{}
 		}
 		e.draining[id] = d
+		// beginDrain's goroutine is counted HERE, under e.mu, not in
+		// beginDrain, which runs after the lock is dropped: Stop sets
+		// e.stopped under this lock and then waits on e.wg, so an Add made
+		// here always comes before that Wait. Every toDrain entry reaches
+		// beginDrain, which owns the Done.
+		e.wg.Add(1)
 		sets.toDrain = append(sets.toDrain, d)
 		return
 	}
