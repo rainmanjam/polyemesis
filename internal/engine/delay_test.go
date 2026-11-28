@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -710,7 +711,9 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 	// then left polyemesis.db open when TempDir's cleanup ran, and Windows
 	// refuses to unlink an open file. Wait for the whole teardown -- retiring
 	// is cleared only after teardownDest returns, as in the drain test above --
-	// and for the feed, before the test ends.
+	// and for the feed, before the test ends. That still left the drain
+	// goroutine's closing publishStatus, a store read, racing the cleanup;
+	// Stop now waits for it (see the test below), which is what closes that.
 	eventually(t, "the drain's teardown to finish", 9*time.Second, func() bool {
 		return drainingOf(e, row.ID) == nil && destOf(e, row.ID) == nil &&
 			retiringOf(e, row.ID) == nil
@@ -732,6 +735,58 @@ func TestTheBroadcastDelayAnnouncesEachPhaseOnTheEventStreamWithoutTheKey(t *tes
 		if !strings.Contains(string(raw), `"seconds":1`) {
 			t.Fatalf("destination.delay data = %v, want seconds 1", env.Data)
 		}
+	}
+}
+
+// STOP WAITS FOR A DRAIN THAT IS FINISHING ON ITS OWN. A drain whose tail runs
+// out is torn down by its own goroutine, outside Stop, and that goroutine's
+// last step reads the store (publishStatus -> Status). Stop used to return
+// without waiting for it, so the caller could close the database under the
+// read: on Windows, TempDir's cleanup then failed to delete polyemesis.db.
+//
+// Mutation: drop the e.wg.Add(1) in sortDestLocked and the defer e.wg.Done()
+// in beginDrain. Stop then returns while the goroutine is parked below.
+func TestStopWaitsForADrainFinishingOnItsOwnBeforeReturning(t *testing.T) {
+	e, _ := storeEngine(t)
+	row := delayedRow(t, e)
+	if err := e.startDest(delayPlan(row), e.hub, 0); err != nil {
+		t.Fatalf("startDest: %v", err)
+	}
+	reached, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	letGo := func() { releaseOnce.Do(func() { close(release) }) }
+	// Set before the drain's goroutine exists, so its read of the field is
+	// ordered after this write by the go statement.
+	e.beforeDrainStatus = func() { close(reached); <-release }
+	// Registered after storeEngine's e.Stop, so it runs first: a failure
+	// below must not leave the cleanup's Stop waiting on a parked goroutine.
+	t.Cleanup(letGo)
+
+	feed(e.hub, 200)
+	row.Enabled = false
+	if _, err := e.store.UpdateDestination(row); err != nil {
+		t.Fatal(err)
+	}
+	e.stopDestinations(map[int64]destPlan{})
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the drain never reached its closing status read")
+	}
+
+	stopped := make(chan struct{})
+	go func() { e.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+		t.Fatal("Stop returned while the drain goroutine had its store read still to " +
+			"do; a caller closing the database now races that read")
+	case <-time.After(300 * time.Millisecond):
+	}
+	letGo()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop never returned after the drain goroutine was let go")
 	}
 }
 

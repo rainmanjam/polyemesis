@@ -381,7 +381,16 @@ func (e *Engine) beginDrain(d *destination) {
 	e.log.Info("broadcast delay: destination stopped; the delayed tail is playing out before it ends",
 		"dest", d.row.Name, "remaining", d.delay.line.Status().DrainRemaining.Round(time.Second))
 	e.streamDelay(d.row, d.delay, DelayDraining, "")
+	// ON e.wg, ADDED BY sortDestLocked, so Stop waits for this goroutine. A
+	// drain that ends on its own finishes OUTSIDE Stop -- Stop cuts only the
+	// drains still in e.draining -- and its last step, publishStatus, reads
+	// the store. Untracked, that read could still hold the store's one
+	// connection after Stop returned and the caller closed the database: a
+	// query on a closed store in production, and on Windows a polyemesis.db
+	// nobody can delete. Bounded: Stop closes the line of every drain it
+	// cuts, which closes done.
 	go func() {
+		defer e.wg.Done()
 		<-done
 		e.finishDrain(d)
 	}()
@@ -418,6 +427,9 @@ func (e *Engine) finishDrain(d *destination) {
 	}
 	e.mu.Unlock()
 	d.delay.finish()
+	if e.beforeDrainStatus != nil {
+		e.beforeDrainStatus()
+	}
 	e.publishStatus()
 }
 
