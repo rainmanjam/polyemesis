@@ -22,7 +22,7 @@
     "@astrojs/markdown-satteri": "0.4.10",
     "@astrojs/sitemap": "^3.7.4",
     "@tailwindcss/vite": "^4.3.5",
-    "astro": "^7.4.12",
+    "astro": "^7.4.13",
     "mermaid": "^12.2.0",
     "motion": "^14.14.0",
     "tailwindcss": "^4.3.5",
